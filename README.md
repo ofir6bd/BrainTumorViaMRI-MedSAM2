@@ -16,7 +16,7 @@
 A BraTS 2024 brain-tumour segmentation project built on Meta's **MedSAM2** (medical Segment
 Anything 2). MRI modalities are stacked into RGB "video" frames, ground-truth masks at a few
 anchor slices are used as prompts, and SAM2 propagates the segmentation through the volume.
-Pipeline stages follow the numeric prefixes of the scripts: **01 → 02 → 03 → 05**.
+Pipeline stages: acquire data (**`01`**) → explore it in the web viewer (**`src/web`**, via `run_web.bat`) → run inference (**`05`**).
 
 BraTS 2024 labels: `1 = NETC`, `2 = SNFH`, `3 = ET`, `4 = RC`.
 Composites: `WT` (whole tumour = 1+2+3+4), `TC` (tumour core = 1+3+4).
@@ -31,12 +31,16 @@ BrainTumorViaMRI-MedSAM2/
 ├── requirements.txt        # Python dependencies
 ├── config.yaml             # pipeline parameters (paths, num_patients, ...)
 ├── secrets.json            # Synapse credentials (git-ignored)
+├── run_web.bat             # launches the web slice viewer (localhost, live-reload)
 ├── .venv/                  # local virtual environment (not committed)
 ├── src/                    # all project scripts
 │   ├── 01_acquire_data.py
-│   ├── 02_view_slices.py
-│   ├── 03_view_modalities.py
-│   └── 05_infer_multibbox_hitl.py
+│   ├── 05_infer_multibbox_hitl.py
+│   └── web/                # web viewer (replaces the old 02 + 03 scripts)
+│       ├── app.py          #   Flask backend: patient list + rendered views
+│       ├── serve.py        #   dev server with browser live-reload
+│       ├── templates/index.html
+│       └── static/         #   app.js, style.css  (the frontend)
 ├── data/                   # all INPUTS (git-ignored)
 │   ├── raw/                # downloaded BraTS archives
 │   ├── dataset/            # extracted dataset (dataset/training_data1_v2)
@@ -53,8 +57,7 @@ scripts — no paths are hard-coded.
 ## What each script does
 
 - **`src/01_acquire_data.py`** — Downloads the BraTS 2024 dataset from Synapse (token in `secrets.json`) into `data/raw/` and extracts the archives into `data/dataset/`.
-- **`src/02_view_slices.py`** — Interactive viewer: 2D brain / segmentation / overlay / binary-mask panels and an optional 3D scatter of the tumour labels.
-- **`src/03_view_modalities.py`** — Interactive viewer: all MRI modalities plus the segmentation, and a per-label bounding-box view on each label's peak slice.
+- **`src/web/`** — Web viewer (replaces the old terminal scripts `02` and `03`). Pick a patient, then switch between four views: **Panels** (background / labels / overlay / binary mask, with a slice slider), **Modalities + Seg** (T1/T1C/T2/FLAIR + segmentation grid), **BBox per label** (each label at its peak slice with a bounding box), and **3D scatter** of the tumour labels. Launch it with `run_web.bat`.
 - **`src/05_infer_multibbox_hitl.py`** — MedSAM2 inference: treats the volume as a slice "video", seeds from a peak slice and grows anchors via an oracle-guided (GT) iterative loop, prompts with one bounding box per disconnected component, then merges masks and reports Dice/HD95.
 
 ---
@@ -95,10 +98,21 @@ Activate `.venv`, then run each script **from the repo root** (scripts read `con
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python src\01_acquire_data.py            # download + extract dataset
-python src\02_view_slices.py             # interactive 2D/3D viewer
-python src\03_view_modalities.py         # interactive modalities + bbox viewer
 python src\05_infer_multibbox_hitl.py    # HITL + multi-bbox inference (GPU)
 ```
+
+For the interactive viewer, use `run_web.bat` (see below) instead of a script.
+
+## Web viewer
+
+Double-click **`run_web.bat`** (or run it from a terminal). It starts a local server and opens
+`http://localhost:5000` in your browser. Pick a patient, then switch between four views —
+**Panels**, **Modalities + Seg**, **BBox per label**, and **3D scatter** (the slice slider applies
+to the first two). It reads patients from `config.yaml` → `paths.dataset`.
+
+The site is served with **live-reload**: while it's running, editing any file under `src/web/`
+(`templates/index.html`, `static/app.js`, `static/style.css`) makes the browser refresh
+automatically. (Backend logic changes in `src/web/app.py` take effect after re-running the bat.)
 
 ## Prerequisites the code expects
 
