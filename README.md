@@ -16,7 +16,7 @@
 A BraTS 2024 brain-tumour segmentation project built on Meta's **MedSAM2** (medical Segment
 Anything 2). MRI modalities are stacked into RGB "video" frames, ground-truth masks at a few
 anchor slices are used as prompts, and SAM2 propagates the segmentation through the volume.
-Pipeline stages follow the numeric prefixes of the scripts: **01 → 02 → 03 → 04 → 05**.
+Pipeline stages follow the numeric prefixes of the scripts: **01 → 02 → 03 → 05**.
 
 BraTS 2024 labels: `1 = NETC`, `2 = SNFH`, `3 = ET`, `4 = RC`.
 Composites: `WT` (whole tumour = 1+2+3+4), `TC` (tumour core = 1+3+4).
@@ -36,7 +36,6 @@ BrainTumorViaMRI-MedSAM2/
 │   ├── 01_acquire_data.py
 │   ├── 02_view_slices.py
 │   ├── 03_view_modalities.py
-│   ├── 04_infer_baseline.py
 │   └── 05_infer_multibbox_hitl.py
 ├── data/                   # all INPUTS (git-ignored)
 │   ├── raw/                # downloaded BraTS archives
@@ -56,8 +55,7 @@ scripts — no paths are hard-coded.
 - **`src/01_acquire_data.py`** — Downloads the BraTS 2024 dataset from Synapse (token in `secrets.json`) into `data/raw/` and extracts the archives into `data/dataset/`.
 - **`src/02_view_slices.py`** — Interactive viewer: 2D brain / segmentation / overlay / binary-mask panels and an optional 3D scatter of the tumour labels.
 - **`src/03_view_modalities.py`** — Interactive viewer: all MRI modalities plus the segmentation, and a per-label bounding-box view on each label's peak slice.
-- **`src/04_infer_baseline.py`** — Baseline MedSAM2 pipeline: 5 penta-anchor slices per label (and WT/TC), bidirectional shared-encoder propagation, mask merge, and Dice/HD95 metrics.
-- **`src/05_infer_multibbox_hitl.py`** — Adds a human-in-the-loop iterative anchor-refinement loop and multi-bounding-box prompting (one box per disconnected component).
+- **`src/05_infer_multibbox_hitl.py`** — MedSAM2 inference: treats the volume as a slice "video", seeds from a peak slice and grows anchors via an oracle-guided (GT) iterative loop, prompts with one bounding box per disconnected component, then merges masks and reports Dice/HD95.
 
 ---
 
@@ -99,7 +97,6 @@ Activate `.venv`, then run each script **from the repo root** (scripts read `con
 python src\01_acquire_data.py            # download + extract dataset
 python src\02_view_slices.py             # interactive 2D/3D viewer
 python src\03_view_modalities.py         # interactive modalities + bbox viewer
-python src\04_infer_baseline.py          # baseline MedSAM2 inference (GPU)
 python src\05_infer_multibbox_hitl.py    # HITL + multi-bbox inference (GPU)
 ```
 
