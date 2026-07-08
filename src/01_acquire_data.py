@@ -4,12 +4,16 @@ import os
 import zipfile
 import tarfile
 import json
+import yaml
 
 with open('secrets.json', 'r') as f:
     config = json.load(f)
 
-cache_dir = "1_.synapsecache"
-dataset_dir = "2_BraTS2024_dataset"
+with open('config.yaml', 'r') as f:
+    _cfg = yaml.safe_load(f)
+
+cache_dir = _cfg["paths"]["raw"]
+dataset_dir = _cfg["paths"]["extract_to"]
 
 def download():
     if os.path.exists(cache_dir):

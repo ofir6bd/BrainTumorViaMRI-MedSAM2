@@ -1,15 +1,20 @@
 import os
+import yaml
 import nibabel as nib
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.colors import ListedColormap
 
+with open("config.yaml", "r") as _f:
+    _CFG = yaml.safe_load(_f)
+DATASET_DIR = _CFG["paths"]["dataset"]
+
 BRATS_COLORS = ['none', 'red', 'green', 'blue', 'yellow']
 BRATS_CMAP = ListedColormap(BRATS_COLORS)
 
 def find_patients_in_training_data():
-    dataset_dir = r"./2_BraTS2024_dataset/training_data1_v2"
+    dataset_dir = DATASET_DIR
 
     if not os.path.exists(dataset_dir):
         print(f"Training data directory not found: {dataset_dir}")

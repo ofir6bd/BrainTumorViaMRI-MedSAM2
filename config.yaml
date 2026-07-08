@@ -1,2 +1,12 @@
+paths:
+  raw:        data/raw                        # downloaded archives (script 01)
+  extract_to: data/dataset                    # script 01 extracts archives here
+  dataset:    data/dataset/training_data1_v2  # patient folders (scripts 02-05 read this)
+  sample:     data/sample                     # single-patient smoke test
+  outputs:    outputs                         # all generated artifacts
+  tmp:        outputs/tmp_frames              # ephemeral RGB frames, auto-cleaned
+  medsam2:    MedSAM2                         # vendored MedSAM2 repo + checkpoints
+
 inference:
-  num_patients: 1   # how many patients to process (null = all)
+  num_patients: 1        # how many patients to process (null = all)
+  use_sample:   true     # true -> read paths.sample; false -> read paths.dataset

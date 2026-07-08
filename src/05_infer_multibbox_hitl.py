@@ -28,15 +28,16 @@ from MedSAM2.sam2.build_sam import build_sam2_video_predictor
 
 warnings.filterwarnings("ignore")
 
-MEDSAM2_PATH    = os.path.abspath("./MedSAM2")
+with open("config.yaml", "r") as _f:
+    _CFG = yaml.safe_load(_f)
+
+MEDSAM2_PATH    = os.path.abspath(_CFG["paths"]["medsam2"])
 SAM2_CHECKPOINT = "./checkpoints/MedSAM2_latest.pt"
 SAM2_CFG        = "sam2/configs/sam2.1_hiera_t512.yaml"
-DATASET_DIR     = r"./2_BraTS2024_dataset/training_data1_v2"
-DATASET_DIR     = r"./One_Patient_test_MRI_DATA"
-OUTPUT_BASE_DIR = os.path.abspath("./medsam2_results")
-TEMP_VIDEO_DIR  = os.path.abspath("./temp_video_frames")
-with open("config.yaml", "r") as _f:
-    NUM_PATIENTS = yaml.safe_load(_f)["inference"]["num_patients"]
+DATASET_DIR     = _CFG["paths"]["sample"] if _CFG["inference"]["use_sample"] else _CFG["paths"]["dataset"]
+OUTPUT_BASE_DIR = os.path.abspath(_CFG["paths"]["outputs"])
+TEMP_VIDEO_DIR  = os.path.abspath(_CFG["paths"]["tmp"])
+NUM_PATIENTS    = _CFG["inference"]["num_patients"]
 DEBUG           = True
 SHOW_PLOTS      = False
 

@@ -1,10 +1,15 @@
 import os
+import yaml
 import nibabel as nib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 from matplotlib.colors import ListedColormap
 from matplotlib.widgets import Button
+
+with open("config.yaml", "r") as _f:
+    _CFG = yaml.safe_load(_f)
+DATASET_DIR = _CFG["paths"]["dataset"]
 
 LABEL_NAMES  = {1: "NETC", 2: "SNFH", 3: "ET", 4: "RC"}
 LABEL_COLORS = {1: 'red', 2: 'green', 3: 'blue', 4: 'yellow'}
@@ -23,7 +28,7 @@ _LABEL_BBOX = {
 }
 
 def find_patients_in_training_data():
-    dataset_dir = r"./2_BraTS2024_dataset/training_data1_v2"
+    dataset_dir = DATASET_DIR
     if not os.path.exists(dataset_dir):
         print(f"Directory not found: {dataset_dir}")
         return []
