@@ -1,172 +1,3 @@
-"""
-medsam2_brats_pipeline_hitl.py
-===============================
-End-to-end BraTS 2024 segmentation pipeline using MedSAM2
-with a **Human-in-the-Loop (HITL) iterative anchor refinement** loop.
-
-Overview
---------
-Each patient volume is processed in 7 logical phases, plus a new
-iterative HITL refinement phase that runs between initial inference
-and the final merge:
-
-  Phase 00 – Bootstrap:    add MedSAM2 to sys.path, install portalocker.
-  Phase 01 – Data I/O:     discover NIfTI files by suffix, load all modalities
-                            (seg + T1c/T2w/T2f/T1n), apply fallback chains for
-                            missing modalities, validate label presence.
-  Phase 02 – RGB Frames:   stack T1c/T2w/T2f into per-slice JPEG triplets
-                            that the SAM2 video predictor treats as a "video".
-                            Normalization is performed PER SLICE independently.
-                            Returns cached uint8 RGB array (H,W,D,3) so that
-                            the background volume and histogram re-use the same
-                            normalised values without extra computation.
-  Phase 03 – Anchors:      seed with the single densest slice per label/track
-                            (peak-slice only — one anchor to start).
-  Phase 04 – HITL Loop:    iterative refinement:
-                              Iteration 0 : single peak-slice anchor -> infer -> Dice.
-                              Iteration 1+: if Dice improvement < HITL_MIN_IMPROVEMENT
-                                            or Dice is already >= HITL_DICE_TARGET -> stop.
-                                            Otherwise add the slice with the largest
-                                            per-slice error (max |GT area - pred area|)
-                                            and re-infer.
-                              Hard cap at HITL_MAX_ITERATIONS total iterations.
-  Phase 05 – Merge:        paint per-label binary masks onto a single label
-                            map using a fixed priority order.
-  Phase 06 – Metrics:      compute Dice and HD95 (raw and post-merge) and
-                            write results to a CSV.
-  Visualisation:           save a figure showing GT, prediction, and overlap
-                            at every anchor slice used in the FINAL iteration.
-
-NEW FEATURES
-------------
-  1. MULTI-BBOX PROMPTING
-       When a GT mask slice contains disconnected (separated) components,
-       the pipeline now detects each connected component via scipy.ndimage.label
-       and issues one bounding-box prompt per component instead of a single
-       box enclosing everything.  A minimum-area threshold
-       (BBOX_MIN_COMPONENT_AREA) suppresses tiny noise islands.
-
-       The SAM2 API receives each box as a separate add_new_points_or_box()
-       call on the same frame before propagation.
-
-  2. BBOX INPUT VISUALISATION
-       For every anchor slice (in both the per-round HITL figures and the
-       final summary figure) a 5th panel is now saved alongside the existing
-       4 columns:
-           Col 4 — "Bbox Input" : greyscale background with each component
-                   bounding box drawn as a coloured rectangle, labelled with
-                   its component index and pixel area.
-       The function save_bbox_input_image() can also be called standalone to
-       write a dedicated PNG for every anchor slice x every track x every round
-       into visualizations/<id>/bbox_inputs/.
-
-OPTIMIZATIONS (logic/results unchanged)
------------------------------------------
-  1. prepare_rgb_frames_cached()
-       Computes _norm_slice_uint8 ONCE per slice per modality, writes JPEGs,
-       AND returns the uint8 RGB ndarray (H,W,D,3).  The background volume
-       and histogram both consume this cache — no redundant normalisation.
-
-  2. _render_segmentation_panel()
-       Single axes-drawing helper shared by save_hitl_round_slice_figure()
-       and show_visualization().  Eliminates the ~80% code duplication
-       between those two functions.
-
-  3. save_normalization_histogram() accepts rgb_cache
-       Histogram rows are derived from the already-computed cache rather
-       than re-running _norm_slice_uint8 on the raw volumes a second time.
-       Raw / clipped stages are reconstructed cheaply from the raw volumes
-       only when needed for the diagnostic rows.
-
-  4. Peak-slice passed into run_all_tracks_hitl()
-       find_peak_slice() is called once in Phase 03 and the result is
-       forwarded into the HITL runner, eliminating the duplicate argmax
-       inside run_all_tracks_hitl().
-
-Human-in-the-Loop (HITL) design
----------------------------------
-The pipeline starts from the *minimum viable prompt* — a single GT mask at
-the slice with the most foreground pixels (peak slice).  After inference it
-checks whether the volumetric Dice meets the target or if adding more anchors
-is still improving results:
-
-  stop if:
-    * Dice >= HITL_DICE_TARGET                     (good enough)
-    * Dice improvement D < HITL_MIN_IMPROVEMENT    (adding anchors stopped helping)
-    * total anchor count == HITL_MAX_ITERATIONS    (budget exhausted)
-
-  otherwise:
-    * Identify the axial slice with the greatest segmentation error.
-      Error metric: |GT_pixels(z) - pred_pixels(z)| (combined FP + FN).
-    * Add that slice's GT mask as an additional anchor.
-    * Re-run inference (shared encoder, reset only the memory bank).
-
-BraTS 2024 label convention
-----------------------------
-  1 = NETC  (Non-Enhancing Tumour Core)
-  2 = SNFH  (Surrounding Non-tumour FLAIR Hyperintensity)
-  3 = ET    (Enhancing Tumour)
-  4 = RC    (Resection Cavity)
-
-Composite tracks
-----------------
-  WT (Whole Tumour)  = labels 1 + 2 + 3 + 4
-  TC (Tumour Core)   = labels 1 + 3 + 4
-
-Both are tracked INDEPENDENTLY (not derived from per-label outputs).
-
-Shared-encoder optimisation
-----------------------------
-SAM2 video inference re-encodes the entire volume on each init_state call.
-By calling init_state ONCE and using reset_state between tracks (and between
-HITL iterations for the same track) we keep the cached frame features and
-avoid redundant encodes.
-Typical wall-clock speedup: ~3-4x vs naive per-track init_state.
-
-Propagation pattern (per HITL iteration, per track)
------------------------------------------------------
-  1. reset_state            : clear memory bank (frame features stay cached).
-  2. add_new_points_or_box  : register all currently accumulated GT bboxes
-                              (one call per connected component per anchor slice).
-  3. Forward pass           : propagate from lowest anchor z -> last frame.
-  4. reset_state + re-add   : reset memory bank again.
-  5. Backward pass          : propagate from highest anchor z -> first frame.
-  6. Union of logits        : binary 3-D mask.
-  7. Compute Dice vs GT.
-  8. Decide: stop or add next anchor.
-
-Per-round slice figure layout (5 columns per anchor row)
----------------------------------------------------------
-  Col 0 — GT mask only          : cyan contour + fill on greyscale background
-  Col 1 — Prediction only       : magenta contour + fill on greyscale background
-  Col 2 — GT + Pred combined    : both contours overlaid together
-  Col 3 — Delta map             : TP=yellow  FN=green  FP=red  on greyscale
-  Col 4 — Bbox Input            : coloured rectangles per connected component
-
-Normalization histogram layout (3 columns x 3 rows, linear Y axis)
--------------------------------------------------------------------
-  Columns : T1c (R)  |  T2w (G)  |  T2f/FLAIR (B)
-  Row 0   : Raw float values  (dashed lines = mean p0.5/p99.5 across slices;
-            shaded bands = per-slice variability of clip boundaries)
-  Row 1   : After per-slice percentile clipping
-  Row 2   : After per-slice rescaling to uint8 [0..255]
-  Y axis  : linear voxel count (not log-scale)
-
-  NOTE: All three histogram rows reflect PER-SLICE normalization — each slice
-  is normalised independently using its own p0.5/p99.5 clip boundaries.
-  The histograms aggregate voxel distributions across all slices.
-
-Output files (per patient)
---------------------------
-  segs_nifti/<id>_pred.nii.gz                  - merged multi-label prediction
-  segs_nifti/<id>_pred_WT.nii.gz               - independent WT binary mask
-  segs_nifti/<id>_pred_TC.nii.gz               - independent TC binary mask
-  visualizations/<id>/                          - final-anchor figures + histogram
-  visualizations/<id>/hitl_rounds/              - per-round 5-column slice figures
-  visualizations/<id>/bbox_inputs/              - standalone bbox prompt images
-  results_hitl_<timestamp>.csv                  - Dice + HD95 + HITL audit trail
-"""
-
 import os
 import sys
 import csv
@@ -182,11 +13,12 @@ from PIL import Image
 from scipy.ndimage import (
     distance_transform_edt,
     binary_erosion,
-    label as nd_label,          # connected-component labelling
+    label as nd_label,
 )
 import torch
+import yaml
 import matplotlib
-matplotlib.use('Agg')   # headless-safe backend
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
@@ -196,57 +28,34 @@ from MedSAM2.sam2.build_sam import build_sam2_video_predictor
 
 warnings.filterwarnings("ignore")
 
-
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
 MEDSAM2_PATH    = os.path.abspath("./MedSAM2")
 SAM2_CHECKPOINT = "./checkpoints/MedSAM2_latest.pt"
 SAM2_CFG        = "sam2/configs/sam2.1_hiera_t512.yaml"
 DATASET_DIR     = r"./2_BraTS2024_dataset/training_data1_v2"
-DATASET_DIR     = r"./One_Patient_test_MRI_DATA"   # single-patient smoke test
+DATASET_DIR     = r"./One_Patient_test_MRI_DATA"
 OUTPUT_BASE_DIR = os.path.abspath("./medsam2_results")
 TEMP_VIDEO_DIR  = os.path.abspath("./temp_video_frames")
-NUM_PATIENTS    = 1
+with open("config.yaml", "r") as _f:
+    NUM_PATIENTS = yaml.safe_load(_f)["inference"]["num_patients"]
 DEBUG           = True
 SHOW_PLOTS      = False
 
-
-# =============================================================================
-# HUMAN-IN-THE-LOOP (HITL) KNOBS
-# =============================================================================
 HITL_MAX_ITERATIONS  = 7
 HITL_MIN_IMPROVEMENT = 0.005
 HITL_DICE_TARGET     = 0.95
 
-
-# =============================================================================
-# MULTI-BBOX KNOBS  (NEW)
-# =============================================================================
-
-# Minimum number of foreground pixels a connected component must have to
-# receive its own bounding-box prompt.  Smaller blobs are treated as noise
-# and suppressed.  Tune this to your resolution / label size.
 BBOX_MIN_COMPONENT_AREA = 50
 
-# Colour palette used when drawing multiple bboxes on the same slice.
-# Cycles if there are more components than colours.
 BBOX_PALETTE = [
-    "#FF4444",   # red
-    "#44FF44",   # green
-    "#4488FF",   # blue
-    "#FFAA00",   # orange
-    "#FF44FF",   # magenta
-    "#00FFFF",   # cyan
-    "#FFFF44",   # yellow
-    "#FF8844",   # salmon
+    "#FF4444",
+    "#44FF44",
+    "#4488FF",
+    "#FFAA00",
+    "#FF44FF",
+    "#00FFFF",
+    "#FFFF44",
+    "#FF8844",
 ]
-
-
-# =============================================================================
-# LABEL DEFINITIONS
-# =============================================================================
 
 LABEL_NAMES    = {1: "NETC", 2: "SNFH", 3: "ET", 4: "RC"}
 TARGET_LABELS  = [1, 2, 3, 4]
@@ -255,11 +64,6 @@ WT_LABELS      = [1, 2, 3, 4]
 TC_LABELS      = [1, 3, 4]
 MASK_THRESHOLD = 0
 MIN_FOREGROUND_VOXELS_PER_SLICE = 100
-
-
-# =============================================================================
-# PHASE 00 - Environment bootstrap
-# =============================================================================
 
 if MEDSAM2_PATH not in sys.path:
     sys.path.insert(0, MEDSAM2_PATH)
@@ -281,39 +85,16 @@ except ImportError as import_error:
         f"Error: {import_error}"
     )
 
-
-# =============================================================================
-# UTILITIES
-# =============================================================================
-
 def dprint(*args, **kwargs):
     if DEBUG:
         print("[DEBUG]", *args, **kwargs)
-
 
 def clear_dir(directory_path):
     if os.path.exists(directory_path):
         shutil.rmtree(directory_path)
     os.makedirs(directory_path)
 
-
 def _norm_slice_uint8(slice_2d):
-    """
-    Normalize a single 2-D MRI slice to [0, 255] uint8.
-
-    Clip bounds (p0.5 / p99.5) are computed from the slice's own non-zero
-    voxels only.  Falls back to the whole slice when all voxels are zero.
-
-    Parameters
-    ----------
-    slice_2d : float ndarray (H, W)
-
-    Returns
-    -------
-    scaled_uint8 : uint8 ndarray  (H, W)
-    lo           : float   lower clip boundary (p0.5 of non-zero voxels)
-    hi           : float   upper clip boundary (p99.5 of non-zero voxels)
-    """
     s       = slice_2d.astype(np.float32)
     nonzero = s[s != 0]
 
@@ -328,30 +109,7 @@ def _norm_slice_uint8(slice_2d):
     scaled = np.clip((s - lo) / rng * 255, 0, 255).astype(np.uint8)
     return scaled, lo, hi
 
-
-# =============================================================================
-# NEW FEATURE 1 — Connected-component bbox extraction
-# =============================================================================
-
 def get_component_bboxes(mask_2d):
-    """
-    Decompose a binary 2-D mask into its connected components and return
-    one axis-aligned bounding box per component that is large enough
-    (>= BBOX_MIN_COMPONENT_AREA pixels).
-
-    Parameters
-    ----------
-    mask_2d : bool ndarray (H, W)
-
-    Returns
-    -------
-    bboxes : list of (row_min, col_min, row_max, col_max)
-             Empty list if the mask has no foreground.
-
-    The bbox coordinates are INCLUSIVE on both ends and follow the
-    (y0, x0, y1, x1) = (row_min, col_min, row_max, col_max) convention
-    that matches SAM2's box_coords input after conversion to (x0, y0, x1, y1).
-    """
     if not np.any(mask_2d):
         return []
 
@@ -378,47 +136,20 @@ def get_component_bboxes(mask_2d):
 
     return bboxes
 
-
 def bboxes_to_sam2_boxes(bboxes):
-    """
-    Convert (row_min, col_min, row_max, col_max) bbox list to SAM2's
-    expected (x0, y0, x1, y1) = (col_min, row_min, col_max, row_max) format.
-
-    Returns a float32 ndarray of shape (N, 4).
-    """
     if not bboxes:
         return np.zeros((0, 4), dtype=np.float32)
     converted = []
     for (r0, c0, r1, c1) in bboxes:
-        converted.append([c0, r0, c1, r1])   # x0, y0, x1, y1
+        converted.append([c0, r0, c1, r1])
     return np.array(converted, dtype=np.float32)
 
-
-# =============================================================================
-# NEW FEATURE 2 — Bbox input visualisation panel + standalone image saver
-# =============================================================================
-
 def _render_bbox_panel(ax, bg_norm, bboxes, title):
-    """
-    Draw one "Bbox Input" panel onto axes `ax`.
-
-    Shows the greyscale background with each bounding box drawn as a
-    coloured rectangle.  Each box is labelled with its component index
-    and approximate pixel area (box area as proxy).
-
-    Parameters
-    ----------
-    ax       : matplotlib Axes
-    bg_norm  : float ndarray (H, W)  greyscale background in [0, 1]
-    bboxes   : list of (row_min, col_min, row_max, col_max)
-    title    : str
-    """
     ax.imshow(bg_norm, cmap='gray', vmin=0, vmax=1, interpolation='bilinear')
     ax.set_facecolor('#0d0d1a')
     ax.axis('off')
     ax.set_title(title, color='#ffdd00', fontsize=8, pad=4)
 
-    # Border style — gold to distinguish this column
     for sp in ax.spines.values():
         sp.set_edgecolor('#ffdd00')
         sp.set_linewidth(2)
@@ -441,7 +172,6 @@ def _render_bbox_panel(ax, bg_norm, bboxes, title):
         )
         ax.add_patch(rect)
 
-        # Label: component index + box area (pixels)
         box_area = box_h * box_w
         ax.text(
             c0 + 2, r0 + 2,
@@ -451,7 +181,6 @@ def _render_bbox_panel(ax, bg_norm, bboxes, title):
             bbox=dict(facecolor='black', alpha=0.45, pad=1, edgecolor='none'),
         )
 
-    # Legend summary
     n_boxes = len(bboxes)
     ax.text(
         0.01, 0.99,
@@ -460,7 +189,6 @@ def _render_bbox_panel(ax, bg_norm, bboxes, title):
         color='#ffdd00', fontsize=8, fontweight='bold',
         bbox=dict(facecolor='black', alpha=0.5, pad=2, edgecolor='none'),
     )
-
 
 def save_bbox_input_image(
     bg_norm,
@@ -472,23 +200,6 @@ def save_bbox_input_image(
     bbox_output_directory,
     is_new_anchor=False,
 ):
-    """
-    Save a standalone PNG showing the bbox prompts for one anchor slice.
-
-    Useful for debugging and auditing which components were prompted at
-    each HITL round.
-
-    Parameters
-    ----------
-    bg_norm              : float ndarray (H, W)  greyscale in [0, 1]
-    bboxes               : list of (row_min, col_min, row_max, col_max)
-    z_index              : int   axial slice index
-    track_name           : str
-    round_index          : int
-    patient_id           : str
-    bbox_output_directory: str   target directory for the PNG
-    is_new_anchor        : bool  whether this slice was just added this round
-    """
     os.makedirs(bbox_output_directory, exist_ok=True)
 
     fig, ax = plt.subplots(1, 1, figsize=(6, 6), facecolor='#1a1a2e')
@@ -525,19 +236,8 @@ def save_bbox_input_image(
 
     return output_path
 
-
-# =============================================================================
-# OPTIMIZATION 1 — prepare_rgb_frames_cached
-# =============================================================================
-
 def prepare_rgb_frames_cached(t1c_volume, t2w_volume, t2f_volume,
                                video_subfolder_name):
-    """
-    Convert multi-contrast MRI volume -> per-slice RGB JPEG folder.
-    R = T1c, G = T2w, B = T2f.  Normalization is PER SLICE.
-
-    Returns the uint8 RGB cache (H, W, D, 3).
-    """
     frame_output_directory = os.path.join(TEMP_VIDEO_DIR, video_subfolder_name)
     os.makedirs(frame_output_directory, exist_ok=True)
 
@@ -564,19 +264,9 @@ def prepare_rgb_frames_cached(t1c_volume, t2w_volume, t2f_volume,
     dprint(f"  RGB frames saved: {D} files")
     return rgb_cache
 
-
-# =============================================================================
-# OPTIMIZATION 2 — _render_segmentation_panel
-# =============================================================================
-
 def _render_segmentation_panel(ax, bg_norm, gt_mask, pred_mask, mode,
                                 title, title_color, border_color,
                                 border_width=2):
-    """
-    Draw one segmentation panel onto axes `ax`.
-
-    mode : 'gt' | 'pred' | 'both' | 'delta'
-    """
     ax.imshow(bg_norm, cmap='gray', vmin=0, vmax=1, interpolation='bilinear')
     ax.set_facecolor('#0d0d1a')
     ax.axis('off')
@@ -607,22 +297,12 @@ def _render_segmentation_panel(ax, bg_norm, gt_mask, pred_mask, mode,
         overlay[fp] = [1.0, 0.0, 0.0, 0.60]
         ax.imshow(overlay, interpolation='none')
 
-
 def _make_bg_norm(background_volume, z):
-    """
-    Return a [0,1] float greyscale array for the given axial slice,
-    clipped at the 1st/99th percentile of that slice.
-    """
     sl  = background_volume[:, :, z]
     lo  = np.percentile(sl, 1)
     hi  = np.percentile(sl, 99)
     rng = max(hi - lo, 1e-8)
     return np.clip((sl.astype(float) - lo) / rng, 0, 1)
-
-
-# =============================================================================
-# OPTIMIZATION 3 — save_normalization_histogram (accepts rgb_cache)
-# =============================================================================
 
 def save_normalization_histogram(
     t1c_volume_raw,
@@ -632,7 +312,6 @@ def save_normalization_histogram(
     patient_id,
     visualization_output_directory,
 ):
-    """Save a 3-column x 3-row histogram figure (LINEAR Y axis)."""
     os.makedirs(visualization_output_directory, exist_ok=True)
 
     modality_triples = [
@@ -812,36 +491,18 @@ def save_normalization_histogram(
     print(f"  [NORM-HIST] Saved normalization histogram "
           f"(per-slice): {output_histogram_path}")
 
-
-# =============================================================================
-# DIAGNOSTIC PLOT 2 — Per-round HITL slice figure
-# Now 5 columns: GT | Pred | GT+Pred | Delta | Bbox Input
-# =============================================================================
-
 def save_hitl_round_slice_figure(
     background_volume,
     ground_truth_mask_3d,
     current_predicted_mask_3d,
     current_anchor_z_set_sorted,
-    anchor_bboxes_by_z,          # NEW: dict { z: list of (r0,c0,r1,c1) }
+    anchor_bboxes_by_z,
     round_index,
     current_round_dice_score,
     track_name,
     patient_id,
     visualization_output_directory,
 ):
-    """
-    Save a 5-column per-round diagnostic figure for one HITL inference round.
-
-    One row per anchor slice.  Five columns:
-        Col 0 — GT mask only
-        Col 1 — Prediction only
-        Col 2 — GT + Prediction combined
-        Col 3 — Delta map (TP / FN / FP colour-coded)
-        Col 4 — Bbox Input (connected-component bboxes)  ← NEW
-
-    The newest anchor row is highlighted with a yellow border.
-    """
     hitl_rounds_output_directory = os.path.join(
         visualization_output_directory, "hitl_rounds"
     )
@@ -853,7 +514,6 @@ def save_hitl_round_slice_figure(
 
     newest_anchor_row_index = number_of_anchor_rows - 1
 
-    # 5 columns now
     figure_object, axes_grid = plt.subplots(
         number_of_anchor_rows, 5,
         figsize=(27, 5 * number_of_anchor_rows + 1),
@@ -915,7 +575,6 @@ def save_hitl_round_slice_figure(
                 border_width=b_width,
             )
 
-        # Col 4 — Bbox Input (NEW)
         _render_bbox_panel(
             ax=axes_grid[row_index, 4],
             bg_norm=bg_norm,
@@ -941,13 +600,7 @@ def save_hitl_round_slice_figure(
     dprint(f"  [HITL-ROUND-VIZ] Saved: {output_round_figure_path}")
     plt.close(figure_object)
 
-
-# =============================================================================
-# PHASE 01 - Data I/O
-# =============================================================================
-
 def load_nifti(file_path):
-    """Load a NIfTI file; return (volume_data float32, affine, header, image)."""
     dprint(f"  Loading: {file_path}")
     nifti_image = nib.load(file_path)
     volume_data = nifti_image.get_fdata(dtype=np.float32)
@@ -955,19 +608,7 @@ def load_nifti(file_path):
            f"min={volume_data.min():.1f}  max={volume_data.max():.1f}")
     return volume_data, nifti_image.affine, nifti_image.header, nifti_image
 
-
-# =============================================================================
-# PHASE 06 - Metrics
-# =============================================================================
-
 def calculate_metrics(ground_truth_binary_mask, predicted_binary_mask):
-    """
-    Compute Dice and HD95 between two binary 3-D masks.
-
-    Edge cases:
-      both empty  -> Dice=1,   HD95=0
-      one empty   -> Dice=0,   HD95=373 (diagonal of BraTS volume)
-    """
     ground_truth_binary_mask = ground_truth_binary_mask.astype(bool)
     predicted_binary_mask    = predicted_binary_mask.astype(bool)
 
@@ -1009,16 +650,7 @@ def calculate_metrics(ground_truth_binary_mask, predicted_binary_mask):
     )
     return float(dice_score), hausdorff_distance_95th_percentile
 
-
-# =============================================================================
-# PHASE 03 - Anchor utilities
-# =============================================================================
-
 def find_peak_slice(binary_mask_3d):
-    """
-    Return the axial slice index with the most foreground pixels.
-    Returns None if mask is entirely empty.
-    """
     per_slice_counts = np.array([
         binary_mask_3d[:, :, z].sum()
         for z in range(binary_mask_3d.shape[2])
@@ -1027,17 +659,11 @@ def find_peak_slice(binary_mask_3d):
         return None
     return int(np.argmax(per_slice_counts))
 
-
 def find_largest_error_slice(
     ground_truth_mask_3d,
     predicted_mask_3d,
     already_used_anchor_z_set,
 ):
-    """
-    Find the axial slice with the greatest segmentation error not already
-    in the anchor set.  Error = |GT_pixels(z) - pred_pixels(z)|.
-    Returns None if all occupied slices are already anchors.
-    """
     D = ground_truth_mask_3d.shape[2]
     per_slice_gt_counts   = np.array([
         ground_truth_mask_3d[:, :, z].sum() for z in range(D)
@@ -1057,16 +683,9 @@ def find_largest_error_slice(
         return None
     return int(np.argmax(per_slice_errors))
 
-
-# =============================================================================
-# PHASE 04 - MedSAM2 Predictor singleton
-# =============================================================================
-
 _global_predictor_singleton = None
 
-
 def get_predictor():
-    """Return the MedSAM2 video predictor, loading it on first call."""
     global _global_predictor_singleton
     if _global_predictor_singleton is not None:
         return _global_predictor_singleton
@@ -1091,12 +710,6 @@ def get_predictor():
     print("  [MODEL] Predictor loaded")
     return _global_predictor_singleton
 
-
-# =============================================================================
-# PHASE 04 - Single-track inference within a shared inference_state
-# Now uses multi-bbox prompting (one box per connected component per slice).
-# =============================================================================
-
 @torch.inference_mode()
 @torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 def _infer_one_track(
@@ -1105,28 +718,6 @@ def _infer_one_track(
     anchor_masks_keyed_by_z,
     volume_shape,
 ):
-    """
-    Run bidirectional propagation for ONE track given a set of anchor masks.
-
-    CHANGED: Instead of calling add_new_mask() with the full binary mask,
-    we decompose each anchor slice into connected components and call
-    add_new_points_or_box() once per component.  This gives SAM2 a tighter
-    spatial prior and correctly handles masks with disconnected regions.
-
-    Parameters
-    ----------
-    predictor               : SAM2VideoPredictor
-    shared_inference_state  : opaque state dict from init_state
-    anchor_masks_keyed_by_z : dict { z: bool ndarray (H, W) }
-    volume_shape            : (H, W, D)
-
-    Returns
-    -------
-    predicted_binary_mask_3d : bool ndarray (H, W, D)
-    anchor_bboxes_by_z       : dict { z: list of (r0,c0,r1,c1) }
-                               Bboxes actually submitted as prompts —
-                               returned so callers can visualise them.
-    """
     H, W, D = volume_shape
 
     if not anchor_masks_keyed_by_z:
@@ -1134,13 +725,10 @@ def _infer_one_track(
 
     sorted_anchor_z_indices = sorted(anchor_masks_keyed_by_z.keys())
 
-    # Pre-compute bboxes once so we can reuse across forward + backward passes
-    # and return them to the caller for visualisation.
     anchor_bboxes_by_z = {}
     for anchor_z, anchor_mask_2d in anchor_masks_keyed_by_z.items():
         bboxes = get_component_bboxes(anchor_mask_2d)
         if not bboxes:
-            # Fallback: whole-mask bbox if no component survives the threshold
             rows = np.any(anchor_mask_2d, axis=1)
             cols = np.any(anchor_mask_2d, axis=0)
             if rows.any():
@@ -1152,14 +740,13 @@ def _infer_one_track(
         anchor_bboxes_by_z[anchor_z] = bboxes
 
     def _register_all_anchor_prompts():
-        """Add one box prompt per component per anchor frame."""
         for anchor_z, bboxes in anchor_bboxes_by_z.items():
-            sam2_boxes = bboxes_to_sam2_boxes(bboxes)  # (N, 4) x0y0x1y1
+            sam2_boxes = bboxes_to_sam2_boxes(bboxes)
             if sam2_boxes.shape[0] == 0:
                 continue
             for box_idx in range(sam2_boxes.shape[0]):
-                single_box = sam2_boxes[box_idx]           # shape (4,)
-                obj_id     = box_idx + 1                   # unique id per box
+                single_box = sam2_boxes[box_idx]
+                obj_id     = box_idx + 1
                 predictor.add_new_points_or_box(
                     inference_state=shared_inference_state,
                     frame_idx=anchor_z,
@@ -1168,9 +755,8 @@ def _infer_one_track(
                 )
             dprint(f"    z={anchor_z}: registered {sam2_boxes.shape[0]} box(es)")
 
-    # Forward pass ────────────────────────────────────────────────────────────
     _register_all_anchor_prompts()
-    per_frame_logit_scores = {}   # frame_idx -> combined logit (H, W)
+    per_frame_logit_scores = {}
 
     for (
         output_frame_index, output_object_ids, output_mask_logits,
@@ -1179,7 +765,6 @@ def _infer_one_track(
         start_frame_idx=min(sorted_anchor_z_indices),
         reverse=False,
     ):
-        # Union-merge logits from all object IDs at this frame
         merged_logit = None
         for object_position, object_id in enumerate(output_object_ids):
             logit = output_mask_logits[object_position][0].cpu().numpy()
@@ -1187,7 +772,6 @@ def _infer_one_track(
         if merged_logit is not None:
             per_frame_logit_scores[output_frame_index] = merged_logit
 
-    # Backward pass ───────────────────────────────────────────────────────────
     predictor.reset_state(shared_inference_state)
     _register_all_anchor_prompts()
 
@@ -1199,7 +783,7 @@ def _infer_one_track(
         reverse=True,
     ):
         if output_frame_index in per_frame_logit_scores:
-            continue   # forward pass already covered this frame
+            continue
         merged_logit = None
         for object_position, object_id in enumerate(output_object_ids):
             logit = output_mask_logits[object_position][0].cpu().numpy()
@@ -1207,7 +791,6 @@ def _infer_one_track(
         if merged_logit is not None:
             per_frame_logit_scores[output_frame_index] = merged_logit
 
-    # Threshold -> binary ─────────────────────────────────────────────────────
     predicted_binary_mask_3d = np.zeros((H, W, D), dtype=bool)
     for z in range(D):
         if z in per_frame_logit_scores:
@@ -1216,12 +799,6 @@ def _infer_one_track(
             )
 
     return predicted_binary_mask_3d, anchor_bboxes_by_z
-
-
-# =============================================================================
-# OPTIMIZATION 4 — run_all_tracks_hitl
-# Updated to pass anchor_bboxes_by_z through to the visualisation functions.
-# =============================================================================
 
 @torch.inference_mode()
 @torch.autocast(device_type="cuda", dtype=torch.bfloat16)
@@ -1234,15 +811,6 @@ def run_all_tracks_hitl(
     patient_id,
     patient_visualization_directory,
 ):
-    """
-    Segment ALL tracks using the HITL iterative anchor refinement strategy,
-    all within a SINGLE init_state session (shared encoder).
-
-    Returns
-    -------
-    per_track_final_predicted_masks : dict { track_name: bool ndarray (H,W,D) }
-    per_track_hitl_round_logs       : dict { track_name: list[dict] }
-    """
     H, W, D = volume_shape
     predictor = get_predictor()
     video_dir = os.path.join(TEMP_VIDEO_DIR, video_subfolder_name)
@@ -1265,7 +833,6 @@ def run_all_tracks_hitl(
         print(f"  [ERROR] No JPEG frames in {video_dir}")
         return empty_masks, empty_logs
 
-    # Single init_state: encode ALL frames ONCE
     try:
         shared_inference_state = predictor.init_state(
             video_path=video_dir,
@@ -1275,7 +842,6 @@ def run_all_tracks_hitl(
         print(f"  [ERROR] init_state failed: {init_state_exception}")
         return empty_masks, empty_logs
 
-    # Standalone bbox image output directory
     bbox_vis_dir = os.path.join(patient_visualization_directory, "bbox_inputs")
     os.makedirs(bbox_vis_dir, exist_ok=True)
 
@@ -1326,7 +892,6 @@ def run_all_tracks_hitl(
             )
             latest_anchor_bboxes_by_z = anchor_bboxes_by_z
 
-            # ── Save standalone bbox images for every anchor this round ──
             sorted_anchors_this_round = sorted(current_anchor_z_set)
             newest_z                  = sorted_anchors_this_round[-1]
             for anchor_z in sorted_anchors_this_round:
@@ -1388,13 +953,12 @@ def run_all_tracks_hitl(
                 best_round_dice_score  = current_round_dice_score
                 best_round_anchor_list = sorted_current_anchor_list[:]
 
-            # Per-round 5-column figure (now includes bbox column)
             save_hitl_round_slice_figure(
                 background_volume=background_volume,
                 ground_truth_mask_3d=ground_truth_mask_3d,
                 current_predicted_mask_3d=current_round_predicted_mask,
                 current_anchor_z_set_sorted=sorted_current_anchor_list,
-                anchor_bboxes_by_z=anchor_bboxes_by_z,     # NEW
+                anchor_bboxes_by_z=anchor_bboxes_by_z,
                 round_index=round_index,
                 current_round_dice_score=current_round_dice_score,
                 track_name=track_name,
@@ -1408,7 +972,6 @@ def run_all_tracks_hitl(
                     f"at round {round_index}"
                 )
 
-            # Stopping criteria
             if current_round_dice_score >= HITL_DICE_TARGET:
                 stop_reason_string                = f"dice_target ({HITL_DICE_TARGET})"
                 hitl_round_log[-1]['stop_reason'] = stop_reason_string
@@ -1428,7 +991,6 @@ def run_all_tracks_hitl(
                 hitl_round_log[-1]['stop_reason'] = stop_reason_string
                 break
 
-            # Next anchor: largest error slice not yet prompted
             next_anchor_z = find_largest_error_slice(
                 ground_truth_mask_3d,
                 current_round_predicted_mask,
@@ -1459,7 +1021,6 @@ def run_all_tracks_hitl(
         per_track_final_predicted_masks[track_name] = best_predicted_mask_3d
         per_track_hitl_round_logs[track_name]       = hitl_round_log
 
-        # Stash the final bboxes on the log so show_visualization can use them
         for entry in hitl_round_log:
             entry['anchor_bboxes_by_z'] = latest_anchor_bboxes_by_z
 
@@ -1479,16 +1040,7 @@ def run_all_tracks_hitl(
 
     return per_track_final_predicted_masks, per_track_hitl_round_logs
 
-
-# =============================================================================
-# PHASE 05 - Multi-Label Merge with Priority
-# =============================================================================
-
 def merge_masks_to_label_map(per_label_binary_masks, volume_shape):
-    """
-    Combine per-label binary masks into a single integer label map.
-    Paint order follows MERGE_PRIORITY (later labels overwrite earlier).
-    """
     print("\n  Merging binary masks -> label map...")
     merged_label_map = np.zeros(volume_shape, dtype=np.uint8)
 
@@ -1515,12 +1067,6 @@ def merge_masks_to_label_map(per_label_binary_masks, volume_shape):
 
     return merged_label_map
 
-
-# =============================================================================
-# VISUALISATION — final-anchor figure
-# Now 4 columns: GT | Pred | Overlap | Bbox Input
-# =============================================================================
-
 def show_visualization(
     background_volume,
     ground_truth_binary_mask,
@@ -1535,11 +1081,6 @@ def show_visualization(
     visualization_output_directory,
     track_label=None,
 ):
-    """
-    Save the final-anchor diagnostic figure for a single track.
-    One row per anchor slice used in the FINAL HITL iteration.
-    Four columns: GT | Prediction | Overlap (TP/FN/FP) | Bbox Input.
-    """
     os.makedirs(visualization_output_directory, exist_ok=True)
 
     label_display_name = (
@@ -1564,7 +1105,6 @@ def show_visualization(
 
     number_of_anchor_rows = max(len(final_anchor_z_list), 1)
 
-    # 4 columns now (GT | Pred | Delta | Bbox)
     figure_object = plt.figure(
         figsize=(32, 6 * number_of_anchor_rows + 2),
         facecolor='#1a1a2e',
@@ -1638,7 +1178,6 @@ def show_visualization(
                 border_width=bw,
             )
 
-        # Col 3 — Bbox Input (NEW)
         bbox_ax = figure_object.add_subplot(grid_spec_object[row_index, 3])
         _render_bbox_panel(
             ax=bbox_ax,
@@ -1692,24 +1231,17 @@ def show_visualization(
         plt.show(block=True)
     plt.close(figure_object)
 
-
-# =============================================================================
-# Per-patient pipeline
-# =============================================================================
-
 def process_patient(
     patient_id,
     patient_directory_path,
     csv_writer,
     results_accumulator,
 ):
-    """Full HITL segmentation pipeline for one patient."""
     print(f"\n{'='*60}")
     print(f"  PATIENT: {patient_id}")
     print(f"{'='*60}")
     patient_start_time = time.time()
 
-    # -- Phase 01: file discovery ---------------------------------------------
     all_files = os.listdir(patient_directory_path)
 
     def find_modality_file(suffix):
@@ -1804,7 +1336,6 @@ def process_patient(
     )
     os.makedirs(patient_visualization_dir, exist_ok=True)
 
-    # -- Phase 02: write JPEG frames AND cache uint8 RGB ----------------------
     video_subfolder_name = f"{patient_id}_rgb"
     clear_dir(os.path.join(TEMP_VIDEO_DIR, video_subfolder_name))
 
@@ -1818,7 +1349,6 @@ def process_patient(
 
     background_visualization_volume = rgb_cache.mean(axis=-1).astype(np.float32)
 
-    # -- Normalization histogram -----------------------------------------------
     print(f"\n  Saving normalization histogram (per-slice, from cache)...")
     save_normalization_histogram(
         t1c_volume_raw=red_channel_volume,
@@ -1829,7 +1359,6 @@ def process_patient(
         visualization_output_directory=patient_visualization_dir,
     )
 
-    # -- Phase 03: build GT masks and compute peak slices ---------------------
     print(f"\n  Phase 03 -- Peak-slice seed (HITL round 0):")
     print(f"  {'Track':<22} {'Peak z':>8} {'GT vox':>12}")
     print(f"  {'-'*45}")
@@ -1879,7 +1408,6 @@ def process_patient(
         print(f"  [SKIP] No valid track GT masks for {patient_id}")
         return []
 
-    # -- Phase 04 (HITL): run all tracks with iterative anchor refinement -----
     print(
         f"\n  Phase 04 -- HITL inference "
         f"[max_iter={HITL_MAX_ITERATIONS} | "
@@ -1920,7 +1448,6 @@ def process_patient(
         print(f"  [ERROR] All per-label inferences failed for {patient_id}")
         return []
 
-    # -- Phase 05: merge -> NIfTI ---------------------------------------------
     merged_label_map = merge_masks_to_label_map(
         per_label_predicted_binary_masks,
         (volume_height, volume_width, num_axial_slices),
@@ -1959,13 +1486,11 @@ def process_patient(
         )
         print(f"  Saved TC NIfTI: {tc_nifti_path}")
 
-    # Temp frame cleanup
     temp_jpeg_dir = os.path.join(TEMP_VIDEO_DIR, video_subfolder_name)
     if os.path.exists(temp_jpeg_dir):
         shutil.rmtree(temp_jpeg_dir)
         dprint(f"  Cleaned temp frames: {temp_jpeg_dir}")
 
-    # -- Phase 06: metrics ----------------------------------------------------
     patient_metric_rows   = []
     present_labels_string = f"[{','.join(map(str, present_tumor_label_ids))}]"
 
@@ -2033,7 +1558,6 @@ def process_patient(
             'hd95_merged'  : hd95_merged,
         })
 
-    # WT metrics
     if wt_succeeded:
         wt_gt         = np.isin(seg_volume_data, wt_present)
         dice_wt, hd95_wt = calculate_metrics(wt_gt, wt_predicted_mask)
@@ -2083,7 +1607,6 @@ def process_patient(
     else:
         print("  [SKIP] WT inference failed or no WT labels present")
 
-    # TC metrics
     if tc_succeeded:
         tc_gt         = np.isin(seg_volume_data, tc_present)
         dice_tc, hd95_tc = calculate_metrics(tc_gt, tc_predicted_mask)
@@ -2141,11 +1664,6 @@ def process_patient(
         f"{time.time() - patient_start_time:.1f}s"
     )
     return patient_metric_rows
-
-
-# =============================================================================
-# Main loop + final summary
-# =============================================================================
 
 def run_pipeline():
     print(f"\n{'*'*65}")
@@ -2229,7 +1747,6 @@ def run_pipeline():
                 traceback.print_exc()
                 failed_patients.append(patient_id)
 
-    # -- Final summary --------------------------------------------------------
     print(f"\n\n{'#'*65}")
     print(f"  FINAL SUMMARY  --  HITL iterative anchoring  (multi-bbox)")
     print(
@@ -2296,7 +1813,6 @@ def run_pipeline():
             )
         print()
 
-        # -- Tuning advisory --------------------------------------------------
         from collections import Counter
 
         all_round_counts = [r['n_rounds'] for r in results_accumulator]
@@ -2356,7 +1872,6 @@ def run_pipeline():
         print()
 
     print(f"All outputs saved to: {OUTPUT_BASE_DIR}")
-
 
 if __name__ == "__main__":
     run_pipeline()

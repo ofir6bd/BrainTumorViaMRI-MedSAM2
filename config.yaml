@@ -1,0 +1,2 @@
+inference:
+  num_patients: 1   # how many patients to process (null = all)

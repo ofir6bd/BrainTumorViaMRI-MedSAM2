@@ -6,18 +6,14 @@ import numpy as np
 from matplotlib.colors import ListedColormap
 from matplotlib.widgets import Button
 
-
-# =============================================================================
-# BraTS 2024 label definitions
-# =============================================================================
 LABEL_NAMES  = {1: "NETC", 2: "SNFH", 3: "ET", 4: "RC"}
 LABEL_COLORS = {1: 'red', 2: 'green', 3: 'blue', 4: 'yellow'}
 
 _LABEL_OVERLAY = {
-    1: (1.00, 0.27, 0.00, 0.50),   # NETC  — orange-red
-    2: (0.00, 1.00, 0.50, 0.50),   # SNFH  — spring green
-    3: (0.00, 0.80, 1.00, 0.50),   # ET    — sky blue
-    4: (1.00, 0.90, 0.00, 0.50),   # RC    — bright yellow
+    1: (1.00, 0.27, 0.00, 0.50),
+    2: (0.00, 1.00, 0.50, 0.50),
+    3: (0.00, 0.80, 1.00, 0.50),
+    4: (1.00, 0.90, 0.00, 0.50),
 }
 _LABEL_BBOX = {
     1: '#ff4500',
@@ -25,11 +21,6 @@ _LABEL_BBOX = {
     3: '#00ccff',
     4: '#ffe600',
 }
-
-
-# =============================================================================
-# Patient discovery
-# =============================================================================
 
 def find_patients_in_training_data():
     dataset_dir = r"./2_BraTS2024_dataset/training_data1_v2"
@@ -68,11 +59,6 @@ def find_patients_in_training_data():
     patients.sort(key=lambda x: x['patient_id'])
     return patients
 
-
-# =============================================================================
-# Shared helpers
-# =============================================================================
-
 def _peak_slice_per_label(seg_data):
     result = {}
     for label_id in LABEL_NAMES:
@@ -83,7 +69,6 @@ def _peak_slice_per_label(seg_data):
         peak_z = int(np.argmax(counts))
         result[label_id] = (peak_z, int(counts[peak_z]))
     return result
-
 
 def _compute_bbox(mask_2d):
     rows = np.any(mask_2d, axis=1)
@@ -96,13 +81,11 @@ def _compute_bbox(mask_2d):
     c_max = int(len(cols) - 1 - np.argmax(cols[::-1]))
     return r_min, r_max, c_min, c_max
 
-
 def _pick_background_modality(patient_info):
     for key in ('T1C', 'T1', 'T2', 'FLAIR'):
         if key in patient_info['modalities']:
             return nib.load(patient_info['modalities'][key]).get_fdata(), key
     return None, None
-
 
 def _norm_bg(bg_vol, z):
     bg_slice = bg_vol[:, :, z].astype(np.float32)
@@ -111,14 +94,7 @@ def _norm_bg(bg_vol, z):
     hi = float(np.percentile(nz, 99)) if nz.size else 1
     return np.clip((bg_slice - lo) / max(hi - lo, 1e-8), 0, 1)
 
-
 def _make_toggle_button(fig, state_dict, toggleable_artists):
-    """
-    Add a 'Hide Labels' / 'Show Labels' toggle button at the bottom centre.
-
-    toggleable_artists : list of matplotlib artists (images, patches, texts)
-                         whose visibility is toggled together.
-    """
     ax_btn = plt.axes([0.42, 0.02, 0.16, 0.05])
     btn    = Button(ax_btn, 'Hide Labels', color='#3a3a5c', hovercolor='#555580')
     btn.label.set_color('white')
@@ -133,12 +109,7 @@ def _make_toggle_button(fig, state_dict, toggleable_artists):
         fig.canvas.draw_idle()
 
     btn.on_clicked(toggle)
-    return btn   # keep reference alive
-
-
-# =============================================================================
-# OPTION 1 — modality + segmentation viewer  (toggle SEG panel)
-# =============================================================================
+    return btn
 
 def plot_modalities_with_seg(patient_info):
     seg_data   = nib.load(patient_info['seg_file']).get_fdata()
@@ -196,14 +167,8 @@ def plot_modalities_with_seg(patient_info):
 
     axes_flat[-1].axis('off')
 
-    # toggle hides/shows the entire SEG axes
     _btn = _make_toggle_button(fig, {'on': True}, [seg_ax])
     plt.show()
-
-
-# =============================================================================
-# OPTION 2 — bounding box viewer  (toggle overlay + bbox + text)
-# =============================================================================
 
 def plot_bbox_per_label(patient_info):
     seg_data = nib.load(patient_info['seg_file']).get_fdata()
@@ -216,7 +181,6 @@ def plot_bbox_per_label(patient_info):
     bg_vol, bg_name = _pick_background_modality(patient_info)
     n_labels        = len(peaks)
 
-    # square grid: 4 labels -> 2x2,  3 labels -> 2x2 (1 empty), 2 -> 1x2
     n_cols = int(np.ceil(np.sqrt(n_labels)))
     n_rows = int(np.ceil(n_labels / n_cols))
 
@@ -233,7 +197,7 @@ def plot_bbox_per_label(patient_info):
         fontsize=14, fontweight='bold', color='white',
     )
 
-    toggleable = []   # all artists that hide/show together
+    toggleable = []
 
     for idx, (label_id, (peak_z, px_count)) in enumerate(sorted(peaks.items())):
 
@@ -253,13 +217,11 @@ def plot_bbox_per_label(patient_info):
         ax.set_facecolor('black')
         ax.imshow(bg_norm, cmap='gray', vmin=0, vmax=1)
 
-        # coloured overlay
         overlay = np.zeros((*mask_2d.shape, 4), dtype=float)
         overlay[mask_2d] = overlay_rgba
         ov_img = ax.imshow(overlay, interpolation='none')
         toggleable.append(ov_img)
 
-        # bbox rect + annotation text
         if bbox:
             r_min, r_max, c_min, c_max = bbox
             w = c_max - c_min
@@ -290,17 +252,11 @@ def plot_bbox_per_label(patient_info):
             sp.set_edgecolor(bbox_color)
             sp.set_linewidth(1.5)
 
-    # hide any unused grid cells
     for idx in range(n_labels, n_rows * n_cols):
         axes[idx // n_cols, idx % n_cols].set_visible(False)
 
     _btn = _make_toggle_button(fig, {'on': True}, toggleable)
     plt.show()
-
-
-# =============================================================================
-# Shared patient selection
-# =============================================================================
 
 def select_patient(patients):
     print()
@@ -316,11 +272,6 @@ def select_patient(patients):
     except ValueError:
         print("  Invalid number.")
     return None
-
-
-# =============================================================================
-# Main
-# =============================================================================
 
 def main():
     patients = find_patients_in_training_data()
@@ -349,7 +300,6 @@ def main():
                 plot_bbox_per_label(p)
         else:
             print("  Unknown option.")
-
 
 if __name__ == "__main__":
     main()

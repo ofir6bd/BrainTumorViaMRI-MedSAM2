@@ -1,5 +1,9 @@
+# --- Secrets ---
+secrets.json
+
 # --- Python & Environments ---
 medsam2_env/
+.venv/
 
 # --- MedSAM2 Specifics ---
 MedSAM2/

@@ -1,0 +1,25 @@
+# BraTS 2024 / MedSAM2 project — Python dependencies
+# Install into the project-local .venv:  pip install -r requirements.txt
+
+# --- Core scientific stack ---
+numpy
+scipy
+Pillow
+matplotlib
+nibabel
+PyYAML                 # reads config.yaml (pipeline parameters)
+
+# --- Data acquisition (BraTS via Synapse) ---
+synapseclient          # also provides the synapseutils module
+
+# --- MedSAM2 / SAM2 runtime ---
+# NOTE: torch/torchvision are intentionally NOT pinned here. This project runs
+# on the GPU (NVIDIA RTX 5090), so install the CUDA build from the PyTorch index
+# instead of the default CPU wheel from PyPI:
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# (cu128 = CUDA 12.8, required for RTX 50-series / Blackwell sm_120 GPUs.)
+portalocker==2.7.0
+
+# NOTE: MedSAM2 (the "sam2" package) is NOT on PyPI. It ships in this repo
+# under ./MedSAM2 and is installed editable, separately from this file:
+#     pip install -e ./MedSAM2
