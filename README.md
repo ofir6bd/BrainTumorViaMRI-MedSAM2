@@ -31,12 +31,17 @@ BrainTumorViaMRI-MedSAM2/
 ├── requirements.txt        # Python dependencies
 ├── config.yaml             # pipeline parameters (paths, num_patients, ...)
 ├── secrets.json            # Synapse credentials (git-ignored)
+├── run_web.bat             # launches the web slice viewer (localhost, live-reload)
 ├── .venv/                  # local virtual environment (not committed)
 ├── src/                    # all project scripts
 │   ├── 01_acquire_data.py
-│   ├── 02_view_slices.py
 │   ├── 03_view_modalities.py
-│   └── 05_infer_multibbox_hitl.py
+│   ├── 05_infer_multibbox_hitl.py
+│   └── web/                # web slice viewer (replaces the old 02 script)
+│       ├── app.py          #   Flask backend: patient list + slice/scatter PNGs
+│       ├── serve.py        #   dev server with browser live-reload
+│       ├── templates/index.html
+│       └── static/         #   app.js, style.css  (the frontend)
 ├── data/                   # all INPUTS (git-ignored)
 │   ├── raw/                # downloaded BraTS archives
 │   ├── dataset/            # extracted dataset (dataset/training_data1_v2)
@@ -53,7 +58,7 @@ scripts — no paths are hard-coded.
 ## What each script does
 
 - **`src/01_acquire_data.py`** — Downloads the BraTS 2024 dataset from Synapse (token in `secrets.json`) into `data/raw/` and extracts the archives into `data/dataset/`.
-- **`src/02_view_slices.py`** — Interactive viewer: 2D brain / segmentation / overlay / binary-mask panels and an optional 3D scatter of the tumour labels.
+- **`src/web/`** — Web slice viewer (replaces the old `02` terminal script): pick a patient, scrub through slices with a slider (Brain / Labels / Overlay / Binary Mask), and toggle a 3D scatter of the tumour labels. Launch it with `run_web.bat`.
 - **`src/03_view_modalities.py`** — Interactive viewer: all MRI modalities plus the segmentation, and a per-label bounding-box view on each label's peak slice.
 - **`src/05_infer_multibbox_hitl.py`** — MedSAM2 inference: treats the volume as a slice "video", seeds from a peak slice and grows anchors via an oracle-guided (GT) iterative loop, prompts with one bounding box per disconnected component, then merges masks and reports Dice/HD95.
 
@@ -95,10 +100,19 @@ Activate `.venv`, then run each script **from the repo root** (scripts read `con
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python src\01_acquire_data.py            # download + extract dataset
-python src\02_view_slices.py             # interactive 2D/3D viewer
 python src\03_view_modalities.py         # interactive modalities + bbox viewer
 python src\05_infer_multibbox_hitl.py    # HITL + multi-bbox inference (GPU)
 ```
+
+## Web slice viewer
+
+Double-click **`run_web.bat`** (or run it from a terminal). It starts a local server and opens
+`http://localhost:5000` in your browser — pick a patient, drag the slice slider, and toggle the
+3D scatter. It reads patients from `config.yaml` → `paths.dataset`.
+
+The site is served with **live-reload**: while it's running, editing any file under `src/web/`
+(`templates/index.html`, `static/app.js`, `static/style.css`) makes the browser refresh
+automatically. (Backend logic changes in `src/web/app.py` take effect after re-running the bat.)
 
 ## Prerequisites the code expects
 

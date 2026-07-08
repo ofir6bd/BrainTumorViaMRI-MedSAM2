@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BraTS 2024 - Slice Viewer</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>BraTS 2024 &mdash; Slice Viewer</h1>
+    <p class="sub">Brain &middot; Labels &middot; Overlay &middot; Binary Mask &middot; 3D scatter</p>
+  </header>
+
+  <section class="controls">
+    <label class="field">
+      <span>Patient</span>
+      <select id="patient"></select>
+    </label>
+
+    <div class="field slice-field">
+      <span>Slice</span>
+      <button id="best" type="button">Best</button>
+      <input type="range" id="z" min="0" max="0" value="0">
+      <span id="zlabel" class="zlabel">z = 0</span>
+    </div>
+
+    <button id="toggle3d" type="button">3D scatter</button>
+  </section>
+
+  <main>
+    <p id="status" class="status">Loading&hellip;</p>
+    <img id="viewer" alt="" />
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
