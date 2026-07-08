@@ -56,6 +56,20 @@ header .sub {
   gap: 10px;
 }
 
+.hidden { display: none !important; }
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 select, button {
   background: #23233c;
   color: var(--fg);

@@ -1,12 +1,20 @@
 const patientSel = document.getElementById("patient");
 const zSlider = document.getElementById("z");
 const zLabel = document.getElementById("zlabel");
+const sliceField = document.getElementById("sliceField");
 const viewer = document.getElementById("viewer");
 const statusEl = document.getElementById("status");
 const bestBtn = document.getElementById("best");
-const toggle3dBtn = document.getElementById("toggle3d");
+const viewTabs = document.getElementById("views");
 
-const current = { id: null, best: 0, mode: "2d" };
+const VIEWS = {
+  panels:     { slice: true,  url: (id, z) => `/panels.png?id=${id}&z=${z}` },
+  modalities: { slice: true,  url: (id, z) => `/modalities.png?id=${id}&z=${z}` },
+  bbox:       { slice: false, url: (id) => `/bbox.png?id=${id}` },
+  scatter:    { slice: false, url: (id) => `/scatter.png?id=${id}` },
+};
+
+const current = { id: null, best: 0, view: "panels" };
 
 async function loadPatients() {
   const list = await (await fetch("/api/patients")).json();
@@ -23,6 +31,7 @@ async function loadPatients() {
     opt.textContent = p.label;
     patientSel.appendChild(opt);
   }
+  setActiveTab("panels");
   await selectPatient(Number(list[0].id));
 }
 
@@ -33,32 +42,39 @@ async function selectPatient(id) {
   current.best = info.best_slice;
   zSlider.max = info.depth - 1;
   zSlider.value = info.best_slice;
-  showSlice();
+  render();
 }
 
-function showSlice() {
-  current.mode = "2d";
+function setActiveTab(view) {
+  current.view = view;
+  for (const btn of viewTabs.querySelectorAll(".tab")) {
+    btn.classList.toggle("active", btn.dataset.view === view);
+  }
+  sliceField.classList.toggle("hidden", !VIEWS[view].slice);
+}
+
+function render() {
+  if (current.id === null) return;
+  const view = VIEWS[current.view];
   const z = zSlider.value;
   zLabel.textContent = `z = ${z}`;
-  statusEl.textContent = "";
-  viewer.src = `/slice.png?id=${current.id}&z=${z}&t=${Date.now()}`;
-}
-
-function show3d() {
-  current.mode = "3d";
-  statusEl.textContent = "Rendering 3D scatter…";
+  statusEl.textContent = "Rendering…";
   viewer.onload = () => (statusEl.textContent = "");
-  viewer.src = `/scatter.png?id=${current.id}&t=${Date.now()}`;
+  viewer.onerror = () => (statusEl.textContent = "Failed to render this view.");
+  viewer.src = `${view.url(current.id, z)}&_=${Date.now()}`;
 }
 
 patientSel.addEventListener("change", (e) => selectPatient(Number(e.target.value)));
-zSlider.addEventListener("input", showSlice);
+zSlider.addEventListener("input", render);
 bestBtn.addEventListener("click", () => {
   zSlider.value = current.best;
-  showSlice();
+  render();
 });
-toggle3dBtn.addEventListener("click", () =>
-  current.mode === "3d" ? showSlice() : show3d()
-);
+viewTabs.addEventListener("click", (e) => {
+  const btn = e.target.closest(".tab");
+  if (!btn) return;
+  setActiveTab(btn.dataset.view);
+  render();
+});
 
 loadPatients();
