@@ -1,0 +1,17 @@
+# --- Python & Environments ---
+medsam2_env/
+
+# --- MedSAM2 Specifics ---
+MedSAM2/
+
+# --- IDEs ---
+.vscode/
+.idea/
+
+# --- Data ----
+*1_.synapsecache*
+*2_BraTS2024_dataset*
+medsam2_input/
+medsam2_results/
+One_Patient_test_MRI_DATA/
+temp_video_frames/
