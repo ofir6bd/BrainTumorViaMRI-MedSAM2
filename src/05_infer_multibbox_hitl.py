@@ -24,7 +24,6 @@ import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
 from matplotlib.patches import Patch
 import matplotlib.colors as mcolors
-from MedSAM2.sam2.build_sam import build_sam2_video_predictor
 
 warnings.filterwarnings("ignore")
 
@@ -77,6 +76,7 @@ subprocess.run(
 )
 
 try:
+    from sam2.build_sam import build_sam2_video_predictor
     print("[INIT] sam2.build_sam import OK")
 except ImportError as import_error:
     raise ImportError(
