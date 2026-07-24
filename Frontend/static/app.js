@@ -78,3 +78,22 @@ viewTabs.addEventListener("click", (e) => {
 });
 
 loadPatients();
+
+// ---- sidebar mode switching (Explore / Asymmetry) ----
+const sidenav = document.getElementById("sidenav");
+const panels = {
+  explore: document.getElementById("explorePanel"),
+  asymmetry: document.getElementById("asymPanel"),
+};
+sidenav.addEventListener("click", (e) => {
+  const btn = e.target.closest(".navbtn");
+  if (!btn) return;
+  const mode = btn.dataset.mode;
+  for (const b of sidenav.querySelectorAll(".navbtn")) {
+    b.classList.toggle("active", b === btn);
+  }
+  for (const [name, el] of Object.entries(panels)) {
+    el.classList.toggle("hidden", name !== mode);
+  }
+  if (mode === "asymmetry" && window.initAsymmetry) window.initAsymmetry();
+});

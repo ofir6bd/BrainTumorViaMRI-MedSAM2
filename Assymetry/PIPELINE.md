@@ -1,29 +1,32 @@
-# Asymmetry Pipeline — Spec (DRAFT, awaiting confirmation)
+# Asymmetry Pipeline — Spec (IMPLEMENTED)
 
-> Status: **draft for review.** No code has been written yet. Refine this file with me
-> until you approve it, then I'll implement it. **All changes stay inside `Assymetry/`.**
+> Status: **implemented.** Code lives in `Assymetry/` (`pipeline.py`, `render.py`,
+> `routes.py`); the UI is wired into `Frontend/` (sidebar "Asymmetry" button).
+> Launch with `run_web.bat` and open the **Asymmetry** tab.
+>
+> As-built decisions are recorded in §6. Defaults live in `PARAMS` at the top of
+> `pipeline.py` (`n_min_voxel=500`, `k_max=4`, ...).
+>
+> **No skull-stripping stage:** BraTS volumes are already skull-stripped, so the former
+> Stage A (T1/T1C histogram matching → adaptive threshold → brain mask) was removed. The
+> brain region is simply the **nonzero FLAIR voxels**, and the pipeline runs on FLAIR
+> directly.
 
 ---
 
 ## 0. Scope & constraints
 
 - **Pipeline code, outputs, and rendering logic live in `Assymetry/`.** The UI hooks into
-  the **existing `src/web` viewer** (decided): a new **"Asymmetry"** sidebar entry is added
-  there, and it calls into `Assymetry/`. So the only files touched outside `Assymetry/` are
-  the web app's `index.html`, `app.js`, `style.css`, and `app.py` (thin route wiring).
+  the **existing viewer in `Frontend/`**: a new **"Asymmetry"** sidebar entry calls into
+  `Assymetry/`. Files touched outside `Assymetry/` are the web app's `index.html`,
+  `app.js` (nav switch), `asymmetry.js` (new), `style.css`, and `app.py` (blueprint wiring).
 - **Clustering = Gaussian Mixture Models** (`sklearn.mixture.GaussianMixture`) — used both
   for per-hemisphere clustering (Stage B) and for the Area Difference feature (Stage C).
 - Data source is **`data/sample/`** only (read-only). Current patients:
   - `BraTS-GLI-00046-101`
   - `BraTS-GLI-00060-100`
-- Modality file suffixes in this dataset:
-  | Role  | Suffix   |
-  |-------|----------|
-  | T1    | `-t1n`   |
-  | T1C   | `-t1c`   |
-  | FLAIR | `-t2f`   |
-  | T2    | `-t2w`   |
-  | GT seg| `-seg`   |
+- Only **FLAIR** (`-t2f`) and the **GT segmentation** (`-seg`) are used. T1/T1C/T2 exist in
+  the dataset but are no longer read (they were only used by the removed skull-strip stage).
 - Volumes are 3D NIfTI (`.nii.gz`). We process **axial slices** (index `z` along axis 2),
   matching the existing viewer's convention.
 
@@ -40,19 +43,11 @@ as an image and steppable in a small web UI.
 
 ## 2. Pipeline stages
 
-### Stage A — Preprocessing & Skull Stripping (uses T1 + T1C)
-1. Load T1 (`-t1n`) and T1C (`-t1c`) volumes.
-2. **Histogram matching**: match T1C's intensity histogram to T1 (or vice-versa —
-   see Q3) so the two are on a comparable intensity scale.
-3. **Adaptive threshold**: build the histogram of each, and find the intensity at which
-   the **difference between the two histograms is maximal**; use that intensity as the
-   skull-stripping threshold.
-4. Apply the threshold to produce a **brain mask** (largest connected component, hole-fill
-   — see Q4), and apply the same mask to **FLAIR** to get skull-stripped FLAIR.
+> **Input:** BraTS FLAIR, already skull-stripped. `brain_mask = FLAIR > 0`;
+> `flair_stripped` = FLAIR normalised to [0, 1]. (There is no Stage A — see the note at
+> the top of this file.)
 
-**Output:** `brain_mask` (3D bool), `flair_stripped` (3D float).
-
-### Stage B — Per-slice asymmetry processing (on skull-stripped FLAIR)
+### Stage B — Per-slice asymmetry processing (on FLAIR)
 Iterate over every axial slice `z`:
 1. Count brain voxels in the slice. If `count < N_min_voxel` → **skip this slice** (no
    tumor decision, not shown unless "show skipped" is on — see Q6).
@@ -71,8 +66,8 @@ Iterate over every axial slice `z`:
 difference map, candidate mask.
 
 ### Stage C — Symmetry feature extraction (paper features)
-Assuming the vertical mid-sagittal plane splits skull-stripped FLAIR into two halves,
-compute, per slice (and/or aggregated per volume — see Q8):
+Assuming the vertical mid-sagittal plane splits FLAIR into two halves, compute per slice
+and aggregated per volume:
 - **AD — Area Difference**: difference in cluster areas between hemispheres, via GMM.
 - **MD — Mean Difference**: difference of mean gray levels between hemispheres.
 - **BC — Bhattacharyya Coefficient**: overlap of the two hemispheres' intensity histograms.
@@ -90,26 +85,25 @@ compute, per slice (and/or aggregated per volume — see Q8):
 
 ---
 
-## 3. Web UI (self-contained, inside `Assymetry/`)
+## 3. Web UI (in `Frontend/`, backed by `Assymetry/`)
 
-A standalone page served by `Assymetry/` with a **left sidebar** whose main entry is an
-**"Asymmetry"** button. Selecting it opens the step-through viewer.
+The `Frontend/` viewer has a **left sidebar** with an **"Asymmetry"** entry that opens the
+step-through viewer; it calls the `/asym` blueprint served from `Assymetry/routes.py`.
 
 **Interaction model — "Next" walks the whole process:**
 - A big **Next** button advances **one step at a time** through the stages, rendering the
-  image for that step so the process is visible incrementally. Proposed step order:
-  1. T1 & T1C raw
-  2. Histogram matching result
-  3. Adaptive-threshold histogram (with chosen threshold marked)
-  4. Brain mask + skull-stripped FLAIR
-  5. Current slice: midline drawn
-  6. Per-hemisphere clustering (mean-color quantized)
-  7. Flipped-hemisphere overlay
-  8. Difference map + candidate mask
-  9. Feature values (AD / MD / BC) for the slice
-  10. Prediction vs. GT overlay + slice Dice
-  - After the last per-slice step, **Next** moves to the next qualifying slice and
-    resumes at step 5; after the last slice, it shows the **volume Dice** summary.
+  image for that step so the process is visible incrementally. As-built step order
+  (defined in `render.py:STEP_DEFS`; ids adapt automatically if steps are inserted):
+  1. Current slice: midline drawn
+  2. Per-hemisphere GMM clustering (mean-color quantized)
+  3. Flipped-hemisphere overlay + |difference|
+  4. Difference map + candidate mask
+  5. Feature values (AD / MD / BC) for the slice
+  6. Prediction vs. GT overlay + slice Dice
+  7. Volume summary (whole-tumour Dice + mean features)
+  - Steps 1-6 repeat per qualifying slice; after the last per-slice step, **Next** moves to
+    the next qualifying slice and resumes at the midline step; after the last slice it shows
+    step 7, the **volume Dice** summary.
 - **Skip slice** button → jump straight to the next qualifying slice.
 - **Skip patient** button → jump to the next patient.
 - Patient selector (dropdown) for the two sample patients.
@@ -119,39 +113,37 @@ matches the current look and needs no JS charting.
 
 ---
 
-## 4. Parameters (defaults — adjust in review)
+## 4. Parameters (`PARAMS` in `pipeline.py`)
 
-| Name           | Meaning                                   | Proposed default |
-|----------------|-------------------------------------------|------------------|
-| `N_min_voxel`  | min brain voxels for a slice to be processed | `500`         |
-| `K`            | GMM components per hemisphere              | `3`             |
-| `diff_thresh`  | threshold on difference map for candidate mask | see Q5      |
+| Name          | Meaning                                        | Default |
+|---------------|------------------------------------------------|---------|
+| `n_min_voxel` | min brain voxels for a slice to be processed   | `500`   |
+| `k_max`       | max GMM components per hemisphere (auto-K, BIC)| `4`     |
+| `feat_bins`   | histogram bins for the Bhattacharyya coeff.    | `64`    |
+
+Difference-map threshold is **Otsu** on the `|difference|` values (not a fixed parameter).
 
 ---
 
 ## 5. Outputs / artifacts
 
-- Rendered PNGs streamed to the browser (no files needed), **or** also saved under
-  `Assymetry/outputs/<patient>/` for later inspection (see Q9).
-- Optional CSV of per-slice `AD, MD, BC, Dice` under `Assymetry/outputs/`.
+- Rendered PNGs streamed to the browser on demand.
+- Per-slice `z, brain_voxels, AD, MD, BC, dice` (+ a `volume` Dice row) saved to
+  `Assymetry/outputs/<patient>/features.csv` on the summary step.
 
 ---
 
-## 6. Open questions (please answer / correct)
+## 6. As-built decisions
 
-_Resolved: UI = added into existing `src/web` viewer. Clusterer = GMM._
+_UI = added into the `Frontend/` viewer. Clusterer = GMM with auto-K by BIC (K =
+2..`k_max`, default 4). **No skull-stripping stage** — see the note at the top._
 
-1. **Histogram-matching direction:** match T1C→T1 or T1→T1C as reference?
-2. **Brain mask cleanup:** after thresholding, keep largest connected component + fill
-   holes? Or use the raw threshold mask as-is?
-3. **Midline location:** fixed geometric center column, or estimated (e.g. best
-   left/right symmetry / centroid of brain mask)?
-4. **Skipped slices:** hide them entirely, or show a "skipped (below N_min_voxel)" frame
-   when stepping?
-5. **Difference-map threshold:** fixed value, percentile (e.g. top 2%), or Otsu on the
-   difference map?
-6. **Features per-slice or per-volume:** compute AD/MD/BC per processed slice, aggregate
-   to a per-volume number, or both?
-7. **Persist outputs:** stream PNGs only, or also save PNGs/CSV under `Assymetry/outputs/`?
-8. **Which slices count for volume Dice:** only slices we actually processed (≥
-   `N_min_voxel`), or all slices (skipped slices predict empty)?
+1. **Brain region:** `FLAIR > 0` (BraTS is pre-skull-stripped); FLAIR normalised to [0,1].
+2. **Midline:** **estimated per slice** = centroid column of the brain mask (fallback =
+   geometric centre). Halves cropped to a symmetric width around it before flipping.
+3. **Skipped slices:** **reported and rendered as a "skipped" frame** when stepping.
+4. **Difference-map threshold:** **Otsu** on the `|difference|` values.
+5. **Features:** computed **per slice and aggregated per volume** (mean).
+6. **Persist outputs:** per-slice `AD,MD,BC,dice` **CSV saved to
+   `Assymetry/outputs/<patient>/features.csv`** on the summary step.
+7. **Volume Dice denominator:** **all slices** (skipped slices predict empty).

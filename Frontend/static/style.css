@@ -16,11 +16,60 @@ body {
   color: var(--fg);
 }
 
+/* ---- app shell: sidebar + content ---- */
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 210px;
+  flex: 0 0 210px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.brand { margin: 0; font-size: 1.2rem; }
+.brand-sub { margin: 2px 0 18px; color: var(--muted); font-size: 0.8rem; }
+
+.sidenav { display: flex; flex-direction: column; gap: 8px; }
+
+.navbtn {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.navbtn .ic { font-size: 1.05rem; opacity: 0.85; }
+.navbtn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.sidefoot {
+  margin-top: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.content { flex: 1; min-width: 0; }
+
 header {
   padding: 20px 24px 8px;
 }
 
-header h1 {
+header h1, header h2 {
   margin: 0;
   font-size: 1.4rem;
 }
@@ -29,6 +78,36 @@ header .sub {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+/* ---- asymmetry ---- */
+.asym-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.asym-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px 0;
+  flex-wrap: wrap;
+}
+.chip {
+  background: #23233c;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.asym-steptitle { color: var(--muted); font-size: 0.85rem; }
+
+#asymViewer {
+  max-width: 100%;
+  height: auto;
+  background: #141428;
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
 }
 
 .controls {

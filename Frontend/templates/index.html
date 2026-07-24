@@ -7,40 +7,97 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header>
-    <h1>BraTS 2024 &mdash; Viewer</h1>
-    <p class="sub">Panels &middot; Modalities + Segmentation &middot; BBox per label &middot; 3D scatter</p>
-  </header>
+  <div class="app">
+    <aside class="sidebar">
+      <h1 class="brand">BraTS 2024</h1>
+      <p class="brand-sub">Tumour viewer</p>
+      <nav class="sidenav" id="sidenav">
+        <button class="navbtn active" data-mode="explore" type="button">
+          <span class="ic">&#9635;</span> Explore
+        </button>
+        <button class="navbtn" data-mode="asymmetry" type="button">
+          <span class="ic">&#9695;</span> Asymmetry
+        </button>
+      </nav>
+      <p class="sidefoot">data/sample &middot; FLAIR asymmetry</p>
+    </aside>
 
-  <section class="controls">
-    <label class="field">
-      <span>Patient</span>
-      <select id="patient"></select>
-    </label>
+    <div class="content">
+      <!-- ============ EXPLORE ============ -->
+      <section class="mode-panel" id="explorePanel">
+        <header>
+          <h2>Explore</h2>
+          <p class="sub">Panels &middot; Modalities + Segmentation &middot; BBox per label &middot; 3D scatter</p>
+        </header>
 
-    <div class="field">
-      <span>View</span>
-      <div class="tabs" id="views">
-        <button class="tab" data-view="panels" type="button">Panels</button>
-        <button class="tab" data-view="modalities" type="button">Modalities + Seg</button>
-        <button class="tab" data-view="bbox" type="button">BBox per label</button>
-        <button class="tab" data-view="scatter" type="button">3D scatter</button>
-      </div>
+        <section class="controls">
+          <label class="field">
+            <span>Patient</span>
+            <select id="patient"></select>
+          </label>
+
+          <div class="field">
+            <span>View</span>
+            <div class="tabs" id="views">
+              <button class="tab" data-view="panels" type="button">Panels</button>
+              <button class="tab" data-view="modalities" type="button">Modalities + Seg</button>
+              <button class="tab" data-view="bbox" type="button">BBox per label</button>
+              <button class="tab" data-view="scatter" type="button">3D scatter</button>
+            </div>
+          </div>
+
+          <div class="field slice-field" id="sliceField">
+            <span>Slice</span>
+            <button id="best" type="button">Best</button>
+            <input type="range" id="z" min="0" max="0" value="0">
+            <span id="zlabel" class="zlabel">z = 0</span>
+          </div>
+        </section>
+
+        <main>
+          <p id="status" class="status">Loading&hellip;</p>
+          <img id="viewer" alt="" />
+        </main>
+      </section>
+
+      <!-- ============ ASYMMETRY ============ -->
+      <section class="mode-panel hidden" id="asymPanel">
+        <header>
+          <h2>Asymmetry pipeline</h2>
+          <p class="sub">Per-hemisphere GMM &middot; flip &amp; subtract &middot; Dice vs whole tumour (FLAIR is pre-skull-stripped)</p>
+        </header>
+
+        <section class="controls">
+          <label class="field">
+            <span>Patient</span>
+            <select id="asymPatient"></select>
+          </label>
+          <div class="field">
+            <span>Step</span>
+            <div class="asym-buttons">
+              <button id="asymNext" type="button" class="primary">Next &rarr;</button>
+              <button id="asymSkipSlice" type="button">Skip slice</button>
+              <button id="asymSkipPatient" type="button">Skip patient</button>
+              <button id="asymRestart" type="button">Restart</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="asym-progress" id="asymProgress">
+          <span class="chip" id="asymStepChip">Step 1</span>
+          <span class="chip" id="asymSliceChip">Stage A</span>
+          <span class="asym-steptitle" id="asymStepTitle"></span>
+        </div>
+
+        <main>
+          <p id="asymStatus" class="status">Select a patient and click Next.</p>
+          <img id="asymViewer" alt="" />
+        </main>
+      </section>
     </div>
-
-    <div class="field slice-field" id="sliceField">
-      <span>Slice</span>
-      <button id="best" type="button">Best</button>
-      <input type="range" id="z" min="0" max="0" value="0">
-      <span id="zlabel" class="zlabel">z = 0</span>
-    </div>
-  </section>
-
-  <main>
-    <p id="status" class="status">Loading&hellip;</p>
-    <img id="viewer" alt="" />
-  </main>
+  </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='asymmetry.js') }}"></script>
 </body>
 </html>

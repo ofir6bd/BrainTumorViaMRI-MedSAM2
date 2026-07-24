@@ -12,9 +12,13 @@ PyYAML                 # reads config.yaml (pipeline parameters)
 # --- Data acquisition (BraTS via Synapse) ---
 synapseclient          # also provides the synapseutils module
 
-# --- Web slice viewer (src/web, launched by run_web.bat) ---
+# --- Web slice viewer (Frontend/, launched by run_web.bat) ---
 Flask
 livereload             # serves the site and reloads the browser on file changes
+
+# --- Asymmetry pipeline (Assymetry/) ---
+scikit-learn           # GaussianMixture (per-hemisphere GMM clustering)
+scikit-image           # histogram matching, Otsu threshold
 
 # --- MedSAM2 / SAM2 runtime ---
 # NOTE: torch/torchvision are intentionally NOT pinned here. This project runs

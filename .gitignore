@@ -4,6 +4,8 @@ secrets.json
 # --- Python & Environments ---
 medsam2_env/
 .venv/
+__pycache__/
+*.pyc
 
 # --- MedSAM2 Specifics ---
 MedSAM2/
