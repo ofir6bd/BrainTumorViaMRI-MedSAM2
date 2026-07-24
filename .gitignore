@@ -15,5 +15,7 @@ MedSAM2/
 .idea/
 
 # --- Data & outputs ---
-data/
+data/*
+!data/sample/
+!data/sample/**
 outputs/
