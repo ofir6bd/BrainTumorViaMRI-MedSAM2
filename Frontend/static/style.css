@@ -1,0 +1,227 @@
+:root {
+  --bg: #0f1020;
+  --panel: #1a1a2e;
+  --fg: #e8e8f0;
+  --muted: #9a9ab0;
+  --accent: #4f7cff;
+  --border: #2c2c44;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* ---- app shell: sidebar + content ---- */
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 210px;
+  flex: 0 0 210px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.brand { margin: 0; font-size: 1.2rem; }
+.brand-sub { margin: 2px 0 18px; color: var(--muted); font-size: 0.8rem; }
+
+.sidenav { display: flex; flex-direction: column; gap: 8px; }
+
+.navbtn {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.navbtn .ic { font-size: 1.05rem; opacity: 0.85; }
+.navbtn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.sidefoot {
+  margin-top: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.content { flex: 1; min-width: 0; }
+
+header {
+  padding: 20px 24px 8px;
+}
+
+header h1, header h2 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+header .sub {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* ---- asymmetry ---- */
+.asym-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* permanent, sticky whole-tumour Dice bar */
+.asym-dicebar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  background: linear-gradient(90deg, #191a33, #14213a);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.dice-main { display: flex; align-items: baseline; gap: 12px; }
+.dice-label { color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.dice-value {
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: #6ee7a8;
+  font-variant-numeric: tabular-nums;
+}
+.dice-value.computing { font-size: 1rem; color: var(--muted); font-weight: 500; }
+.dice-slice { color: var(--fg); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+
+/* stacked per-slice figures */
+.asym-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 22px 24px 60px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.asym-fig {
+  margin: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px 16px;
+}
+.asym-fig-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  color: var(--fg);
+}
+.asym-fig img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #141428;
+  border-radius: 6px;
+}
+.asym-fig-cap {
+  margin: 12px 2px 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-end;
+  padding: 16px 24px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.slice-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.hidden { display: none !important; }
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+select, button {
+  background: #23233c;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--accent); }
+
+input[type="range"] {
+  width: min(48vw, 420px);
+  accent-color: var(--accent);
+}
+
+.zlabel {
+  font-variant-numeric: tabular-nums;
+  min-width: 64px;
+  color: var(--fg);
+}
+
+main {
+  padding: 24px;
+  text-align: center;
+}
+
+.status {
+  color: var(--muted);
+  min-height: 1.2em;
+}
+
+#viewer {
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
