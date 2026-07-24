@@ -137,16 +137,23 @@ _UI = added into the `Frontend/` viewer. Clusterer = GMM with auto-K by BIC (K =
 2..`k_max`, default 4). **No skull-stripping stage** — see the note at the top._
 
 1. **Brain region:** `FLAIR > 0` (BraTS is pre-skull-stripped); FLAIR normalised to [0,1].
-2. **Midline & orientation:** the anatomical **Left-Right axis is detected from the NIfTI
-   affine** (`aff2axcodes`; BraTS sample is `('L','A','S')`, so L-R = axis 0 = rows). Each
-   slice is transposed into a **canonical frame where L-R lies on the columns**, so the
-   mid-sagittal split is a vertical line in the conventional radiological orientation. The
-   midline is then the **centroid column of the brain mask** (fallback = geometric centre);
-   halves are cropped to a symmetric width around it before flipping. The prediction is
-   transposed back to the original frame before Dice scoring.
-   _(Fix 2026-07-24: the earlier version always split columns = Anterior-Posterior, mirroring
-   front↔back; correcting to the true L-R axis raised sample Dice, e.g. patient 46
-   0.235 → 0.337.)_
+2. **Midline & orientation (symmetry-based, 2026-07-24):**
+   - **Axis orientation** from the NIfTI affine (`aff2axcodes`; BraTS sample `('L','A','S')`,
+     so L-R = axis 0 = rows). Each slice is transposed into a **canonical frame with L-R on
+     the columns**. _(Earlier bug: split columns = Anterior-Posterior, mirroring front↔back;
+     the fix raised patient-46 Dice 0.235 → ~0.33.)_
+   - **Tilt correction** — the paper just assumes the fissure is the image centre-line
+     (`W/2`), which is worse than a brain-centroid; neither handles head tilt. Instead a
+     **mid-sagittal tilt angle is estimated once per volume** by rotating the densest-brain
+     slices over ±`angle_max`° and picking the angle with the most left-right intensity
+     symmetry (min mean-squared reflection error). Each slice is then rotated so the axis is
+     **vertical** (brain shown upright).
+   - **Offset** — within the tilt-corrected slice the midline column is the
+     **symmetry-optimal column** (max brain-mask mirror IoU) in a ±`offset_win` window
+     around the centroid.
+   - The candidate mask/Dice are computed in this corrected frame (Dice is invariant to the
+     shared rotation/transpose). Measured tilts on the sample: patient 46 ≈ −2°, patient 60
+     ≈ +1°; Dice roughly unchanged (this is a geometric-placement fix, not a detector change).
 3. **Skipped slices:** **reported and rendered as a "skipped" frame** when stepping.
 4. **Difference-map threshold:** **Otsu** on the `|difference|` values.
 5. **Features:** computed **per slice and aggregated per volume** (mean).

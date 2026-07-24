@@ -9,7 +9,12 @@ Stage C  Symmetry features AD / MD / BC.
 Stage D  Dice of the stacked prediction vs. ground-truth whole tumour (seg > 0).
 
 Design decisions (defaults, see PIPELINE.md open questions):
-  Q3 midline                 : per-slice centroid column of the brain mask
+  Q3 midline                 : mid-sagittal axis found by symmetry maximisation -- a tilt
+                               angle estimated once per volume (max left-right intensity
+                               symmetry) + a per-slice symmetry-optimal offset column. Each
+                               slice is rotated into a tilt-corrected frame where the axis
+                               is a vertical line; the candidate mask is rotated back for
+                               scoring.
   Q4 skipped slices          : reported, rendered as a "skipped" frame by the UI
   Q5 difference threshold    : Otsu on the |difference| map
   Q6 features                : per slice AND aggregated per volume
@@ -23,6 +28,7 @@ import glob
 
 import numpy as np
 import nibabel as nib
+from scipy import ndimage
 from sklearn.mixture import GaussianMixture
 from skimage.filters import threshold_otsu
 
@@ -33,6 +39,9 @@ PARAMS = {
     "n_min_voxel": 500,   # min brain voxels for a slice to be processed
     "k_max": 4,           # max GMM components per hemisphere (auto-select 2..k_max by BIC)
     "feat_bins": 64,      # bins for the Bhattacharyya coefficient
+    "angle_max": 12.0,    # mid-sagittal axis search: +/- degrees
+    "angle_step": 1.0,    # angle search step (degrees)
+    "offset_win": 15,     # midline column search half-window (pixels)
 }
 
 MODALITY_SUFFIX = {"FLAIR": "-t2f"}
@@ -170,6 +179,73 @@ class AsymmetryPipeline:
     def slice_seg(self, z):
         return self._canon(self.seg[:, :, z])
 
+    # -- mid-sagittal axis: tilt angle (per volume) + corrected frame ---------
+    @staticmethod
+    def _best_mirror_ssd(img, brain, win):
+        """Min mean-squared reflection error over a small offset window (vertical axis)."""
+        W = img.shape[1]
+        if brain.sum() == 0:
+            return np.inf
+        c0 = int(round(brain.sum(0) @ np.arange(W) / max(brain.sum(), 1)))
+        best = np.inf
+        for c in range(max(c0 - win, 5), min(c0 + win + 1, W - 5)):
+            hw = min(c, W - c)
+            diff = img[:, c - hw:c] - img[:, c:c + hw][:, ::-1]
+            ov = brain[:, c - hw:c] & brain[:, c:c + hw][:, ::-1]
+            if ov.any():
+                best = min(best, float((diff[ov] ** 2).mean()))
+        return best
+
+    @property
+    def mid_angle(self):
+        """Tilt angle (degrees) that makes the mid-sagittal plane vertical.
+
+        Estimated ONCE per volume by rotating the densest-brain slices over a range of
+        angles and picking the one with the most left-right intensity symmetry.
+        """
+        if "mid_angle" not in self._cache:
+            self._cache["mid_angle"] = self._estimate_mid_angle()
+        return self._cache["mid_angle"]
+
+    def _estimate_mid_angle(self):
+        idx = self.slice_indices
+        if not idx:
+            return 0.0
+        reps = [z for _, z in sorted(((self.brain_count(z), z) for z in idx),
+                                     reverse=True)[:12]]
+        slices = [self.slice_flair(z) for z in reps]
+        win = self.p["offset_win"]
+        amax, astep = self.p["angle_max"], self.p["angle_step"]
+        best = (0.0, np.inf)
+        for th in np.arange(-amax, amax + 1e-6, astep):
+            tot, n = 0.0, 0
+            for sl in slices:
+                r = sl if abs(th) < 1e-6 else ndimage.rotate(sl, th, reshape=False, order=1)
+                rb = r > 0.01
+                s = self._best_mirror_ssd(r, rb, win)
+                if np.isfinite(s):
+                    tot += s
+                    n += 1
+            if n and tot / n < best[1]:
+                best = (float(th), tot / n)
+        return best[0]
+
+    def _rot(self, sl, angle, order):
+        if abs(angle) < 1e-6:
+            return sl
+        return ndimage.rotate(sl, angle, reshape=False, order=order,
+                              mode="constant", cval=0)
+
+    def slice_flair_corr(self, z):
+        """Canonical FLAIR slice rotated so the mid-sagittal axis is vertical."""
+        return self._rot(self.slice_flair(z), self.mid_angle, 1)
+
+    def slice_brain_corr(self, z):
+        return self._rot(self.slice_brain(z).astype(np.float32), self.mid_angle, 0) > 0.5
+
+    def slice_seg_corr(self, z):
+        return self._rot(self.slice_seg(z), self.mid_angle, 0)
+
     # -- slice bookkeeping -------------------------------------------------
     def brain_count(self, z):
         return int(self.brain_mask[:, :, z].sum())
@@ -203,13 +279,26 @@ class AsymmetryPipeline:
         if z in self._slice_cache:
             return self._slice_cache[z]
 
-        fln = self.slice_flair(z)      # canonical frame: columns = Left-Right
-        bm = self.slice_brain(z)
+        fln = self.slice_flair_corr(z)   # tilt-corrected: axis is a vertical line
+        bm = self.slice_brain_corr(z)
         H, W = fln.shape
 
-        # Q3 midline: centroid column of the brain mask (fallback = geometric centre)
-        cols = np.where(bm.any(axis=0))[0]
-        c = int(round(fln.shape[1] * 0.5)) if cols.size == 0 else int(round(bm.sum(axis=0) @ np.arange(W) / max(bm.sum(), 1)))
+        # Q3 midline: symmetry-optimal column near the brain centroid (tilt already fixed)
+        if bm.sum() == 0:
+            c = W // 2
+        else:
+            c0 = int(round(bm.sum(axis=0) @ np.arange(W) / max(bm.sum(), 1)))
+            win = self.p["offset_win"]
+            best = (c0, -1.0)
+            for cc in range(max(c0 - win, 1), min(c0 + win + 1, W - 1)):
+                hw = min(cc, W - cc)
+                lft, rgt = bm[:, cc - hw:cc], bm[:, cc:cc + hw][:, ::-1]
+                inter = np.logical_and(lft, rgt).sum()
+                union = np.logical_or(lft, rgt).sum()
+                iou = inter / union if union else 0.0
+                if iou > best[1]:
+                    best = (cc, iou)
+            c = best[0]
         c = min(max(c, 1), W - 1)
         half_w = min(c, W - c)
 
@@ -251,7 +340,7 @@ class AsymmetryPipeline:
         ra = (r_labels == int(np.argmax(r_means))).mean() if r_labels.size else 0.0
         ad = float(abs(la - ra))
 
-        gt = self.slice_seg(z) > 0
+        gt = self.slice_seg_corr(z) > 0
         dice = _dice(candidate, gt)
 
         out = {
@@ -277,22 +366,27 @@ class AsymmetryPipeline:
         return q, labels, means
 
     # -- Stage D -----------------------------------------------------------
-    @property
-    def predicted_volume(self):
-        if "pred" not in self._cache:
-            pred = np.zeros(self.seg.shape, dtype=bool)
-            for z in self.slice_indices:
-                cand = self.process_slice(z)["candidate"]   # canonical frame
-                pred[:, :, z] = cand.T if self.lr_is_rows else cand
-            self._cache["pred"] = pred
-        return self._cache["pred"]
-
-    @property
-    def gt_whole(self):
-        return self.seg > 0
+    def candidate_corr(self, z):
+        """Candidate tumour mask in the tilt-corrected frame (empty for skipped slices)."""
+        if self.is_processed(z):
+            return self.process_slice(z)["candidate"]
+        return np.zeros(self.slice_seg_corr(z).shape, dtype=bool)
 
     def volume_dice(self):
-        return _dice(self.predicted_volume, self.gt_whole)
+        """Dice over all slices, computed in the tilt-corrected frame (Dice is invariant
+        to the shared rotation/transpose, so this equals the original-space value)."""
+        if "vdice" not in self._cache:
+            procset = set(self.slice_indices)
+            inter = pa = ga = 0
+            for z in range(self.depth):
+                gt = self.slice_seg_corr(z) > 0
+                cand = self.process_slice(z)["candidate"] if z in procset \
+                    else np.zeros_like(gt)
+                inter += int(np.logical_and(cand, gt).sum())
+                pa += int(cand.sum())
+                ga += int(gt.sum())
+            self._cache["vdice"] = 1.0 if (pa + ga) == 0 else float(2.0 * inter / (pa + ga))
+        return self._cache["vdice"]
 
     def volume_features(self):
         rows = [self.process_slice(z)["features"] for z in self.slice_indices]
@@ -304,6 +398,7 @@ class AsymmetryPipeline:
         return {
             "patient_id": self.patient_id,
             "n_slices_processed": len(self.slice_indices),
+            "mid_angle": round(self.mid_angle, 1),
             "volume_dice": self.volume_dice(),
             "volume_features": self.volume_features(),
         }

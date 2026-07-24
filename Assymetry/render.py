@@ -30,9 +30,11 @@ STEP_DEFS = [
 
 # One-sentence explanation shown under each per-slice image in the stacked view.
 EXPLANATIONS = {
-    "midline": ("The Left-Right axis is read from the scan orientation and the slice is "
-                "shown in standard radiological view. A vertical midline is placed at the "
-                "brain's centre of mass, dividing it into left and right hemispheres."),
+    "midline": ("The mid-sagittal plane is found by maximising left-right symmetry: a tilt "
+                "angle is estimated once for the whole volume, and the slice is rotated so "
+                "that plane stands vertical (brain shown upright). A vertical midline is then "
+                "placed at the symmetry-optimal column, splitting it into left and right "
+                "hemispheres."),
     "clustering": ("Each hemisphere's FLAIR intensities are clustered independently with a "
                    "Gaussian Mixture Model (number of components chosen automatically by "
                    "BIC). Every pixel is repainted with its cluster's mean value, so tissue "
@@ -96,7 +98,7 @@ def _style(ax, title):
 
 def _full_quant(pl, s):
     """Reassemble the two quantised half-slices into a full-slice image."""
-    H, W = pl.slice_flair(s["z"]).shape
+    H, W = pl.slice_flair_corr(s["z"]).shape
     c, hw = s["midline"], s["half_w"]
     full = np.zeros((H, W))
     full[:, c - hw:c] = s["left_quant"]
@@ -116,14 +118,14 @@ def render(pipeline, z, step):
         return _skipped(pl, z)
 
     s = pl.process_slice(z)
-    fln = pl.slice_flair(z)
+    fln = pl.slice_flair_corr(z)
 
     if key == "midline":
         fig, axes = _fig(1, 1, 7, 7)
         a = axes[0][0]
         a.imshow(fln, cmap="gray")
         a.axvline(s["midline"], color="#ffe600", lw=2)
-        _style(a, f"Midline at column {s['midline']}  (z={z}, brain={s['brain_count']} px)")
+        _style(a, f"Midline col {s['midline']}  ·  tilt {pl.mid_angle:+.1f} deg  (z={z})")
         return _to_png(fig)
 
     if key == "clustering":
@@ -194,7 +196,7 @@ def render(pipeline, z, step):
         return _to_png(fig)
 
     if key == "predgt":
-        gt = pl.slice_seg(z) > 0
+        gt = pl.slice_seg_corr(z) > 0
         cand = s["candidate"]
         fig, axes = _fig(1, 1, 7.5, 7.5)
         a = axes[0][0]
@@ -214,7 +216,7 @@ def render(pipeline, z, step):
 def _skipped(pl, z):
     fig, axes = _fig(1, 1, 7, 7)
     a = axes[0][0]
-    a.imshow(pl.slice_flair(z), cmap="gray")
+    a.imshow(pl.slice_flair_corr(z), cmap="gray")
     a.text(0.5, 0.06, f"slice z={z} skipped: brain {pl.brain_count(z)} px "
                       f"< N_min_voxel ({pl.p['n_min_voxel']})",
            transform=a.transAxes, ha="center", color="#ffcc00",
@@ -232,9 +234,9 @@ def _summary(pl):
     zb = int(np.argmax(sums)) if max(sums) > 0 else pl.depth // 2
     fig, ax = _fig(1, 2, 6.5, 6)
     a = ax[0][0]
-    a.imshow(pl.slice_flair(zb), cmap="gray")
-    gt = pl.slice_seg(zb) > 0
-    cand = pl._canon(pl.predicted_volume[:, :, zb])
+    a.imshow(pl.slice_flair_corr(zb), cmap="gray")
+    gt = pl.slice_seg_corr(zb) > 0
+    cand = pl.candidate_corr(zb)
     H, W = gt.shape
     overlay = np.zeros((H, W, 4))
     overlay[gt] = (0, 1, 0, 0.35)
@@ -247,7 +249,8 @@ def _summary(pl):
     b.set_facecolor(BG)
     txt = (f"VOLUME SUMMARY\n{pl.patient_id}\n\n"
            f"Whole-tumour Dice : {vd:.3f}\n\n"
-           f"Slices processed  : {len(pl.slice_indices)} / {pl.depth}\n\n"
+           f"Slices processed  : {len(pl.slice_indices)} / {pl.depth}\n"
+           f"Mid-sagittal tilt : {pl.mid_angle:+.1f} deg\n\n"
            f"Mean AD : {vf['AD']:.3f}\n"
            f"Mean MD : {vf['MD']:.3f}\n"
            f"Mean BC : {vf['BC']:.3f}")
