@@ -83,7 +83,9 @@ async function updateDice(idx) {
   el.volDice.classList.add("computing");
   try {
     const s = await (await fetch(`/asym/api/summary/${idx}`)).json();
-    const val = (typeof s.volume_dice === "number") ? s.volume_dice.toFixed(3) : "n/a";
+    const whole = (typeof s.volume_dice === "number") ? s.volume_dice.toFixed(3) : "n/a";
+    const active = (typeof s.active_volume_dice === "number") ? s.active_volume_dice.toFixed(3) : "n/a";
+    const val = `${whole} | ${active}`;
     A.diceCache[idx] = val;
     if (A.patientIdx === idx) {           // ignore if the user already switched patient
       el.volDice.textContent = val;

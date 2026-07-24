@@ -64,7 +64,7 @@
       <section class="mode-panel hidden" id="asymPanel">
         <header>
           <h2>Asymmetry pipeline</h2>
-          <p class="sub">Per-hemisphere GMM &middot; flip &amp; subtract &middot; Dice vs whole tumour (FLAIR is pre-skull-stripped)</p>
+          <p class="sub">Median filtering &middot; symmetry scoring (AD/MD/BC) &middot; whole/active/necrotic segmentation &middot; volume estimation (FLAIR already skull-stripped)</p>
         </header>
 
         <section class="controls">
@@ -84,7 +84,7 @@
 
         <div class="asym-dicebar" id="asymDiceBar">
           <div class="dice-main">
-            <span class="dice-label">Whole-tumour Dice (volume)</span>
+            <span class="dice-label">Volume Dice (whole | active)</span>
             <span class="dice-value" id="asymVolDice">&hellip;</span>
           </div>
           <div class="dice-slice" id="asymSliceInfo">&mdash;</div>

@@ -1,27 +1,17 @@
-"""Asymmetry pipeline core (Stages B-D of PIPELINE.md).
+"""Automatic brain tumor detection and volume estimation pipeline.
 
-BraTS volumes arrive **already skull-stripped**, so there is no skull-stripping stage:
-the brain region is simply the nonzero FLAIR voxels, and FLAIR is used directly.
+This module follows the methodology of:
+"Automatic Brain Tumor Detection and Volume Estimation in Multimodal MRI Scans
+via a Symmetry Analysis" (Symmetry, 2023), adapted to BraTS where skull stripping
+is skipped because inputs are already skull-stripped.
 
-Stage B  Per-slice asymmetry: midline, per-hemisphere GMM clustering (mean-colour
-         quantisation), flip, subtract -> candidate whole-tumour mask.
-Stage C  Symmetry features AD / MD / BC.
-Stage D  Dice of the stacked prediction vs. ground-truth whole tumour (seg > 0).
-
-Design decisions (defaults, see PIPELINE.md open questions):
-  Q3 midline                 : mid-sagittal axis found by symmetry maximisation -- a tilt
-                               angle estimated once per volume (max left-right intensity
-                               symmetry) + a per-slice symmetry-optimal offset column. Each
-                               slice is rotated into a tilt-corrected frame where the axis
-                               is a vertical line; the candidate mask is rotated back for
-                               scoring.
-  Q4 skipped slices          : reported, rendered as a "skipped" frame by the UI
-  Q5 difference threshold    : Otsu on the |difference| map
-  Q6 features                : per slice AND aggregated per volume
-  Q7 persist outputs         : CSV written under Assymetry/outputs/<patient>/
-  Q8 volume Dice denominator : all slices (skipped slices predict empty)
-
-GMM component count is auto-selected per hemisphere by BIC over K = 2..K_max.
+Stages implemented per slice:
+1) Median filtering (FLAIR + T1C)
+2) Symmetry analysis on FLAIR (AD, MD, BC -> asymmetry score)
+3) Whole tumor segmentation on FLAIR (FCM + connected components + opening)
+4) Active core segmentation on T1C (FCM + opening + whole-mask ROI)
+5) Necrotic core estimation (closing(active) - active)
+6) Area and volume estimation
 """
 import os
 import glob
@@ -29,22 +19,30 @@ import glob
 import numpy as np
 import nibabel as nib
 from scipy import ndimage
-from sklearn.mixture import GaussianMixture
-from skimage.filters import threshold_otsu
+from skimage.morphology import opening, closing, disk
 
 # ---------------------------------------------------------------------------
 # Parameters
 # ---------------------------------------------------------------------------
 PARAMS = {
-    "n_min_voxel": 500,   # min brain voxels for a slice to be processed
-    "k_max": 4,           # max GMM components per hemisphere (auto-select 2..k_max by BIC)
+    "n_min_voxel": 500,
+    "fcm_clusters": 3,
+    "fcm_m": 2.0,
+    "fcm_max_iter": 100,
+    "fcm_tol": 1e-5,
     "feat_bins": 64,      # bins for the Bhattacharyya coefficient
-    "angle_max": 12.0,    # mid-sagittal axis search: +/- degrees
-    "angle_step": 1.0,    # angle search step (degrees)
-    "offset_win": 15,     # midline column search half-window (pixels)
+    "md_threshold": 0.02,
+    "bc_threshold": 0.02,
+    "ad_threshold": 600.0,
+    "whole_open_radius": 2,
+    "active_open_radius": 1,
+    "active_roi_quantile": 0.70,
+    "active_min_component": 20,
+    "necrotic_close_radius": 2,
+    "min_component": 40,
 }
 
-MODALITY_SUFFIX = {"FLAIR": "-t2f"}
+MODALITY_SUFFIX = {"FLAIR": "-t2f", "T1C": "-t1c"}
 
 
 def _find_modalities(patient_dir):
@@ -60,31 +58,34 @@ def _find_modalities(patient_dir):
     return out
 
 
-def _fit_gmm(vals, k_max):
-    """Fit a GMM on 1-D intensities, choosing K in 2..k_max by lowest BIC.
+def _fcm_1d(values, n_clusters=3, m=2.0, max_iter=100, tol=1e-5):
+    values = np.asarray(values, dtype=np.float64).ravel()
+    n = values.size
+    if n == 0:
+        return np.array([], dtype=int), np.array([], dtype=np.float64), np.empty((0, 0), dtype=np.float64)
 
-    Returns (labels, means) aligned with ``vals``. Falls back to a single cluster
-    when there is too little data.
-    """
-    x = np.asarray(vals, dtype=np.float64).reshape(-1, 1)
-    n_unique = len(np.unique(x))
-    if x.shape[0] < 10 or n_unique < 2:
-        return np.zeros(x.shape[0], dtype=int), np.array([float(x.mean()) if x.size else 0.0])
+    n_clusters = int(max(2, min(n_clusters, max(2, n))))
+    quant = np.linspace(5, 95, n_clusters)
+    centers = np.percentile(values, quant)
+    eps = 1e-12
 
-    best = None
-    for k in range(2, min(k_max, n_unique) + 1):
-        try:
-            g = GaussianMixture(n_components=k, covariance_type="full",
-                                random_state=0, max_iter=100, reg_covar=1e-6).fit(x)
-        except Exception:
-            continue
-        bic = g.bic(x)
-        if best is None or bic < best[0]:
-            best = (bic, g)
-    if best is None:
-        return np.zeros(x.shape[0], dtype=int), np.array([float(x.mean())])
-    g = best[1]
-    return g.predict(x), g.means_.ravel()
+    for _ in range(max_iter):
+        dist = np.abs(values[:, None] - centers[None, :]) + eps
+        power = 2.0 / (m - 1.0)
+        inv = dist ** (-power)
+        u = inv / np.maximum(inv.sum(axis=1, keepdims=True), eps)
+
+        um = u ** m
+        denom = np.maximum(um.sum(axis=0), eps)
+        new_centers = (um * values[:, None]).sum(axis=0) / denom
+
+        if np.max(np.abs(new_centers - centers)) < tol:
+            centers = new_centers
+            break
+        centers = new_centers
+
+    labels = np.argmax(u, axis=1).astype(int)
+    return labels, centers.astype(np.float64), u
 
 
 def _bhattacharyya(a, b, bins, rng):
@@ -96,7 +97,7 @@ def _bhattacharyya(a, b, bins, rng):
 
 
 class AsymmetryPipeline:
-    """Lazy, cached pipeline for one patient directory."""
+    """Lazy, cached paper-style pipeline for one patient directory."""
 
     def __init__(self, patient_dir, params=None):
         self.patient_dir = patient_dir
@@ -123,6 +124,10 @@ class AsymmetryPipeline:
         return self._vol("FLAIR")
 
     @property
+    def t1c(self):
+        return self._vol("T1C")
+
+    @property
     def seg(self):
         return self._vol("SEG")
 
@@ -139,13 +144,32 @@ class AsymmetryPipeline:
         return self._cache["brain_mask"]
 
     @property
-    def flair_stripped(self):
-        """FLAIR normalised to [0, 1] over the brain."""
-        if "flair_stripped" not in self._cache:
+    def flair_norm(self):
+        if "flair_norm" not in self._cache:
             fl = self.flair
             hi = float(fl.max()) or 1.0
-            self._cache["flair_stripped"] = (fl / hi).astype(np.float32)
-        return self._cache["flair_stripped"]
+            self._cache["flair_norm"] = (fl / hi).astype(np.float32)
+        return self._cache["flair_norm"]
+
+    @property
+    def t1c_norm(self):
+        if "t1c_norm" not in self._cache:
+            im = self.t1c
+            hi = float(im.max()) or 1.0
+            self._cache["t1c_norm"] = (im / hi).astype(np.float32)
+        return self._cache["t1c_norm"]
+
+    @property
+    def flair_med(self):
+        if "flair_med" not in self._cache:
+            self._cache["flair_med"] = ndimage.median_filter(self.flair_norm, size=(3, 3, 1)).astype(np.float32)
+        return self._cache["flair_med"]
+
+    @property
+    def t1c_med(self):
+        if "t1c_med" not in self._cache:
+            self._cache["t1c_med"] = ndimage.median_filter(self.t1c_norm, size=(3, 3, 1)).astype(np.float32)
+        return self._cache["t1c_med"]
 
     # -- orientation: put the Left-Right (mid-sagittal) axis on the columns ---
     @property
@@ -171,7 +195,16 @@ class AsymmetryPipeline:
         return sl2d.T if self.lr_is_rows else sl2d
 
     def slice_flair(self, z):
-        return self._canon(self.flair_stripped[:, :, z])
+        return self._canon(self.flair_norm[:, :, z])
+
+    def slice_t1c(self, z):
+        return self._canon(self.t1c_norm[:, :, z])
+
+    def slice_flair_med(self, z):
+        return self._canon(self.flair_med[:, :, z])
+
+    def slice_t1c_med(self, z):
+        return self._canon(self.t1c_med[:, :, z])
 
     def slice_brain(self, z):
         return self._canon(self.brain_mask[:, :, z])
@@ -179,72 +212,12 @@ class AsymmetryPipeline:
     def slice_seg(self, z):
         return self._canon(self.seg[:, :, z])
 
-    # -- mid-sagittal axis: tilt angle (per volume) + corrected frame ---------
-    @staticmethod
-    def _best_mirror_ssd(img, brain, win):
-        """Min mean-squared reflection error over a small offset window (vertical axis)."""
-        W = img.shape[1]
+    def _midline(self, brain):
         if brain.sum() == 0:
-            return np.inf
-        c0 = int(round(brain.sum(0) @ np.arange(W) / max(brain.sum(), 1)))
-        best = np.inf
-        for c in range(max(c0 - win, 5), min(c0 + win + 1, W - 5)):
-            hw = min(c, W - c)
-            diff = img[:, c - hw:c] - img[:, c:c + hw][:, ::-1]
-            ov = brain[:, c - hw:c] & brain[:, c:c + hw][:, ::-1]
-            if ov.any():
-                best = min(best, float((diff[ov] ** 2).mean()))
-        return best
-
-    @property
-    def mid_angle(self):
-        """Tilt angle (degrees) that makes the mid-sagittal plane vertical.
-
-        Estimated ONCE per volume by rotating the densest-brain slices over a range of
-        angles and picking the one with the most left-right intensity symmetry.
-        """
-        if "mid_angle" not in self._cache:
-            self._cache["mid_angle"] = self._estimate_mid_angle()
-        return self._cache["mid_angle"]
-
-    def _estimate_mid_angle(self):
-        idx = self.slice_indices
-        if not idx:
-            return 0.0
-        reps = [z for _, z in sorted(((self.brain_count(z), z) for z in idx),
-                                     reverse=True)[:12]]
-        slices = [self.slice_flair(z) for z in reps]
-        win = self.p["offset_win"]
-        amax, astep = self.p["angle_max"], self.p["angle_step"]
-        best = (0.0, np.inf)
-        for th in np.arange(-amax, amax + 1e-6, astep):
-            tot, n = 0.0, 0
-            for sl in slices:
-                r = sl if abs(th) < 1e-6 else ndimage.rotate(sl, th, reshape=False, order=1)
-                rb = r > 0.01
-                s = self._best_mirror_ssd(r, rb, win)
-                if np.isfinite(s):
-                    tot += s
-                    n += 1
-            if n and tot / n < best[1]:
-                best = (float(th), tot / n)
-        return best[0]
-
-    def _rot(self, sl, angle, order):
-        if abs(angle) < 1e-6:
-            return sl
-        return ndimage.rotate(sl, angle, reshape=False, order=order,
-                              mode="constant", cval=0)
-
-    def slice_flair_corr(self, z):
-        """Canonical FLAIR slice rotated so the mid-sagittal axis is vertical."""
-        return self._rot(self.slice_flair(z), self.mid_angle, 1)
-
-    def slice_brain_corr(self, z):
-        return self._rot(self.slice_brain(z).astype(np.float32), self.mid_angle, 0) > 0.5
-
-    def slice_seg_corr(self, z):
-        return self._rot(self.slice_seg(z), self.mid_angle, 0)
+            return brain.shape[1] // 2
+        cols = np.arange(brain.shape[1])
+        c = int(round((brain.sum(axis=0) @ cols) / max(brain.sum(), 1)))
+        return int(np.clip(c, 1, brain.shape[1] - 1))
 
     # -- slice bookkeeping -------------------------------------------------
     def brain_count(self, z):
@@ -274,113 +247,247 @@ class AsymmetryPipeline:
         sums = [int((seg[:, :, z] > 0).sum()) for z in idx]
         return int(np.argmax(sums)) if max(sums) > 0 else len(idx) // 2
 
-    # -- Stage B + C (per slice) ------------------------------------------
+    def _binary_fcm_mask(self, image, brain):
+        mask = np.zeros(image.shape, dtype=bool)
+        idx = np.where(brain)
+        vals = image[idx]
+        if vals.size < 3:
+            return mask, np.array([], dtype=int), np.array([], dtype=np.float64)
+
+        labels, centers, _ = _fcm_1d(
+            vals,
+            n_clusters=self.p["fcm_clusters"],
+            m=self.p["fcm_m"],
+            max_iter=self.p["fcm_max_iter"],
+            tol=self.p["fcm_tol"],
+        )
+        if centers.size == 0:
+            return mask, labels, centers
+
+        bright = int(np.argmax(centers))
+        chosen = labels == bright
+        mask[idx] = chosen
+        return mask, labels, centers
+
+    def _whole_tumor_from_flair(self, flair_med, brain):
+
+        idx = np.where(brain)
+        vals = flair_med[idx]
+        if vals.size < 3:
+            return np.zeros_like(brain, dtype=bool), np.zeros_like(brain, dtype=bool), np.array([])
+
+        labels, centers, _ = _fcm_1d(
+            vals,
+            n_clusters=self.p["fcm_clusters"],
+            m=self.p["fcm_m"],
+            max_iter=self.p["fcm_max_iter"],
+            tol=self.p["fcm_tol"],
+        )
+
+        cluster_map = np.full(flair_med.shape, -1, dtype=int)
+        cluster_map[idx] = labels
+
+        min_component = int(self.p["min_component"])
+        brightest = int(np.argmax(centers)) if centers.size else -1
+        bright_mask = (cluster_map == brightest) if brightest >= 0 else np.zeros_like(brain, dtype=bool)
+
+        labeled, nlab = ndimage.label(bright_mask)
+        best_cc = None
+        best_area = -1
+        for k in range(1, nlab + 1):
+            cc = (labeled == k)
+            area = int(cc.sum())
+            if area >= min_component and area > best_area:
+                best_area = area
+                best_cc = cc
+
+        raw = best_cc if best_cc is not None else bright_mask
+        opened = opening(raw, footprint=disk(self.p["whole_open_radius"]))
+        if opened.sum() == 0 and raw.sum() > 0:
+            opened = raw
+        return raw.astype(bool), opened.astype(bool), centers
+
+    def _active_and_necrotic(self, t1c_med, brain, whole_mask):
+        active_bin, labels, centers = self._binary_fcm_mask(t1c_med, brain)
+        active = np.zeros_like(whole_mask, dtype=bool)
+        if whole_mask.sum() > 0:
+            roi_vals = t1c_med[whole_mask]
+            q = float(self.p["active_roi_quantile"])
+            q = float(np.clip(q, 0.05, 0.95))
+            thr = float(np.quantile(roi_vals, q))
+
+            active_raw = whole_mask & (t1c_med >= thr)
+            active_open = opening(active_raw, footprint=disk(self.p["active_open_radius"]))
+
+            min_cc = int(self.p["active_min_component"])
+            labeled, nlab = ndimage.label(active_open)
+            kept = np.zeros_like(active_open, dtype=bool)
+            for k in range(1, nlab + 1):
+                cc = (labeled == k)
+                if int(cc.sum()) >= min_cc:
+                    kept |= cc
+            if kept.sum() == 0 and active_open.sum() > 0:
+                kept = active_open
+            active = kept.astype(bool)
+
+        closed = closing(active, footprint=disk(self.p["necrotic_close_radius"]))
+        necrotic = (closed & (~active) & whole_mask).astype(bool)
+        return active_bin.astype(bool), active.astype(bool), necrotic.astype(bool), centers
+
+    # -- Stages 1-5 (per slice) -------------------------------------------
     def process_slice(self, z):
         if z in self._slice_cache:
             return self._slice_cache[z]
 
-        fln = self.slice_flair_corr(z)   # tilt-corrected: axis is a vertical line
-        bm = self.slice_brain_corr(z)
-        H, W = fln.shape
+        flair_raw = self.slice_flair(z)
+        flair_med = self.slice_flair_med(z)
+        t1c_raw = self.slice_t1c(z)
+        t1c_med = self.slice_t1c_med(z)
+        bm = self.slice_brain(z)
 
-        # Q3 midline: symmetry-optimal column near the brain centroid (tilt already fixed)
-        if bm.sum() == 0:
-            c = W // 2
-        else:
-            c0 = int(round(bm.sum(axis=0) @ np.arange(W) / max(bm.sum(), 1)))
-            win = self.p["offset_win"]
-            best = (c0, -1.0)
-            for cc in range(max(c0 - win, 1), min(c0 + win + 1, W - 1)):
-                hw = min(cc, W - cc)
-                lft, rgt = bm[:, cc - hw:cc], bm[:, cc:cc + hw][:, ::-1]
-                inter = np.logical_and(lft, rgt).sum()
-                union = np.logical_or(lft, rgt).sum()
-                iou = inter / union if union else 0.0
-                if iou > best[1]:
-                    best = (cc, iou)
-            c = best[0]
-        c = min(max(c, 1), W - 1)
+        H, W = flair_med.shape
+        c = self._midline(bm)
         half_w = min(c, W - c)
 
-        left_i = fln[:, c - half_w:c]
-        right_i = fln[:, c:c + half_w]
+        left_i = flair_med[:, c - half_w:c]
+        right_i = flair_med[:, c:c + half_w]
         left_b = bm[:, c - half_w:c]
         right_b = bm[:, c:c + half_w]
 
-        # per-hemisphere GMM clustering -> mean-colour quantised image
-        lq, l_labels, l_means = self._quantise(left_i, left_b)
-        rq, r_labels, r_means = self._quantise(right_i, right_b)
+        # symmetry-binary map via FCM on full FLAIR slice
+        bright_full, _, flair_centers = self._binary_fcm_mask(flair_med, bm)
+        left_bin = bright_full[:, c - half_w:c]
+        right_bin = bright_full[:, c:c + half_w]
 
-        right_flip_q = rq[:, ::-1]
-        right_flip_b = right_b[:, ::-1]
-        overlap = left_b & right_flip_b
+        ad = float(abs(int(left_bin.sum()) - int(right_bin.sum())))
 
-        d = (lq - right_flip_q) * overlap
-        absd = np.abs(d)
-        pos = absd[overlap & (absd > 0)]
-        if pos.size >= 2 and pos.max() > pos.min():
-            thr = float(threshold_otsu(pos))
-        else:
-            thr = float(pos.max()) + 1.0 if pos.size else 1.0
-
-        cand_left = overlap & (d > thr)      # left hemisphere brighter -> tumour left
-        cand_right = overlap & (-d > thr)    # mirrored right brighter  -> tumour right
-
-        candidate = np.zeros((H, W), dtype=bool)
-        candidate[:, c - half_w:c] |= cand_left
-        candidate[:, c:c + half_w] |= cand_right[:, ::-1]
-
-        # -- Stage C features --------------------------------------------
         lv = left_i[left_b]
         rv = right_i[right_b]
         md = float(abs(lv.mean() - rv.mean())) if lv.size and rv.size else 0.0
         bc = _bhattacharyya(lv, rv, self.p["feat_bins"], (0.0, 1.0)) if lv.size and rv.size else 1.0
-        # AD: area of the brightest GMM cluster on each side (fraction of hemisphere)
-        la = (l_labels == int(np.argmax(l_means))).mean() if l_labels.size else 0.0
-        ra = (r_labels == int(np.argmax(r_means))).mean() if r_labels.size else 0.0
-        ad = float(abs(la - ra))
+        bc_asym = float(1.0 - bc)
 
-        gt = self.slice_seg_corr(z) > 0
-        dice = _dice(candidate, gt)
+        l1 = 1 if md > self.p["md_threshold"] else -1
+        l2 = 1 if bc_asym > self.p["bc_threshold"] else -1
+        l3 = 1 if ad > self.p["ad_threshold"] else -1
+        score = int(l1 + l2 + l3)
+        detected = bool(score > 0)
+
+        whole_raw, whole_mask, whole_centers = self._whole_tumor_from_flair(flair_med, bm)
+        active_bin, active_mask, necrotic_mask, t1c_centers = self._active_and_necrotic(t1c_med, bm, whole_mask)
+
+        seg2d = self.slice_seg(z)
+        gt_whole = seg2d > 0
+        gt_active = np.isin(seg2d, [1, 3, 4])
+
+        whole_dice = _dice(whole_mask, gt_whole)
+        active_dice = _dice(active_mask, gt_active)
+
+        area_px_whole = int(whole_mask.sum())
+        area_px_active = int(active_mask.sum())
+        area_px_necrotic = int(necrotic_mask.sum())
+
+        area_mm2_whole = area_px_whole * self.pixel_area_mm2
+        area_mm2_active = area_px_active * self.pixel_area_mm2
+        area_mm2_necrotic = area_px_necrotic * self.pixel_area_mm2
 
         out = {
-            "z": z, "midline": c, "half_w": half_w,
-            "left_quant": lq, "right_quant": rq, "right_flip_quant": right_flip_q,
-            "left_brain": left_b, "right_brain": right_b, "overlap": overlap,
-            "diff": d, "thr": thr, "candidate": candidate,
-            "features": {"AD": ad, "MD": md, "BC": bc},
-            "slice_dice": dice, "brain_count": int(bm.sum()),
+            "z": z,
+            "midline": c,
+            "half_w": half_w,
+            "brain_count": int(bm.sum()),
+            "flair_raw": flair_raw,
+            "flair_med": flair_med,
+            "t1c_raw": t1c_raw,
+            "t1c_med": t1c_med,
+            "brain": bm,
+            "left_bin": left_bin,
+            "right_bin": right_bin,
+            "symmetry_bright": bright_full,
+            "features": {
+                "AD": ad,
+                "MD": md,
+                "BC": float(bc),
+                "BC_asym": bc_asym,
+            },
+            "labels": {"L1": l1, "L2": l2, "L3": l3},
+            "thresholds": {
+                "MD": float(self.p["md_threshold"]),
+                "BC_asym": float(self.p["bc_threshold"]),
+                "AD": float(self.p["ad_threshold"]),
+            },
+            "asymmetry_score": score,
+            "tumor_detected": detected,
+            "fcm_centers": {
+                "flair": flair_centers.tolist() if isinstance(flair_centers, np.ndarray) else [],
+                "whole": whole_centers.tolist() if isinstance(whole_centers, np.ndarray) else [],
+                "t1c": t1c_centers.tolist() if isinstance(t1c_centers, np.ndarray) else [],
+            },
+            "whole_raw": whole_raw,
+            "whole_mask": whole_mask,
+            "active_bin": active_bin,
+            "active_mask": active_mask,
+            "necrotic_mask": necrotic_mask,
+            "gt_whole": gt_whole,
+            "gt_active": gt_active,
+            "slice_dice_whole": whole_dice,
+            "slice_dice_active": active_dice,
+            "area_px": {
+                "whole": area_px_whole,
+                "active": area_px_active,
+                "necrotic": area_px_necrotic,
+            },
+            "area_mm2": {
+                "whole": area_mm2_whole,
+                "active": area_mm2_active,
+                "necrotic": area_mm2_necrotic,
+            },
         }
         self._slice_cache[z] = out
         return out
 
-    def _quantise(self, intensities, brain):
-        """Replace each brain pixel by its GMM cluster mean; background -> 0."""
-        q = np.zeros_like(intensities)
-        idx = np.where(brain)
-        vals = intensities[idx]
-        if vals.size == 0:
-            return q, np.array([], dtype=int), np.array([0.0])
-        labels, means = _fit_gmm(vals, self.p["k_max"])
-        q[idx] = means[labels]
-        return q, labels, means
+    @property
+    def pixel_area_mm2(self):
+        if "pixel_area_mm2" not in self._cache:
+            img = nib.load(self.paths["FLAIR"])
+            zooms = img.header.get_zooms()
+            dx = float(zooms[0]) if len(zooms) > 0 else 1.0
+            dy = float(zooms[1]) if len(zooms) > 1 else 1.0
+            self._cache["pixel_area_mm2"] = dx * dy
+        return self._cache["pixel_area_mm2"]
 
-    # -- Stage D -----------------------------------------------------------
-    def candidate_corr(self, z):
-        """Candidate tumour mask in the tilt-corrected frame (empty for skipped slices)."""
+    @property
+    def slice_step_mm(self):
+        if "slice_step_mm" not in self._cache:
+            img = nib.load(self.paths["FLAIR"])
+            zooms = img.header.get_zooms()
+            dz = float(zooms[2]) if len(zooms) > 2 else 1.0
+            self._cache["slice_step_mm"] = dz
+        return self._cache["slice_step_mm"]
+
+    # -- Stage 6 -----------------------------------------------------------
+    def whole_mask(self, z):
         if self.is_processed(z):
-            return self.process_slice(z)["candidate"]
-        return np.zeros(self.slice_seg_corr(z).shape, dtype=bool)
+            return self.process_slice(z)["whole_mask"]
+        return np.zeros(self.slice_seg(z).shape, dtype=bool)
+
+    def active_mask(self, z):
+        if self.is_processed(z):
+            return self.process_slice(z)["active_mask"]
+        return np.zeros(self.slice_seg(z).shape, dtype=bool)
+
+    def necrotic_mask(self, z):
+        if self.is_processed(z):
+            return self.process_slice(z)["necrotic_mask"]
+        return np.zeros(self.slice_seg(z).shape, dtype=bool)
 
     def volume_dice(self):
-        """Dice over all slices, computed in the tilt-corrected frame (Dice is invariant
-        to the shared rotation/transpose, so this equals the original-space value)."""
         if "vdice" not in self._cache:
             procset = set(self.slice_indices)
             inter = pa = ga = 0
             for z in range(self.depth):
-                gt = self.slice_seg_corr(z) > 0
-                cand = self.process_slice(z)["candidate"] if z in procset \
+                gt = self.slice_seg(z) > 0
+                cand = self.process_slice(z)["whole_mask"] if z in procset \
                     else np.zeros_like(gt)
                 inter += int(np.logical_and(cand, gt).sum())
                 pa += int(cand.sum())
@@ -388,30 +495,109 @@ class AsymmetryPipeline:
             self._cache["vdice"] = 1.0 if (pa + ga) == 0 else float(2.0 * inter / (pa + ga))
         return self._cache["vdice"]
 
+    def active_volume_dice(self):
+        if "active_vdice" not in self._cache:
+            procset = set(self.slice_indices)
+            inter = pa = ga = 0
+            for z in range(self.depth):
+                gt = np.isin(self.slice_seg(z), [1, 3, 4])
+                pred = self.process_slice(z)["active_mask"] if z in procset else np.zeros_like(gt)
+                inter += int(np.logical_and(pred, gt).sum())
+                pa += int(pred.sum())
+                ga += int(gt.sum())
+            self._cache["active_vdice"] = 1.0 if (pa + ga) == 0 else float(2.0 * inter / (pa + ga))
+        return self._cache["active_vdice"]
+
     def volume_features(self):
         rows = [self.process_slice(z)["features"] for z in self.slice_indices]
         if not rows:
-            return {"AD": 0.0, "MD": 0.0, "BC": 0.0}
-        return {k: float(np.mean([r[k] for r in rows])) for k in ("AD", "MD", "BC")}
+            return {"AD": 0.0, "MD": 0.0, "BC": 0.0, "BC_asym": 0.0}
+        return {k: float(np.mean([r[k] for r in rows])) for k in ("AD", "MD", "BC", "BC_asym")}
+
+    def detection_metrics(self):
+        tp = tn = fp = fn = 0
+        for z in self.slice_indices:
+            s = self.process_slice(z)
+            pred = bool(s["tumor_detected"])
+            gt = bool((s["gt_whole"]).any())
+            if pred and gt:
+                tp += 1
+            elif (not pred) and (not gt):
+                tn += 1
+            elif pred and (not gt):
+                fp += 1
+            else:
+                fn += 1
+        total = tp + tn + fp + fn
+        acc = (tp + tn) / total if total else 1.0
+        sens = tp / (tp + fn) if (tp + fn) else 1.0
+        spec = tn / (tn + fp) if (tn + fp) else 1.0
+        return {
+            "tp": tp,
+            "tn": tn,
+            "fp": fp,
+            "fn": fn,
+            "accuracy": float(acc),
+            "sensitivity": float(sens),
+            "specificity": float(spec),
+        }
+
+    def volume_estimates(self):
+        active_area_sum = 0.0
+        gt_active_area_sum = 0.0
+        whole_area_sum = 0.0
+        for z in self.slice_indices:
+            s = self.process_slice(z)
+            active_area_sum += s["area_mm2"]["active"]
+            whole_area_sum += s["area_mm2"]["whole"]
+            gt_active_area_sum += float(np.isin(self.slice_seg(z), [1, 3, 4]).sum()) * self.pixel_area_mm2
+
+        step = self.slice_step_mm
+        return {
+            "whole_volume_mm3": float(whole_area_sum * step),
+            "active_volume_mm3": float(active_area_sum * step),
+            "gt_active_volume_mm3": float(gt_active_area_sum * step),
+            "slice_step_mm": float(step),
+            "pixel_area_mm2": float(self.pixel_area_mm2),
+        }
 
     def summary(self):
+        det = self.detection_metrics()
+        vol = self.volume_estimates()
         return {
             "patient_id": self.patient_id,
             "n_slices_processed": len(self.slice_indices),
-            "mid_angle": round(self.mid_angle, 1),
             "volume_dice": self.volume_dice(),
+            "active_volume_dice": self.active_volume_dice(),
             "volume_features": self.volume_features(),
+            "detection": det,
+            "volume_estimation": vol,
+            "thresholds": {
+                "MD": float(self.p["md_threshold"]),
+                "BC_asym": float(self.p["bc_threshold"]),
+                "AD": float(self.p["ad_threshold"]),
+            },
         }
 
     def feature_table(self):
-        """Per-slice AD/MD/BC/Dice for every processed slice."""
+        """Per-slice paper-stage outputs for every processed slice."""
         rows = []
         for z in self.slice_indices:
             s = self.process_slice(z)
             rows.append({
-                "z": z, "brain_voxels": s["brain_count"],
-                "AD": s["features"]["AD"], "MD": s["features"]["MD"],
-                "BC": s["features"]["BC"], "dice": s["slice_dice"],
+                "z": z,
+                "brain_voxels": s["brain_count"],
+                "AD": s["features"]["AD"],
+                "MD": s["features"]["MD"],
+                "BC": s["features"]["BC"],
+                "BC_asym": s["features"]["BC_asym"],
+                "score": s["asymmetry_score"],
+                "detected": int(s["tumor_detected"]),
+                "whole_dice": s["slice_dice_whole"],
+                "active_dice": s["slice_dice_active"],
+                "area_mm2_whole": s["area_mm2"]["whole"],
+                "area_mm2_active": s["area_mm2"]["active"],
+                "area_mm2_necrotic": s["area_mm2"]["necrotic"],
             })
         return rows
 
@@ -421,12 +607,18 @@ class AsymmetryPipeline:
         path = os.path.join(out_dir, "features.csv")
         rows = self.feature_table()
         with open(path, "w", encoding="utf-8") as f:
-            f.write("z,brain_voxels,AD,MD,BC,dice\n")
+            f.write("z,brain_voxels,AD,MD,BC,BC_asym,score,detected,whole_dice,active_dice,area_mm2_whole,area_mm2_active,area_mm2_necrotic\n")
             for r in rows:
-                f.write(f"{r['z']},{r['brain_voxels']},{r['AD']:.6f},"
-                        f"{r['MD']:.6f},{r['BC']:.6f},{r['dice']:.6f}\n")
-            vd = self.volume_dice()
-            f.write(f"volume,,,,,{vd:.6f}\n")
+                f.write(
+                    f"{r['z']},{r['brain_voxels']},{r['AD']:.6f},{r['MD']:.6f},{r['BC']:.6f},"
+                    f"{r['BC_asym']:.6f},{r['score']},{r['detected']},{r['whole_dice']:.6f},"
+                    f"{r['active_dice']:.6f},{r['area_mm2_whole']:.6f},{r['area_mm2_active']:.6f},"
+                    f"{r['area_mm2_necrotic']:.6f}\n"
+                )
+            summ = self.summary()
+            f.write(
+                f"volume,,,,,,,,{summ['volume_dice']:.6f},{summ['active_volume_dice']:.6f},,,\n"
+            )
         return path
 
 
