@@ -87,26 +87,24 @@ and aggregated per volume:
 
 ## 3. Web UI (in `Frontend/`, backed by `Assymetry/`)
 
-The `Frontend/` viewer has a **left sidebar** with an **"Asymmetry"** entry that opens the
-step-through viewer; it calls the `/asym` blueprint served from `Assymetry/routes.py`.
+The `Frontend/` viewer has a **left sidebar** with an **"Asymmetry"** entry; it calls the
+`/asym` blueprint served from `Assymetry/routes.py`.
 
-**Interaction model — "Next" walks the whole process:**
-- A big **Next** button advances **one step at a time** through the stages, rendering the
-  image for that step so the process is visible incrementally. As-built step order
-  (defined in `render.py:STEP_DEFS`; ids adapt automatically if steps are inserted):
-  1. Current slice: midline drawn
+**Interaction model — one page per slice (no Next button):**
+- A permanent, sticky bar at the top shows the **whole-tumour (volume) Dice**, computed
+  once per patient (cached) and updated when the patient changes.
+- Below it, **all per-slice step images are stacked vertically**, one after another, each
+  with a short **explanation caption**. The per-slice steps (from `render.py:STEP_DEFS`,
+  captions in `render.py:EXPLANATIONS`) are:
+  1. Midline
   2. Per-hemisphere GMM clustering (mean-color quantized)
-  3. Flipped-hemisphere overlay + |difference|
+  3. Flip & overlay hemispheres + |difference|
   4. Difference map + candidate mask
-  5. Feature values (AD / MD / BC) for the slice
+  5. Symmetry features (AD / MD / BC)
   6. Prediction vs. GT overlay + slice Dice
-  7. Volume summary (whole-tumour Dice + mean features)
-  - Steps 1-6 repeat per qualifying slice; after the last per-slice step, **Next** moves to
-    the next qualifying slice and resumes at the midline step; after the last slice it shows
-    step 7, the **volume Dice** summary.
-- **Skip slice** button → jump straight to the next qualifying slice.
-- **Skip patient** button → jump to the next patient.
-- Patient selector (dropdown) for the two sample patients.
+- **Prev slice / Next slice** buttons move through the qualifying slices (the page opens on
+  the slice with the most tumour); **Skip patient** switches patient; a **Patient** dropdown
+  selects directly. The volume summary render (step 7) still exists and backs the Dice bar.
 
 Rendering follows the existing app's approach: **server-rendered matplotlib PNGs**, so it
 matches the current look and needs no JS charting.
@@ -139,8 +137,16 @@ _UI = added into the `Frontend/` viewer. Clusterer = GMM with auto-K by BIC (K =
 2..`k_max`, default 4). **No skull-stripping stage** — see the note at the top._
 
 1. **Brain region:** `FLAIR > 0` (BraTS is pre-skull-stripped); FLAIR normalised to [0,1].
-2. **Midline:** **estimated per slice** = centroid column of the brain mask (fallback =
-   geometric centre). Halves cropped to a symmetric width around it before flipping.
+2. **Midline & orientation:** the anatomical **Left-Right axis is detected from the NIfTI
+   affine** (`aff2axcodes`; BraTS sample is `('L','A','S')`, so L-R = axis 0 = rows). Each
+   slice is transposed into a **canonical frame where L-R lies on the columns**, so the
+   mid-sagittal split is a vertical line in the conventional radiological orientation. The
+   midline is then the **centroid column of the brain mask** (fallback = geometric centre);
+   halves are cropped to a symmetric width around it before flipping. The prediction is
+   transposed back to the original frame before Dice scoring.
+   _(Fix 2026-07-24: the earlier version always split columns = Anterior-Posterior, mirroring
+   front↔back; correcting to the true L-R axis raised sample Dice, e.g. patient 46
+   0.235 → 0.337.)_
 3. **Skipped slices:** **reported and rendered as a "skipped" frame** when stepping.
 4. **Difference-map threshold:** **Otsu** on the `|difference|` values.
 5. **Features:** computed **per slice and aggregated per volume** (mean).

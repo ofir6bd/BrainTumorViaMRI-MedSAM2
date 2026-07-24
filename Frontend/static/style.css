@@ -85,29 +85,65 @@ header .sub {
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.asym-progress {
+/* permanent, sticky whole-tumour Dice bar */
+.asym-dicebar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 24px 0;
+  justify-content: space-between;
+  gap: 16px;
   flex-wrap: wrap;
+  padding: 14px 24px;
+  background: linear-gradient(90deg, #191a33, #14213a);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
-.chip {
-  background: #23233c;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 0.8rem;
+.dice-main { display: flex; align-items: baseline; gap: 12px; }
+.dice-label { color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.dice-value {
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: #6ee7a8;
   font-variant-numeric: tabular-nums;
 }
-.asym-steptitle { color: var(--muted); font-size: 0.85rem; }
+.dice-value.computing { font-size: 1rem; color: var(--muted); font-weight: 500; }
+.dice-slice { color: var(--fg); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
 
-#asymViewer {
-  max-width: 100%;
+/* stacked per-slice figures */
+.asym-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 22px 24px 60px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.asym-fig {
+  margin: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px 16px;
+}
+.asym-fig-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  color: var(--fg);
+}
+.asym-fig img {
+  display: block;
+  width: 100%;
   height: auto;
   background: #141428;
-  border-radius: 8px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+}
+.asym-fig-cap {
+  margin: 12px 2px 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .controls {

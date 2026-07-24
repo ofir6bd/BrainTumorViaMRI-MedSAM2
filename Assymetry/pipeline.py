@@ -138,6 +138,38 @@ class AsymmetryPipeline:
             self._cache["flair_stripped"] = (fl / hi).astype(np.float32)
         return self._cache["flair_stripped"]
 
+    # -- orientation: put the Left-Right (mid-sagittal) axis on the columns ---
+    @property
+    def lr_is_rows(self):
+        """True if the anatomical Left-Right axis is image rows (axis 0).
+
+        Determined from the NIfTI affine (aff2axcodes). When True, slices are
+        transposed into a canonical frame so the mid-sagittal split is a vertical
+        line (columns = Left-Right), matching the radiological convention.
+        """
+        if "lr_is_rows" not in self._cache:
+            axis = 1
+            try:
+                codes = nib.aff2axcodes(nib.load(self.paths["FLAIR"]).affine)
+                axis = 0 if codes[0] in ("L", "R") else 1
+            except Exception:
+                axis = 1
+            self._cache["lr_is_rows"] = (axis == 0)
+        return self._cache["lr_is_rows"]
+
+    def _canon(self, sl2d):
+        """Transpose a 2-D slice into the canonical frame (Left-Right on columns)."""
+        return sl2d.T if self.lr_is_rows else sl2d
+
+    def slice_flair(self, z):
+        return self._canon(self.flair_stripped[:, :, z])
+
+    def slice_brain(self, z):
+        return self._canon(self.brain_mask[:, :, z])
+
+    def slice_seg(self, z):
+        return self._canon(self.seg[:, :, z])
+
     # -- slice bookkeeping -------------------------------------------------
     def brain_count(self, z):
         return int(self.brain_mask[:, :, z].sum())
@@ -154,13 +186,25 @@ class AsymmetryPipeline:
             ]
         return self._cache["slice_indices"]
 
+    def best_slice_index(self):
+        """Index (into slice_indices) of the processed slice with the most tumour.
+
+        Falls back to the middle processed slice when the segmentation is empty.
+        """
+        idx = self.slice_indices
+        if not idx:
+            return 0
+        seg = self.seg
+        sums = [int((seg[:, :, z] > 0).sum()) for z in idx]
+        return int(np.argmax(sums)) if max(sums) > 0 else len(idx) // 2
+
     # -- Stage B + C (per slice) ------------------------------------------
     def process_slice(self, z):
         if z in self._slice_cache:
             return self._slice_cache[z]
 
-        fln = self.flair_stripped[:, :, z]
-        bm = self.brain_mask[:, :, z]
+        fln = self.slice_flair(z)      # canonical frame: columns = Left-Right
+        bm = self.slice_brain(z)
         H, W = fln.shape
 
         # Q3 midline: centroid column of the brain mask (fallback = geometric centre)
@@ -207,7 +251,7 @@ class AsymmetryPipeline:
         ra = (r_labels == int(np.argmax(r_means))).mean() if r_labels.size else 0.0
         ad = float(abs(la - ra))
 
-        gt = self.seg[:, :, z] > 0
+        gt = self.slice_seg(z) > 0
         dice = _dice(candidate, gt)
 
         out = {
@@ -238,7 +282,8 @@ class AsymmetryPipeline:
         if "pred" not in self._cache:
             pred = np.zeros(self.seg.shape, dtype=bool)
             for z in self.slice_indices:
-                pred[:, :, z] = self.process_slice(z)["candidate"]
+                cand = self.process_slice(z)["candidate"]   # canonical frame
+                pred[:, :, z] = cand.T if self.lr_is_rows else cand
             self._cache["pred"] = pred
         return self._cache["pred"]
 

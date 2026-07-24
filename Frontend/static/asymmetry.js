@@ -1,15 +1,16 @@
-// Asymmetry pipeline step-through viewer.
-// "Next" walks the whole pipeline one render at a time: steps 1-4 are volume-level
-// (Stage A), steps 5-10 repeat per qualifying slice, step 11 is the volume summary.
+// Asymmetry pipeline viewer.
+// Shows every per-slice step image stacked on one page (one after another), each with an
+// explanation caption. The whole-tumour (volume) Dice is shown permanently at the top.
+// Navigation is per-slice (Prev / Next slice) and per-patient (Skip patient).
 
 const A = {
-  meta: null,          // { steps, first_slice_step, last_slice_step, summary_step }
+  meta: null,          // /asym/api/steps payload
+  sliceSteps: [],      // per-slice steps in display order
   patients: [],
   patientIdx: 0,
-  patient: null,       // { patient_id, depth, slice_indices, n_min_voxel }
+  patient: null,       // { patient_id, depth, slice_indices, best_slice_index, ... }
   sliceIdx: 0,         // pointer into patient.slice_indices
-  step: 1,
-  z: 0,
+  diceCache: {},       // patientIdx -> volume dice string
   ready: false,
 };
 
@@ -19,17 +20,16 @@ async function initAsymmetry() {
   if (A.ready) return;
   A.ready = true;
   el.sel = document.getElementById("asymPatient");
-  el.next = document.getElementById("asymNext");
-  el.skipSlice = document.getElementById("asymSkipSlice");
+  el.prev = document.getElementById("asymPrevSlice");
+  el.nextSlice = document.getElementById("asymSkipSlice");
   el.skipPatient = document.getElementById("asymSkipPatient");
-  el.restart = document.getElementById("asymRestart");
   el.status = document.getElementById("asymStatus");
-  el.viewer = document.getElementById("asymViewer");
-  el.stepChip = document.getElementById("asymStepChip");
-  el.sliceChip = document.getElementById("asymSliceChip");
-  el.stepTitle = document.getElementById("asymStepTitle");
+  el.stack = document.getElementById("asymStack");
+  el.volDice = document.getElementById("asymVolDice");
+  el.sliceInfo = document.getElementById("asymSliceInfo");
 
   A.meta = await (await fetch("/asym/api/steps")).json();
+  A.sliceSteps = A.meta.steps.filter((s) => s.slice_based);
   A.patients = await (await fetch("/asym/api/patients")).json();
 
   el.sel.innerHTML = "";
@@ -45,10 +45,10 @@ async function initAsymmetry() {
   }
 
   el.sel.addEventListener("change", (e) => loadPatient(Number(e.target.value)));
-  el.next.addEventListener("click", advance);
-  el.skipSlice.addEventListener("click", skipSlice);
-  el.skipPatient.addEventListener("click", skipPatient);
-  el.restart.addEventListener("click", () => { A.sliceIdx = 0; A.step = 1; render(); });
+  el.prev.addEventListener("click", () => stepSlice(-1));
+  el.nextSlice.addEventListener("click", () => stepSlice(1));
+  el.skipPatient.addEventListener("click", () =>
+    loadPatient((A.patientIdx + 1) % A.patients.length));
 
   await loadPatient(0);
 }
@@ -57,81 +57,81 @@ window.initAsymmetry = initAsymmetry;
 async function loadPatient(idx) {
   A.patientIdx = idx;
   el.sel.value = String(idx);
-  A.sliceIdx = 0;
-  A.step = 1;
   el.status.textContent = "Loading patient…";
   A.patient = await (await fetch(`/asym/api/patient/${idx}`)).json();
-  render();
+  A.sliceIdx = A.patient.best_slice_index || 0;
+  el.status.textContent = "";
+  renderStack();          // show slice images first…
+  updateDice(idx);        // …then compute the (slower) whole-volume Dice
 }
-
-const SUMMARY = () => A.meta.summary_step;      // 11
-const FIRST_SLICE = () => A.meta.first_slice_step; // 5
-const LAST_SLICE = () => A.meta.last_slice_step;   // 10
 
 function nSlices() { return A.patient ? A.patient.slice_indices.length : 0; }
 
-function advance() {
+function stepSlice(delta) {
   const n = nSlices();
-  const lastStageA = FIRST_SLICE() - 1;   // last volume-level (Stage A) step
-  if (A.step <= lastStageA) {
-    if (A.step === lastStageA) {
-      A.step = n === 0 ? SUMMARY() : FIRST_SLICE();
-      A.sliceIdx = 0;
-    } else {
-      A.step += 1;
+  if (!n) return;
+  A.sliceIdx = Math.min(n - 1, Math.max(0, A.sliceIdx + delta));
+  renderStack();
+}
+
+async function updateDice(idx) {
+  if (A.diceCache[idx] !== undefined) {
+    el.volDice.textContent = A.diceCache[idx];
+    return;
+  }
+  el.volDice.textContent = "computing…";
+  el.volDice.classList.add("computing");
+  try {
+    const s = await (await fetch(`/asym/api/summary/${idx}`)).json();
+    const val = (typeof s.volume_dice === "number") ? s.volume_dice.toFixed(3) : "n/a";
+    A.diceCache[idx] = val;
+    if (A.patientIdx === idx) {           // ignore if the user already switched patient
+      el.volDice.textContent = val;
+      el.volDice.classList.remove("computing");
     }
-  } else if (A.step >= FIRST_SLICE() && A.step < LAST_SLICE()) {
-    A.step += 1;
-  } else if (A.step === LAST_SLICE()) {
-    if (A.sliceIdx < n - 1) { A.sliceIdx += 1; A.step = FIRST_SLICE(); }
-    else { A.step = SUMMARY(); }
+  } catch (e) {
+    if (A.patientIdx === idx) {
+      el.volDice.textContent = "error";
+      el.volDice.classList.remove("computing");
+    }
   }
-  // at SUMMARY: stay put
-  render();
 }
 
-function skipSlice() {
-  const n = nSlices();
-  const lastStageA = FIRST_SLICE() - 1;
-  if (n === 0) { A.step = SUMMARY(); return render(); }
-  if (A.step <= lastStageA) { A.sliceIdx = 0; A.step = FIRST_SLICE(); }
-  else if (A.sliceIdx < n - 1) { A.sliceIdx += 1; A.step = FIRST_SLICE(); }
-  else { A.step = SUMMARY(); }
-  render();
-}
-
-function skipPatient() {
-  const next = (A.patientIdx + 1) % A.patients.length;
-  loadPatient(next);
-}
-
-function render() {
+function renderStack() {
   if (!A.patient) return;
+  const n = nSlices();
   const zlist = A.patient.slice_indices;
-  A.z = zlist.length ? zlist[Math.min(A.sliceIdx, zlist.length - 1)] : 0;
+  const z = n ? zlist[Math.min(A.sliceIdx, n - 1)] : 0;
 
-  const meta = A.meta.steps.find((s) => s.id === A.step) || A.meta.steps[0];
-  el.stepChip.textContent = `#${A.step} – ${meta.label}`;
-  el.stepTitle.textContent = meta.label;
+  el.prev.disabled = A.sliceIdx <= 0;
+  el.nextSlice.disabled = A.sliceIdx >= n - 1;
+  el.sliceInfo.textContent = n
+    ? `Slice z=${z}  ·  ${A.sliceIdx + 1} / ${n} processed slices`
+    : "no processable slices";
 
-  if (A.step === SUMMARY()) {
-    el.sliceChip.textContent = "Volume summary";
-  } else if (A.step >= FIRST_SLICE()) {
-    el.sliceChip.textContent = `Slice z=${A.z}  (${A.sliceIdx + 1}/${zlist.length})`;
-  } else {
-    el.sliceChip.textContent = "Stage A (volume)";
-  }
+  el.stack.innerHTML = "";
+  if (!n) return;
 
-  const atSummary = A.step === SUMMARY();
-  el.next.disabled = atSummary;
-  el.skipSlice.disabled = atSummary;
-  el.status.textContent = atSummary
-    ? "Computing volume Dice… (first time may take a few seconds)"
-    : "Rendering…";
+  const ts = Date.now();
+  A.sliceSteps.forEach((step, i) => {
+    const fig = document.createElement("figure");
+    fig.className = "asym-fig";
 
-  el.viewer.onload = () => {
-    el.status.textContent = atSummary ? "Pipeline complete." : "";
-  };
-  el.viewer.onerror = () => (el.status.textContent = "Failed to render this step.");
-  el.viewer.src = `/asym/step.png?id=${A.patientIdx}&z=${A.z}&step=${A.step}&_=${Date.now()}`;
+    const h = document.createElement("h3");
+    h.className = "asym-fig-title";
+    h.textContent = `${i + 1}. ${step.label}`;
+    fig.appendChild(h);
+
+    const img = document.createElement("img");
+    img.alt = step.label;
+    img.src = `/asym/step.png?id=${A.patientIdx}&z=${z}&step=${step.id}&_=${ts}`;
+    fig.appendChild(img);
+
+    const cap = document.createElement("figcaption");
+    cap.className = "asym-fig-cap";
+    cap.textContent = step.explanation || "";
+    fig.appendChild(cap);
+
+    el.stack.appendChild(fig);
+  });
 }

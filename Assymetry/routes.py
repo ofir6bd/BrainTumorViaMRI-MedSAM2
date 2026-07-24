@@ -64,7 +64,10 @@ def api_patients():
 @asym_bp.route("/api/steps")
 def api_steps():
     return jsonify({
-        "steps": [{"id": i, "label": lbl, "slice_based": sb} for i, lbl, sb in R.STEPS],
+        "steps": [
+            {"id": i, "key": key, "label": lbl, "slice_based": sb, "explanation": expl}
+            for i, key, lbl, sb, expl in R.KEY_LABEL_EXPL
+        ],
         "first_slice_step": R.FIRST_SLICE_STEP,
         "last_slice_step": R.LAST_SLICE_STEP,
         "summary_step": R.SUMMARY_STEP,
@@ -78,6 +81,7 @@ def api_patient(idx):
         "patient_id": pl.patient_id,
         "depth": pl.depth,
         "slice_indices": pl.slice_indices,
+        "best_slice_index": pl.best_slice_index(),
         "n_min_voxel": pl.p["n_min_voxel"],
     })
 

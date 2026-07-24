@@ -28,8 +28,37 @@ STEP_DEFS = [
     ("summary",    "Volume summary",                   False),
 ]
 
+# One-sentence explanation shown under each per-slice image in the stacked view.
+EXPLANATIONS = {
+    "midline": ("The Left-Right axis is read from the scan orientation and the slice is "
+                "shown in standard radiological view. A vertical midline is placed at the "
+                "brain's centre of mass, dividing it into left and right hemispheres."),
+    "clustering": ("Each hemisphere's FLAIR intensities are clustered independently with a "
+                   "Gaussian Mixture Model (number of components chosen automatically by "
+                   "BIC). Every pixel is repainted with its cluster's mean value, so tissue "
+                   "types collapse into flat colour regions."),
+    "flip": ("One hemisphere is mirrored across the midline and laid over the other. A "
+             "healthy brain is nearly symmetric, so subtracting the two sides leaves a "
+             "bright signal only where a tumour breaks the symmetry."),
+    "diff": ("The absolute difference between the hemispheres is thresholded with Otsu's "
+             "method; the surviving asymmetric region becomes the candidate tumour mask "
+             "(red)."),
+    "features": ("Three symmetry features summarise this slice: AD = area difference of the "
+                 "brightest cluster, MD = difference of mean gray levels, BC = Bhattacharyya "
+                 "overlap of the two hemispheres' histograms."),
+    "predgt": ("The candidate mask (red) is overlaid on the ground-truth whole tumour "
+               "(green); their overlap is yellow. The Dice score reports how well they "
+               "match for this slice."),
+    "summary": ("Whole-volume result: the per-slice candidate masks are stacked and scored "
+                "against the ground-truth whole tumour."),
+}
+
 STEPS = [(i + 1, lbl, sb) for i, (_, lbl, sb) in enumerate(STEP_DEFS)]
 _KEY_BY_ID = {i + 1: key for i, (key, _, _) in enumerate(STEP_DEFS)}
+KEY_LABEL_EXPL = [
+    (i + 1, key, lbl, sb, EXPLANATIONS.get(key, ""))
+    for i, (key, lbl, sb) in enumerate(STEP_DEFS)
+]
 _slice_ids = [i + 1 for i, (_, _, sb) in enumerate(STEP_DEFS) if sb]
 FIRST_SLICE_STEP = min(_slice_ids)
 LAST_SLICE_STEP = max(_slice_ids)
@@ -67,7 +96,7 @@ def _style(ax, title):
 
 def _full_quant(pl, s):
     """Reassemble the two quantised half-slices into a full-slice image."""
-    H, W = pl.flair_stripped[:, :, s["z"]].shape
+    H, W = pl.slice_flair(s["z"]).shape
     c, hw = s["midline"], s["half_w"]
     full = np.zeros((H, W))
     full[:, c - hw:c] = s["left_quant"]
@@ -87,7 +116,7 @@ def render(pipeline, z, step):
         return _skipped(pl, z)
 
     s = pl.process_slice(z)
-    fln = pl.flair_stripped[:, :, z]
+    fln = pl.slice_flair(z)
 
     if key == "midline":
         fig, axes = _fig(1, 1, 7, 7)
@@ -165,7 +194,7 @@ def render(pipeline, z, step):
         return _to_png(fig)
 
     if key == "predgt":
-        gt = pl.seg[:, :, z] > 0
+        gt = pl.slice_seg(z) > 0
         cand = s["candidate"]
         fig, axes = _fig(1, 1, 7.5, 7.5)
         a = axes[0][0]
@@ -185,7 +214,7 @@ def render(pipeline, z, step):
 def _skipped(pl, z):
     fig, axes = _fig(1, 1, 7, 7)
     a = axes[0][0]
-    a.imshow(pl.flair_stripped[:, :, z], cmap="gray")
+    a.imshow(pl.slice_flair(z), cmap="gray")
     a.text(0.5, 0.06, f"slice z={z} skipped: brain {pl.brain_count(z)} px "
                       f"< N_min_voxel ({pl.p['n_min_voxel']})",
            transform=a.transAxes, ha="center", color="#ffcc00",
@@ -203,9 +232,9 @@ def _summary(pl):
     zb = int(np.argmax(sums)) if max(sums) > 0 else pl.depth // 2
     fig, ax = _fig(1, 2, 6.5, 6)
     a = ax[0][0]
-    a.imshow(pl.flair_stripped[:, :, zb], cmap="gray")
-    gt = seg[:, :, zb] > 0
-    cand = pl.predicted_volume[:, :, zb]
+    a.imshow(pl.slice_flair(zb), cmap="gray")
+    gt = pl.slice_seg(zb) > 0
+    cand = pl._canon(pl.predicted_volume[:, :, zb])
     H, W = gt.shape
     overlay = np.zeros((H, W, 4))
     overlay[gt] = (0, 1, 0, 0.35)

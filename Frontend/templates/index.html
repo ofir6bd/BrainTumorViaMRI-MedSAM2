@@ -73,26 +73,25 @@
             <select id="asymPatient"></select>
           </label>
           <div class="field">
-            <span>Step</span>
+            <span>Navigate slices</span>
             <div class="asym-buttons">
-              <button id="asymNext" type="button" class="primary">Next &rarr;</button>
-              <button id="asymSkipSlice" type="button">Skip slice</button>
+              <button id="asymPrevSlice" type="button">&larr; Prev slice</button>
+              <button id="asymSkipSlice" type="button">Next slice &rarr;</button>
               <button id="asymSkipPatient" type="button">Skip patient</button>
-              <button id="asymRestart" type="button">Restart</button>
             </div>
           </div>
         </section>
 
-        <div class="asym-progress" id="asymProgress">
-          <span class="chip" id="asymStepChip">Step 1</span>
-          <span class="chip" id="asymSliceChip">Stage A</span>
-          <span class="asym-steptitle" id="asymStepTitle"></span>
+        <div class="asym-dicebar" id="asymDiceBar">
+          <div class="dice-main">
+            <span class="dice-label">Whole-tumour Dice (volume)</span>
+            <span class="dice-value" id="asymVolDice">&hellip;</span>
+          </div>
+          <div class="dice-slice" id="asymSliceInfo">&mdash;</div>
         </div>
 
-        <main>
-          <p id="asymStatus" class="status">Select a patient and click Next.</p>
-          <img id="asymViewer" alt="" />
-        </main>
+        <p id="asymStatus" class="status"></p>
+        <div id="asymStack" class="asym-stack"></div>
       </section>
     </div>
   </div>
