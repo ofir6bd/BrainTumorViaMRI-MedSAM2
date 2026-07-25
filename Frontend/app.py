@@ -21,7 +21,8 @@ from flask import Flask, jsonify, send_file, abort, render_template, request
 
 with open("config.yaml", "r") as _f:
     _CFG = yaml.safe_load(_f)
-DATASET_DIR = _CFG["paths"]["dataset"]
+_USE_SAMPLE = bool(_CFG.get("inference", {}).get("use_sample", False))
+DATASET_DIR = _CFG["paths"]["sample"] if _USE_SAMPLE else _CFG["paths"]["dataset"]
 
 LABEL_NAMES = {1: "NETC", 2: "SNFH", 3: "ET", 4: "RC"}
 BRATS_COLORS = ["none", "red", "green", "blue", "yellow"]

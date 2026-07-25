@@ -11,12 +11,10 @@ FG = "white"
 
 # (key, label, slice_based) in display order; id = index + 1
 STEP_DEFS = [
-    ("median",     "Median filtering (FLAIR/T1C)",               True),
+    ("median",     "Median filtering (FLAIR)",                   True),
     ("symmetry",   "Symmetry split + FCM binary map",            True),
-    ("features",   "AD / MD / BC scoring",                       True),
+    ("features",   "AD / MD / BC + L1/L2/L3 scoring",            True),
     ("whole",      "Whole-tumor segmentation (FLAIR FCM)",       True),
-    ("active",     "Active-core segmentation (T1C FCM + ROI)",   True),
-    ("necrotic",   "Necrotic-core estimation",                   True),
     ("areas",      "Slice area estimation",                      True),
     ("predgt",     "Prediction vs. ground truth",                True),
     ("summary",    "Volume summary",                   False),
@@ -24,24 +22,21 @@ STEP_DEFS = [
 
 # One-sentence explanation shown under each per-slice image in the stacked view.
 EXPLANATIONS = {
-    "median": ("Noise reduction is applied first using 3x3 median filtering on FLAIR and T1C. "
+    "median": ("Noise reduction is applied first using 3x3 median filtering on FLAIR. "
                "BraTS is already skull-stripped, so no skull-removal stage is run."),
-    "symmetry": ("The FLAIR slice is split into left/right hemispheres across the midline. "
-                 "An FCM binary bright-tissue map is computed and used to compare hemisphere areas."),
-    "features": ("Symmetry features are computed as AD (area difference), MD (mean gray-level "
-                 "difference), and BC-asym = 1-BC. Slice-level tumor detection uses score "
-                 "L1+L2+L3 with fixed thresholds."),
-    "whole": ("Whole-tumor (edema-inclusive) segmentation is obtained from FLAIR by FCM, "
-              "connected components, and morphological opening."),
-    "active": ("Active core is segmented inside the whole-tumor ROI using adaptive high-T1C "
-               "thresholding + opening, with small-component cleanup."),
-    "necrotic": ("Necrotic/cystic core is estimated as closing(active) minus active, bounded "
-                 "inside the whole-tumor region."),
+    "symmetry": ("The slice is split at the estimated midline; FCM on FLAIR builds a binary bright-tissue map. "
+                 "Left/right binary halves feed AD, while gray-level halves feed MD and BC."),
+    "features": ("AD = |A_left - A_right| from binary halves; MD = |mu_left - mu_right| from gray FLAIR halves; "
+                 "BC = sum_i sqrt(p(i)q(i)) from left/right histograms, and BC-asym = 1-BC. "
+                 "L1=+1 if MD>T_MD else -1, L2=+1 if (1-BC)>T_BC else -1, L3=+1 if AD>T_AD else -1; "
+                 "score = L1+L2+L3, detected if score > 0."),
+    "whole": ("Whole-tumor mask is taken from the brightest FCM cluster on FLAIR, "
+              "then largest connected component and morphological opening are applied."),
     "areas": ("Pixel counts are converted to physical area via A = pixel_area * white_pixels, "
               "preparing per-slice inputs for volume estimation."),
-    "predgt": ("Predictions are overlaid against BraTS GT: whole tumor (seg>0) and active-core "
-               "GT (labels 1,3,4), with per-slice Dice scores."),
-    "summary": ("Per-slice areas are accumulated and multiplied by slice spacing to estimate "
+    "predgt": ("Predicted whole-tumor mask is overlaid against BraTS whole-tumor GT (seg>0), "
+               "with per-slice Dice score."),
+    "summary": ("Per-slice areas are accumulated and multiplied by slice step to estimate "
                 "volumes. Detection and Dice metrics are shown at patient level."),
 }
 
@@ -100,20 +95,14 @@ def render(pipeline, z, step):
     s = pl.process_slice(z)
     flair_raw = s["flair_raw"]
     flair_med = s["flair_med"]
-    t1c_raw = s["t1c_raw"]
-    t1c_med = s["t1c_med"]
     mid = s["midline"]
 
     if key == "median":
-        fig, ax = _fig(2, 2, 4.8, 4.4)
+        fig, ax = _fig(1, 2, 5.2, 4.8)
         ax[0][0].imshow(flair_raw, cmap="gray")
         _style(ax[0][0], "FLAIR raw")
         ax[0][1].imshow(flair_med, cmap="gray")
         _style(ax[0][1], "FLAIR median")
-        ax[1][0].imshow(t1c_raw, cmap="gray")
-        _style(ax[1][0], "T1C raw")
-        ax[1][1].imshow(t1c_med, cmap="gray")
-        _style(ax[1][1], "T1C median")
         fig.suptitle(f"Stage 1: Median filtering  -  z={z}", color=FG, fontsize=14)
         return _to_png(fig)
 
@@ -155,7 +144,8 @@ def render(pipeline, z, step):
         ymax = max(1.0, float(np.max(vals)) * 1.2 + 0.1)
         b.set_ylim(ymin, ymax)
         b.set_title(
-            f"Detected={int(s['tumor_detected'])}  (L1/L2/L3={s['labels']['L1']}/{s['labels']['L2']}/{s['labels']['L3']})",
+            f"Detected={int(s['tumor_detected'])}  (L1/L2/L3={s['labels']['L1']}/{s['labels']['L2']}/{s['labels']['L3']})\n"
+            f"T_MD={s['thresholds']['MD']:.3f}, T_BC={s['thresholds']['BC_asym']:.3f}, T_AD={s['thresholds']['AD']:.1f}",
             color=FG,
             fontsize=11,
             fontweight="bold",
@@ -179,54 +169,17 @@ def render(pipeline, z, step):
         fig.suptitle(f"Stage 3: Whole-tumor segmentation  -  z={z}", color=FG, fontsize=14)
         return _to_png(fig)
 
-    if key == "active":
-        fig, ax = _fig(1, 3, 5, 5.5)
-        ax[0][0].imshow(t1c_med, cmap="gray")
-        _style(ax[0][0], "T1C median")
-        ax[0][1].imshow(s["active_bin"], cmap="gray")
-        _style(ax[0][1], "T1C active binary (FCM)")
-        ax[0][2].imshow(t1c_med, cmap="gray")
-        ov = np.zeros((*t1c_med.shape, 4))
-        ov[s["whole_mask"]] = (0, 1, 0, 0.25)
-        ov[s["active_mask"]] = (1, 0, 0, 0.55)
-        ax[0][2].imshow(ov)
-        _style(ax[0][2], "Active core (red) within whole ROI (green)")
-        fig.suptitle(f"Stage 4: Active-core segmentation  -  z={z}", color=FG, fontsize=14)
-        return _to_png(fig)
-
-    if key == "necrotic":
-        fig, ax = _fig(1, 2, 6, 6)
-        ax[0][0].imshow(t1c_med, cmap="gray")
-        ov0 = np.zeros((*t1c_med.shape, 4))
-        ov0[s["active_mask"]] = (1, 0, 0, 0.55)
-        ax[0][0].imshow(ov0)
-        _style(ax[0][0], "Active core")
-        ax[0][1].imshow(t1c_med, cmap="gray")
-        ov1 = np.zeros((*t1c_med.shape, 4))
-        ov1[s["active_mask"]] = (1, 0, 0, 0.45)
-        ov1[s["necrotic_mask"]] = (0, 0.8, 1, 0.55)
-        ax[0][1].imshow(ov1)
-        _style(ax[0][1], "Necrotic estimate (cyan)")
-        fig.suptitle(f"Stage 5: Necrotic-core estimation  -  z={z}", color=FG, fontsize=14)
-        return _to_png(fig)
-
     if key == "areas":
         fig, ax = _fig(1, 2, 6.2, 5.8)
         ax[0][0].imshow(flair_med, cmap="gray")
         ov = np.zeros((*flair_med.shape, 4))
         ov[s["whole_mask"]] = (1, 0, 0, 0.35)
-        ov[s["active_mask"]] = (1, 1, 0, 0.55)
-        ov[s["necrotic_mask"]] = (0, 0.8, 1, 0.55)
         ax[0][0].imshow(ov)
-        _style(ax[0][0], "Slice masks")
+        _style(ax[0][0], "Whole-tumor mask")
         b = ax[0][1]
-        vals = [
-            s["area_mm2"]["whole"],
-            s["area_mm2"]["active"],
-            s["area_mm2"]["necrotic"],
-        ]
-        names = ["Whole", "Active", "Necrotic"]
-        colors = ["#ef5350", "#ffee58", "#4fc3f7"]
+        vals = [s["area_mm2"]["whole"]]
+        names = ["Whole"]
+        colors = ["#ef5350"]
         bars = b.bar(names, vals, color=colors)
         b.set_facecolor(BG)
         b.tick_params(colors=FG)
@@ -235,12 +188,12 @@ def render(pipeline, z, step):
         b.set_title(f"Area (mm²)  |  pixel area={pl.pixel_area_mm2:.3f}", color=FG, fontsize=11)
         for bar, v in zip(bars, vals):
             b.text(bar.get_x() + bar.get_width() / 2, v, f"{v:.1f}", ha="center", va="bottom", color=FG)
-        fig.suptitle(f"Stage 6: Area estimation  -  z={z}", color=FG, fontsize=14)
+        fig.suptitle(f"Stage 4: Area estimation  -  z={z}", color=FG, fontsize=14)
         return _to_png(fig)
 
     if key == "predgt":
-        fig, axes = _fig(1, 2, 6.2, 6.0)
-        a0, a1 = axes[0][0], axes[0][1]
+        fig, axes = _fig(1, 1, 6.2, 6.0)
+        a0 = axes[0][0]
         a0.imshow(flair_med, cmap="gray")
         ov0 = np.zeros((*flair_med.shape, 4))
         gt_whole = s["gt_whole"]
@@ -251,17 +204,7 @@ def render(pipeline, z, step):
         a0.imshow(ov0)
         _style(a0, f"Whole: Dice={s['slice_dice_whole']:.3f}")
 
-        a1.imshow(t1c_med, cmap="gray")
-        ov1 = np.zeros((*t1c_med.shape, 4))
-        gt_active = s["gt_active"]
-        pd_active = s["active_mask"]
-        ov1[gt_active] = (0, 1, 0, 0.35)
-        ov1[pd_active] = (1, 0, 0, 0.45)
-        ov1[gt_active & pd_active] = (1, 1, 0, 0.6)
-        a1.imshow(ov1)
-        _style(a1, f"Active core: Dice={s['slice_dice_active']:.3f}")
-
-        fig.suptitle(f"Stage 7: Prediction vs GT  -  z={z}", color=FG, fontsize=14)
+        fig.suptitle(f"Stage 5: Prediction vs GT  -  z={z}", color=FG, fontsize=14)
         return _to_png(fig)
 
     return _skipped(pl, z)
@@ -282,7 +225,6 @@ def _skipped(pl, z):
 
 def _summary(pl):
     vd = pl.volume_dice()
-    adv = pl.active_volume_dice()
     vf = pl.volume_features()
     det = pl.detection_metrics()
     vol = pl.volume_estimates()
@@ -308,16 +250,14 @@ def _summary(pl):
     b.set_facecolor(BG)
     txt = (f"VOLUME SUMMARY\n{pl.patient_id}\n\n"
             f"Whole-tumour Dice : {vd:.3f}\n"
-            f"Active-core Dice  : {adv:.3f}\n\n"
+            f"\n"
             f"Slices processed  : {len(pl.slice_indices)} / {pl.depth}\n"
             f"Detection acc/sens/spec : {det['accuracy']:.3f} / {det['sensitivity']:.3f} / {det['specificity']:.3f}\n\n"
            f"Mean AD : {vf['AD']:.3f}\n"
            f"Mean MD : {vf['MD']:.3f}\n"
             f"Mean BC : {vf['BC']:.3f}\n"
             f"Mean 1-BC : {vf['BC_asym']:.3f}\n\n"
-            f"Whole volume (mm3) : {vol['whole_volume_mm3']:.1f}\n"
-            f"Active volume (mm3): {vol['active_volume_mm3']:.1f}\n"
-            f"GT active (mm3)    : {vol['gt_active_volume_mm3']:.1f}")
+            f"Whole volume (mm3) : {vol['whole_volume_mm3']:.1f}")
     b.text(0.02, 0.98, txt, transform=b.transAxes, ha="left", va="top",
            color=FG, fontsize=13, family="monospace")
     fig.suptitle("Volume summary", color=FG, fontsize=15, fontweight="bold")

@@ -1,6 +1,6 @@
 // Asymmetry pipeline viewer.
 // Shows every per-slice step image stacked on one page (one after another), each with an
-// explanation caption. The whole-tumour (volume) Dice is shown permanently at the top.
+// explanation caption. Whole volume Dice is shown permanently at the top.
 // Navigation is per-slice (Prev / Next slice) and per-patient (Skip patient).
 
 const A = {
@@ -84,8 +84,7 @@ async function updateDice(idx) {
   try {
     const s = await (await fetch(`/asym/api/summary/${idx}`)).json();
     const whole = (typeof s.volume_dice === "number") ? s.volume_dice.toFixed(3) : "n/a";
-    const active = (typeof s.active_volume_dice === "number") ? s.active_volume_dice.toFixed(3) : "n/a";
-    const val = `${whole} | ${active}`;
+    const val = `${whole}`;
     A.diceCache[idx] = val;
     if (A.patientIdx === idx) {           // ignore if the user already switched patient
       el.volDice.textContent = val;
@@ -108,8 +107,8 @@ function renderStack() {
   el.prev.disabled = A.sliceIdx <= 0;
   el.nextSlice.disabled = A.sliceIdx >= n - 1;
   el.sliceInfo.textContent = n
-    ? `Slice z=${z}  ·  ${A.sliceIdx + 1} / ${n} processed slices`
-    : "no processable slices";
+    ? `Slice z=${z}  ·  ${A.sliceIdx + 1} / ${n} slices`
+    : "no slices";
 
   el.stack.innerHTML = "";
   if (!n) return;

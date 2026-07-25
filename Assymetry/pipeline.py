@@ -6,12 +6,10 @@ via a Symmetry Analysis" (Symmetry, 2023), adapted to BraTS where skull strippin
 is skipped because inputs are already skull-stripped.
 
 Stages implemented per slice:
-1) Median filtering (FLAIR + T1C)
+1) Median filtering (FLAIR)
 2) Symmetry analysis on FLAIR (AD, MD, BC -> asymmetry score)
 3) Whole tumor segmentation on FLAIR (FCM + connected components + opening)
-4) Active core segmentation on T1C (FCM + opening + whole-mask ROI)
-5) Necrotic core estimation (closing(active) - active)
-6) Area and volume estimation
+4) Area and volume estimation
 """
 import os
 import glob
@@ -19,7 +17,7 @@ import glob
 import numpy as np
 import nibabel as nib
 from scipy import ndimage
-from skimage.morphology import opening, closing, disk
+from skimage.morphology import opening, disk
 
 # ---------------------------------------------------------------------------
 # Parameters
@@ -35,14 +33,10 @@ PARAMS = {
     "bc_threshold": 0.02,
     "ad_threshold": 600.0,
     "whole_open_radius": 2,
-    "active_open_radius": 1,
-    "active_roi_quantile": 0.70,
-    "active_min_component": 20,
-    "necrotic_close_radius": 2,
     "min_component": 40,
 }
 
-MODALITY_SUFFIX = {"FLAIR": "-t2f", "T1C": "-t1c"}
+MODALITY_SUFFIX = {"FLAIR": "-t2f"}
 
 
 def _find_modalities(patient_dir):
@@ -68,7 +62,6 @@ def _fcm_1d(values, n_clusters=3, m=2.0, max_iter=100, tol=1e-5):
     quant = np.linspace(5, 95, n_clusters)
     centers = np.percentile(values, quant)
     eps = 1e-12
-
     for _ in range(max_iter):
         dist = np.abs(values[:, None] - centers[None, :]) + eps
         power = 2.0 / (m - 1.0)
@@ -124,10 +117,6 @@ class AsymmetryPipeline:
         return self._vol("FLAIR")
 
     @property
-    def t1c(self):
-        return self._vol("T1C")
-
-    @property
     def seg(self):
         return self._vol("SEG")
 
@@ -152,24 +141,10 @@ class AsymmetryPipeline:
         return self._cache["flair_norm"]
 
     @property
-    def t1c_norm(self):
-        if "t1c_norm" not in self._cache:
-            im = self.t1c
-            hi = float(im.max()) or 1.0
-            self._cache["t1c_norm"] = (im / hi).astype(np.float32)
-        return self._cache["t1c_norm"]
-
-    @property
     def flair_med(self):
         if "flair_med" not in self._cache:
             self._cache["flair_med"] = ndimage.median_filter(self.flair_norm, size=(3, 3, 1)).astype(np.float32)
         return self._cache["flair_med"]
-
-    @property
-    def t1c_med(self):
-        if "t1c_med" not in self._cache:
-            self._cache["t1c_med"] = ndimage.median_filter(self.t1c_norm, size=(3, 3, 1)).astype(np.float32)
-        return self._cache["t1c_med"]
 
     # -- orientation: put the Left-Right (mid-sagittal) axis on the columns ---
     @property
@@ -197,14 +172,8 @@ class AsymmetryPipeline:
     def slice_flair(self, z):
         return self._canon(self.flair_norm[:, :, z])
 
-    def slice_t1c(self, z):
-        return self._canon(self.t1c_norm[:, :, z])
-
     def slice_flair_med(self, z):
         return self._canon(self.flair_med[:, :, z])
-
-    def slice_t1c_med(self, z):
-        return self._canon(self.t1c_med[:, :, z])
 
     def slice_brain(self, z):
         return self._canon(self.brain_mask[:, :, z])
@@ -302,37 +271,11 @@ class AsymmetryPipeline:
                 best_cc = cc
 
         raw = best_cc if best_cc is not None else bright_mask
+
         opened = opening(raw, footprint=disk(self.p["whole_open_radius"]))
         if opened.sum() == 0 and raw.sum() > 0:
             opened = raw
         return raw.astype(bool), opened.astype(bool), centers
-
-    def _active_and_necrotic(self, t1c_med, brain, whole_mask):
-        active_bin, labels, centers = self._binary_fcm_mask(t1c_med, brain)
-        active = np.zeros_like(whole_mask, dtype=bool)
-        if whole_mask.sum() > 0:
-            roi_vals = t1c_med[whole_mask]
-            q = float(self.p["active_roi_quantile"])
-            q = float(np.clip(q, 0.05, 0.95))
-            thr = float(np.quantile(roi_vals, q))
-
-            active_raw = whole_mask & (t1c_med >= thr)
-            active_open = opening(active_raw, footprint=disk(self.p["active_open_radius"]))
-
-            min_cc = int(self.p["active_min_component"])
-            labeled, nlab = ndimage.label(active_open)
-            kept = np.zeros_like(active_open, dtype=bool)
-            for k in range(1, nlab + 1):
-                cc = (labeled == k)
-                if int(cc.sum()) >= min_cc:
-                    kept |= cc
-            if kept.sum() == 0 and active_open.sum() > 0:
-                kept = active_open
-            active = kept.astype(bool)
-
-        closed = closing(active, footprint=disk(self.p["necrotic_close_radius"]))
-        necrotic = (closed & (~active) & whole_mask).astype(bool)
-        return active_bin.astype(bool), active.astype(bool), necrotic.astype(bool), centers
 
     # -- Stages 1-5 (per slice) -------------------------------------------
     def process_slice(self, z):
@@ -341,8 +284,6 @@ class AsymmetryPipeline:
 
         flair_raw = self.slice_flair(z)
         flair_med = self.slice_flair_med(z)
-        t1c_raw = self.slice_t1c(z)
-        t1c_med = self.slice_t1c_med(z)
         bm = self.slice_brain(z)
 
         H, W = flair_med.shape
@@ -374,22 +315,15 @@ class AsymmetryPipeline:
         detected = bool(score > 0)
 
         whole_raw, whole_mask, whole_centers = self._whole_tumor_from_flair(flair_med, bm)
-        active_bin, active_mask, necrotic_mask, t1c_centers = self._active_and_necrotic(t1c_med, bm, whole_mask)
 
         seg2d = self.slice_seg(z)
         gt_whole = seg2d > 0
-        gt_active = np.isin(seg2d, [1, 3, 4])
 
         whole_dice = _dice(whole_mask, gt_whole)
-        active_dice = _dice(active_mask, gt_active)
 
         area_px_whole = int(whole_mask.sum())
-        area_px_active = int(active_mask.sum())
-        area_px_necrotic = int(necrotic_mask.sum())
 
         area_mm2_whole = area_px_whole * self.pixel_area_mm2
-        area_mm2_active = area_px_active * self.pixel_area_mm2
-        area_mm2_necrotic = area_px_necrotic * self.pixel_area_mm2
 
         out = {
             "z": z,
@@ -398,8 +332,6 @@ class AsymmetryPipeline:
             "brain_count": int(bm.sum()),
             "flair_raw": flair_raw,
             "flair_med": flair_med,
-            "t1c_raw": t1c_raw,
-            "t1c_med": t1c_med,
             "brain": bm,
             "left_bin": left_bin,
             "right_bin": right_bin,
@@ -421,26 +353,16 @@ class AsymmetryPipeline:
             "fcm_centers": {
                 "flair": flair_centers.tolist() if isinstance(flair_centers, np.ndarray) else [],
                 "whole": whole_centers.tolist() if isinstance(whole_centers, np.ndarray) else [],
-                "t1c": t1c_centers.tolist() if isinstance(t1c_centers, np.ndarray) else [],
             },
             "whole_raw": whole_raw,
             "whole_mask": whole_mask,
-            "active_bin": active_bin,
-            "active_mask": active_mask,
-            "necrotic_mask": necrotic_mask,
             "gt_whole": gt_whole,
-            "gt_active": gt_active,
             "slice_dice_whole": whole_dice,
-            "slice_dice_active": active_dice,
             "area_px": {
                 "whole": area_px_whole,
-                "active": area_px_active,
-                "necrotic": area_px_necrotic,
             },
             "area_mm2": {
                 "whole": area_mm2_whole,
-                "active": area_mm2_active,
-                "necrotic": area_mm2_necrotic,
             },
         }
         self._slice_cache[z] = out
@@ -471,16 +393,6 @@ class AsymmetryPipeline:
             return self.process_slice(z)["whole_mask"]
         return np.zeros(self.slice_seg(z).shape, dtype=bool)
 
-    def active_mask(self, z):
-        if self.is_processed(z):
-            return self.process_slice(z)["active_mask"]
-        return np.zeros(self.slice_seg(z).shape, dtype=bool)
-
-    def necrotic_mask(self, z):
-        if self.is_processed(z):
-            return self.process_slice(z)["necrotic_mask"]
-        return np.zeros(self.slice_seg(z).shape, dtype=bool)
-
     def volume_dice(self):
         if "vdice" not in self._cache:
             procset = set(self.slice_indices)
@@ -494,19 +406,6 @@ class AsymmetryPipeline:
                 ga += int(gt.sum())
             self._cache["vdice"] = 1.0 if (pa + ga) == 0 else float(2.0 * inter / (pa + ga))
         return self._cache["vdice"]
-
-    def active_volume_dice(self):
-        if "active_vdice" not in self._cache:
-            procset = set(self.slice_indices)
-            inter = pa = ga = 0
-            for z in range(self.depth):
-                gt = np.isin(self.slice_seg(z), [1, 3, 4])
-                pred = self.process_slice(z)["active_mask"] if z in procset else np.zeros_like(gt)
-                inter += int(np.logical_and(pred, gt).sum())
-                pa += int(pred.sum())
-                ga += int(gt.sum())
-            self._cache["active_vdice"] = 1.0 if (pa + ga) == 0 else float(2.0 * inter / (pa + ga))
-        return self._cache["active_vdice"]
 
     def volume_features(self):
         rows = [self.process_slice(z)["features"] for z in self.slice_indices]
@@ -543,20 +442,14 @@ class AsymmetryPipeline:
         }
 
     def volume_estimates(self):
-        active_area_sum = 0.0
-        gt_active_area_sum = 0.0
         whole_area_sum = 0.0
         for z in self.slice_indices:
             s = self.process_slice(z)
-            active_area_sum += s["area_mm2"]["active"]
             whole_area_sum += s["area_mm2"]["whole"]
-            gt_active_area_sum += float(np.isin(self.slice_seg(z), [1, 3, 4]).sum()) * self.pixel_area_mm2
 
         step = self.slice_step_mm
         return {
             "whole_volume_mm3": float(whole_area_sum * step),
-            "active_volume_mm3": float(active_area_sum * step),
-            "gt_active_volume_mm3": float(gt_active_area_sum * step),
             "slice_step_mm": float(step),
             "pixel_area_mm2": float(self.pixel_area_mm2),
         }
@@ -568,7 +461,6 @@ class AsymmetryPipeline:
             "patient_id": self.patient_id,
             "n_slices_processed": len(self.slice_indices),
             "volume_dice": self.volume_dice(),
-            "active_volume_dice": self.active_volume_dice(),
             "volume_features": self.volume_features(),
             "detection": det,
             "volume_estimation": vol,
@@ -594,10 +486,7 @@ class AsymmetryPipeline:
                 "score": s["asymmetry_score"],
                 "detected": int(s["tumor_detected"]),
                 "whole_dice": s["slice_dice_whole"],
-                "active_dice": s["slice_dice_active"],
                 "area_mm2_whole": s["area_mm2"]["whole"],
-                "area_mm2_active": s["area_mm2"]["active"],
-                "area_mm2_necrotic": s["area_mm2"]["necrotic"],
             })
         return rows
 
@@ -607,17 +496,16 @@ class AsymmetryPipeline:
         path = os.path.join(out_dir, "features.csv")
         rows = self.feature_table()
         with open(path, "w", encoding="utf-8") as f:
-            f.write("z,brain_voxels,AD,MD,BC,BC_asym,score,detected,whole_dice,active_dice,area_mm2_whole,area_mm2_active,area_mm2_necrotic\n")
+            f.write("z,brain_voxels,AD,MD,BC,BC_asym,score,detected,whole_dice,area_mm2_whole\n")
             for r in rows:
                 f.write(
                     f"{r['z']},{r['brain_voxels']},{r['AD']:.6f},{r['MD']:.6f},{r['BC']:.6f},"
                     f"{r['BC_asym']:.6f},{r['score']},{r['detected']},{r['whole_dice']:.6f},"
-                    f"{r['active_dice']:.6f},{r['area_mm2_whole']:.6f},{r['area_mm2_active']:.6f},"
-                    f"{r['area_mm2_necrotic']:.6f}\n"
+                    f"{r['area_mm2_whole']:.6f}\n"
                 )
             summ = self.summary()
             f.write(
-                f"volume,,,,,,,,{summ['volume_dice']:.6f},{summ['active_volume_dice']:.6f},,,\n"
+                f"volume,,,,,,,,{summ['volume_dice']:.6f},\n"
             )
         return path
 

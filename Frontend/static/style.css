@@ -41,6 +41,19 @@ body {
 
 .sidenav { display: flex; flex-direction: column; gap: 8px; }
 
+.copy-page-btn {
+  margin-top: 10px;
+  width: 100%;
+  text-align: center;
+}
+
+.copy-page-status {
+  min-height: 1.2em;
+  margin: 6px 2px 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
 .navbtn {
   text-align: left;
   padding: 10px 12px;
