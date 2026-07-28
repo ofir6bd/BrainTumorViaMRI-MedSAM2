@@ -15,13 +15,13 @@
         <button class="navbtn active" data-mode="explore" type="button">
           <span class="ic">&#9635;</span> Explore
         </button>
-        <button class="navbtn" data-mode="asymmetry" type="button">
-          <span class="ic">&#9695;</span> Asymmetry
+        <button class="navbtn" data-mode="fcm-segmentation" type="button">
+          <span class="ic">&#9695;</span> FCM Segmentation
         </button>
       </nav>
       <button id="copyPageBtn" type="button" class="copy-page-btn">Copy page image</button>
       <p id="copyPageStatus" class="copy-page-status" aria-live="polite"></p>
-      <p class="sidefoot">data/sample &middot; FLAIR asymmetry</p>
+      <p class="sidefoot">data/sample &middot; FLAIR FCM segmentation</p>
     </aside>
 
     <div class="content">
@@ -62,43 +62,60 @@
         </main>
       </section>
 
-      <!-- ============ ASYMMETRY ============ -->
-      <section class="mode-panel hidden" id="asymPanel">
+      <!-- ============ FCM SEGMENTATION ============ -->
+      <section class="mode-panel hidden" id="fcmPanel">
         <header>
-          <h2>Asymmetry pipeline</h2>
-          <p class="sub">Median filtering &middot; symmetry scoring (AD/MD/BC) &middot; whole-tumor segmentation (FLAIR only) &middot; volume estimation (FLAIR already skull-stripped)</p>
+          <h2>FCM segmentation pipeline</h2>
+          <p class="sub">Whole-tumor segmentation (FLAIR only) &middot; per-slice Dice &middot; volume estimation (FLAIR already skull-stripped)</p>
         </header>
 
-        <section class="controls">
-          <label class="field">
-            <span>Patient</span>
-            <select id="asymPatient"></select>
-          </label>
+        <section class="controls fcm-subnav-wrap">
           <div class="field">
-            <span>Navigate slices</span>
-            <div class="asym-buttons">
-              <button id="asymPrevSlice" type="button">&larr; Prev slice</button>
-              <button id="asymSkipSlice" type="button">Next slice &rarr;</button>
-              <button id="asymSkipPatient" type="button">Skip patient</button>
+            <span>Pipeline view</span>
+            <div class="tabs" id="fcmViews">
+              <button class="tab active" data-aview="pipeline" type="button">Pipeline</button>
+              <button class="tab" data-aview="slice-summary" type="button">Slice summary</button>
             </div>
           </div>
         </section>
 
-        <div class="asym-dicebar" id="asymDiceBar">
+        <section class="controls">
+          <label class="field">
+            <span>Patient</span>
+            <select id="fcmPatient"></select>
+          </label>
+          <div class="field">
+            <span>Navigate slices</span>
+            <div class="fcm-buttons">
+              <button id="fcmPrevSlice" type="button">&larr; Prev slice</button>
+              <button id="fcmSkipSlice" type="button">Next slice &rarr;</button>
+              <button id="fcmSkipPatient" type="button">Skip patient</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="fcm-dicebar" id="fcmDiceBar">
           <div class="dice-main">
             <span class="dice-label">Volume Dice (whole)</span>
-            <span class="dice-value" id="asymVolDice">&hellip;</span>
+            <span class="dice-value" id="fcmVolDice">&hellip;</span>
           </div>
-          <div class="dice-slice" id="asymSliceInfo">&mdash;</div>
+          <div class="dice-slice" id="fcmSliceInfo">&mdash;</div>
         </div>
 
-        <p id="asymStatus" class="status"></p>
-        <div id="asymStack" class="asym-stack"></div>
+        <p id="fcmStatus" class="status"></p>
+        <div id="fcmStack" class="fcm-stack"></div>
+
+        <section id="fcmSummaryPanel" class="fcm-summary hidden">
+          <div class="fcm-summary-head">
+            <h3>Per-slice Dice summary</h3>
+          </div>
+          <div id="fcmSummaryTableWrap" class="fcm-summary-table-wrap"></div>
+        </section>
       </section>
     </div>
   </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
-  <script src="{{ url_for('static', filename='asymmetry.js') }}"></script>
+  <script src="{{ url_for('static', filename='fcm_segmentation.js') }}"></script>
 </body>
 </html>

@@ -4,7 +4,7 @@
 // Navigation is per-slice (Prev / Next slice) and per-patient (Skip patient).
 
 const A = {
-  meta: null,          // /asym/api/steps payload
+  meta: null,          // /fcm/api/steps payload
   sliceSteps: [],      // per-slice steps in display order
   patients: [],
   patientIdx: 0,
@@ -18,25 +18,25 @@ const A = {
 
 const el = {};
 
-async function initAsymmetry() {
+async function initFcmSegmentation() {
   if (A.ready) return;
   A.ready = true;
-  el.sel = document.getElementById("asymPatient");
-  el.prev = document.getElementById("asymPrevSlice");
-  el.nextSlice = document.getElementById("asymSkipSlice");
-  el.skipPatient = document.getElementById("asymSkipPatient");
-  el.status = document.getElementById("asymStatus");
-  el.stack = document.getElementById("asymStack");
-  el.volDice = document.getElementById("asymVolDice");
-  el.sliceInfo = document.getElementById("asymSliceInfo");
-  el.views = document.getElementById("asymViews");
-  el.summaryPanel = document.getElementById("asymSummaryPanel");
-  el.summaryWrap = document.getElementById("asymSummaryTableWrap");
-  el.sliceButtons = document.querySelector("#asymPanel .asym-buttons");
+  el.sel = document.getElementById("fcmPatient");
+  el.prev = document.getElementById("fcmPrevSlice");
+  el.nextSlice = document.getElementById("fcmSkipSlice");
+  el.skipPatient = document.getElementById("fcmSkipPatient");
+  el.status = document.getElementById("fcmStatus");
+  el.stack = document.getElementById("fcmStack");
+  el.volDice = document.getElementById("fcmVolDice");
+  el.sliceInfo = document.getElementById("fcmSliceInfo");
+  el.views = document.getElementById("fcmViews");
+  el.summaryPanel = document.getElementById("fcmSummaryPanel");
+  el.summaryWrap = document.getElementById("fcmSummaryTableWrap");
+  el.sliceButtons = document.querySelector("#fcmPanel .fcm-buttons");
 
-  A.meta = await (await fetch("/asym/api/steps")).json();
+  A.meta = await (await fetch("/fcm/api/steps")).json();
   A.sliceSteps = A.meta.steps.filter((s) => s.slice_based);
-  A.patients = await (await fetch("/asym/api/patients")).json();
+  A.patients = await (await fetch("/fcm/api/patients")).json();
 
   el.sel.innerHTML = "";
   if (!A.patients.length) {
@@ -58,18 +58,18 @@ async function initAsymmetry() {
   el.views.addEventListener("click", (e) => {
     const btn = e.target.closest(".tab");
     if (!btn) return;
-    setAsymView(btn.dataset.aview);
+    setFcmView(btn.dataset.aview);
   });
 
   await loadPatient(0);
 }
-window.initAsymmetry = initAsymmetry;
+window.initFcmSegmentation = initFcmSegmentation;
 
 async function loadPatient(idx) {
   A.patientIdx = idx;
   el.sel.value = String(idx);
   el.status.textContent = "Loading patient…";
-  A.patient = await (await fetch(`/asym/api/patient/${idx}`)).json();
+  A.patient = await (await fetch(`/fcm/api/patient/${idx}`)).json();
   A.sliceIdx = A.patient.best_slice_index || 0;
   el.status.textContent = "";
   renderStack();          // show slice images first…
@@ -88,7 +88,7 @@ function stepSlice(delta) {
   renderStack();
 }
 
-function setAsymView(view) {
+function setFcmView(view) {
   if (!view || (view !== "pipeline" && view !== "slice-summary")) return;
   A.view = view;
   for (const btn of el.views.querySelectorAll(".tab")) {
@@ -111,7 +111,7 @@ async function updateDice(idx) {
   el.volDice.textContent = "computing…";
   el.volDice.classList.add("computing");
   try {
-    const s = await (await fetch(`/asym/api/summary/${idx}`)).json();
+    const s = await (await fetch(`/fcm/api/summary/${idx}`)).json();
     const whole = (typeof s.volume_dice === "number") ? s.volume_dice.toFixed(3) : "n/a";
     const val = `${whole}`;
     A.diceCache[idx] = val;
@@ -136,7 +136,7 @@ function renderStack() {
   el.prev.disabled = A.sliceIdx <= 0;
   el.nextSlice.disabled = A.sliceIdx >= n - 1;
   el.sliceInfo.textContent = n
-    ? `Slice #${A.sliceIdx + 1}/${n}  (z=${z})`
+    ? `Slice #${A.sliceIdx + 1}/${n}`
     : "no slices";
 
   el.stack.innerHTML = "";
@@ -145,20 +145,20 @@ function renderStack() {
   const ts = Date.now();
   A.sliceSteps.forEach((step, i) => {
     const fig = document.createElement("figure");
-    fig.className = "asym-fig";
+    fig.className = "fcm-fig";
 
     const h = document.createElement("h3");
-    h.className = "asym-fig-title";
+    h.className = "fcm-fig-title";
     h.textContent = `${i + 1}. ${step.label}`;
     fig.appendChild(h);
 
     const img = document.createElement("img");
     img.alt = step.label;
-    img.src = `/asym/step.png?id=${A.patientIdx}&z=${z}&step=${step.id}&_=${ts}`;
+    img.src = `/fcm/step.png?id=${A.patientIdx}&z=${z}&step=${step.id}&_=${ts}`;
     fig.appendChild(img);
 
     const cap = document.createElement("figcaption");
-    cap.className = "asym-fig-cap";
+    cap.className = "fcm-fig-cap";
     cap.textContent = step.explanation || "";
     fig.appendChild(cap);
 
@@ -168,7 +168,7 @@ function renderStack() {
 
 async function loadSliceRows(idx) {
   if (A.rowsCache[idx] !== undefined) return A.rowsCache[idx];
-  const resp = await fetch(`/asym/api/slices/${idx}`);
+  const resp = await fetch(`/fcm/api/slices/${idx}`);
   const payload = await resp.json();
   A.rowsCache[idx] = Array.isArray(payload.rows) ? payload.rows : [];
   return A.rowsCache[idx];
@@ -199,13 +199,13 @@ async function renderSummaryTable(idx) {
     const zToPos = new Map(zlist.map((zv, i) => [zv, i + 1]));
     const currentZ = zlist.length ? zlist[Math.min(A.sliceIdx, zlist.length - 1)] : null;
 
-    const preferred = ["slice_no", "z", "whole_dice"];
+    const preferred = ["slice_no", "whole_dice"];
     const extra = Object.keys(rows[0]).filter((k) => !["slice_no", "z", "whole_dice"].includes(k));
     const numericExtras = extra.filter((k) => rows.some((r) => _isNum(r[k])));
     const columns = [...preferred, ...numericExtras];
 
     const table = document.createElement("table");
-    table.className = "asym-summary-table";
+    table.className = "fcm-summary-table";
 
     const thead = document.createElement("thead");
     const hr = document.createElement("tr");

@@ -1,6 +1,6 @@
 """Flask blueprint exposing the FCM segmentation pipeline to the web UI.
 
-Registered by Frontend/app.py under the /asym prefix. Reads patients from the
+Registered by Frontend/app.py under the /fcm prefix. Reads patients from the
 `data/sample` folder (config.yaml -> paths.sample). Pipelines are cached per patient.
 """
 import os
@@ -8,10 +8,10 @@ import os
 import yaml
 from flask import Blueprint, jsonify, send_file, abort, request
 
-from .pipeline import AsymmetryPipeline
+from .pipeline import FcmSegmentationPipeline
 from . import render as R
 
-asym_bp = Blueprint("asym", __name__, url_prefix="/asym")
+fcm_bp = Blueprint("fcm", __name__, url_prefix="/fcm")
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _OUT_DIR = os.path.join(_HERE, "outputs")
@@ -52,16 +52,16 @@ def _pipeline(idx):
     if idx < 0 or idx >= len(PATIENTS):
         abort(404)
     if idx not in _PIPELINES:
-        _PIPELINES[idx] = AsymmetryPipeline(PATIENTS[idx]["dir"])
+        _PIPELINES[idx] = FcmSegmentationPipeline(PATIENTS[idx]["dir"])
     return _PIPELINES[idx]
 
 
-@asym_bp.route("/api/patients")
+@fcm_bp.route("/api/patients")
 def api_patients():
     return jsonify([{"id": i, "label": p["patient_id"]} for i, p in enumerate(PATIENTS)])
 
 
-@asym_bp.route("/api/steps")
+@fcm_bp.route("/api/steps")
 def api_steps():
     return jsonify({
         "steps": [
@@ -74,7 +74,7 @@ def api_steps():
     })
 
 
-@asym_bp.route("/api/patient/<int:idx>")
+@fcm_bp.route("/api/patient/<int:idx>")
 def api_patient(idx):
     pl = _pipeline(idx)
     return jsonify({
@@ -86,7 +86,7 @@ def api_patient(idx):
     })
 
 
-@asym_bp.route("/api/summary/<int:idx>")
+@fcm_bp.route("/api/summary/<int:idx>")
 def api_summary(idx):
     pl = _pipeline(idx)
     summ = pl.summary()
@@ -97,7 +97,7 @@ def api_summary(idx):
     return jsonify(summ)
 
 
-@asym_bp.route("/api/slices/<int:idx>")
+@fcm_bp.route("/api/slices/<int:idx>")
 def api_slices(idx):
     pl = _pipeline(idx)
     rows = pl.feature_table()
@@ -107,16 +107,22 @@ def api_slices(idx):
     })
 
 
-@asym_bp.route("/step.png")
+@fcm_bp.route("/step.png")
 def step_png():
     idx = int(request.args.get("id", -1))
     step = int(request.args.get("step", 1))
     pl = _pipeline(idx)
     z = max(0, min(int(request.args.get("z", 0)), pl.depth - 1))
+    slice_no = None
+    try:
+        pos = pl.slice_indices.index(z)
+        slice_no = int(pos + 1)
+    except ValueError:
+        slice_no = None
     if step == R.SUMMARY_STEP:
         try:
             pl.save_csv(_OUT_DIR)
         except Exception:
             pass
-    buf = R.render(pl, z, step)
+    buf = R.render(pl, z, step, slice_no=slice_no)
     return send_file(buf, mimetype="image/png")

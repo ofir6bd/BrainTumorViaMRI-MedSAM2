@@ -152,11 +152,11 @@ if (copyPageBtn) {
   copyPageBtn.addEventListener("click", copyPageAsImage);
 }
 
-// ---- sidebar mode switching (Explore / Asymmetry) ----
+// ---- sidebar mode switching (Explore / FCM Segmentation) ----
 const sidenav = document.getElementById("sidenav");
 const panels = {
   explore: document.getElementById("explorePanel"),
-  asymmetry: document.getElementById("asymPanel"),
+  "fcm-segmentation": document.getElementById("fcmPanel"),
 };
 sidenav.addEventListener("click", (e) => {
   const btn = e.target.closest(".navbtn");
@@ -168,5 +168,5 @@ sidenav.addEventListener("click", (e) => {
   for (const [name, el] of Object.entries(panels)) {
     el.classList.toggle("hidden", name !== mode);
   }
-  if (mode === "asymmetry" && window.initAsymmetry) window.initAsymmetry();
+  if (mode === "fcm-segmentation" && window.initFcmSegmentation) window.initFcmSegmentation();
 });

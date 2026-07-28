@@ -11,21 +11,15 @@ FG = "white"
 
 # (key, label, slice_based) in display order; id = index + 1
 STEP_DEFS = [
-    ("median",     "Median filtering (FLAIR)",                   True),
     ("whole",      "Whole-tumor segmentation (FLAIR FCM)",       True),
-    ("areas",      "Slice area estimation",                      True),
     ("predgt",     "Prediction vs. ground truth",                True),
     ("summary",    "Volume summary",                   False),
 ]
 
 # One-sentence explanation shown under each per-slice image in the stacked view.
 EXPLANATIONS = {
-    "median": ("Noise reduction is applied first using 3x3 median filtering on FLAIR. "
-               "BraTS is already skull-stripped, so no skull-removal stage is run."),
     "whole": ("Whole-tumor mask is taken from the brightest FCM cluster on FLAIR, "
               "then largest connected component is selected (no opening step)."),
-    "areas": ("Pixel counts are converted to physical area via A = pixel_area * white_pixels, "
-              "preparing per-slice inputs for volume estimation."),
     "predgt": ("Predicted whole-tumor mask is overlaid against BraTS whole-tumor GT (seg>0), "
                "with per-slice Dice score."),
     "summary": ("Per-slice areas are accumulated and multiplied by slice step to estimate "
@@ -73,29 +67,20 @@ def _style(ax, title):
     ax.axis("off")
 
 
-def render(pipeline, z, step):
+def render(pipeline, z, step, slice_no=None):
     pl = pipeline
     key = _KEY_BY_ID.get(step)
+    slice_label = f"slice #{slice_no}" if slice_no is not None else f"z={z}"
 
     if key == "summary":
         return _summary(pl)
 
     # ---- per-slice (Stages B-D) -------------------------------------------
     if not pl.is_processed(z):
-        return _skipped(pl, z)
+        return _skipped(pl, z, slice_no=slice_no)
 
     s = pl.process_slice(z)
-    flair_raw = s["flair_raw"]
     flair_med = s["flair_med"]
-
-    if key == "median":
-        fig, ax = _fig(1, 2, 5.2, 4.8)
-        ax[0][0].imshow(flair_raw, cmap="gray")
-        _style(ax[0][0], "FLAIR raw")
-        ax[0][1].imshow(flair_med, cmap="gray")
-        _style(ax[0][1], "FLAIR median")
-        fig.suptitle(f"Stage 1: Median filtering  -  z={z}", color=FG, fontsize=14)
-        return _to_png(fig)
 
     if key == "whole":
         fig, ax = _fig(1, 3, 5, 5.5)
@@ -107,30 +92,8 @@ def render(pipeline, z, step):
         ov = np.zeros((*flair_med.shape, 4))
         ov[s["whole_mask"]] = (1, 0, 0, 0.5)
         ax[0][2].imshow(ov)
-        _style(ax[0][2], f"Whole mask (FCM+CC, {s['area_px']['whole']} px)")
-        fig.suptitle(f"Stage 2: Whole-tumor segmentation  -  z={z}", color=FG, fontsize=14)
-        return _to_png(fig)
-
-    if key == "areas":
-        fig, ax = _fig(1, 2, 6.2, 5.8)
-        ax[0][0].imshow(flair_med, cmap="gray")
-        ov = np.zeros((*flair_med.shape, 4))
-        ov[s["whole_mask"]] = (1, 0, 0, 0.35)
-        ax[0][0].imshow(ov)
-        _style(ax[0][0], "Whole-tumor mask")
-        b = ax[0][1]
-        vals = [s["area_mm2"]["whole"]]
-        names = ["Whole"]
-        colors = ["#ef5350"]
-        bars = b.bar(names, vals, color=colors)
-        b.set_facecolor(BG)
-        b.tick_params(colors=FG)
-        for spine in b.spines.values():
-            spine.set_color("#555")
-        b.set_title(f"Area (mm²)  |  pixel area={pl.pixel_area_mm2:.3f}", color=FG, fontsize=11)
-        for bar, v in zip(bars, vals):
-            b.text(bar.get_x() + bar.get_width() / 2, v, f"{v:.1f}", ha="center", va="bottom", color=FG)
-        fig.suptitle(f"Stage 3: Area estimation  -  z={z}", color=FG, fontsize=14)
+        _style(ax[0][2], f"Whole mask (FCM+CC, {s['whole_pixels']} px)")
+        fig.suptitle(f"Stage 1: Whole-tumor segmentation  -  {slice_label}", color=FG, fontsize=14)
         return _to_png(fig)
 
     if key == "predgt":
@@ -146,28 +109,28 @@ def render(pipeline, z, step):
         a0.imshow(ov0)
         _style(a0, f"Whole: Dice={s['slice_dice_whole']:.3f}")
 
-        fig.suptitle(f"Stage 4: Prediction vs GT  -  z={z}", color=FG, fontsize=14)
+        fig.suptitle(f"Stage 2: Prediction vs GT  -  {slice_label}", color=FG, fontsize=14)
         return _to_png(fig)
 
     return _skipped(pl, z)
 
 
-def _skipped(pl, z):
+def _skipped(pl, z, slice_no=None):
     fig, axes = _fig(1, 1, 7, 7)
     a = axes[0][0]
     a.imshow(pl.slice_flair_med(z), cmap="gray")
-    a.text(0.5, 0.06, f"slice z={z} skipped: brain {pl.brain_count(z)} px "
+    label = f"slice #{slice_no}" if slice_no is not None else f"slice z={z}"
+    a.text(0.5, 0.06, f"{label} skipped: brain {pl.brain_count(z)} px "
                       f"< N_min_voxel ({pl.p['n_min_voxel']})",
            transform=a.transAxes, ha="center", color="#ffcc00",
            fontsize=11, fontweight="bold",
            bbox=dict(facecolor="black", alpha=0.6, pad=4))
-    _style(a, f"Skipped slice (z={z})")
+    _style(a, f"Skipped {label}")
     return _to_png(fig)
 
 
 def _summary(pl):
     vd = pl.volume_dice()
-    vol = pl.volume_estimates()
     seg = pl.seg
     sums = [int((seg[:, :, z] > 0).sum()) for z in range(pl.depth)]
     zb = int(np.argmax(sums)) if max(sums) > 0 else pl.depth // 2
@@ -191,9 +154,7 @@ def _summary(pl):
     txt = (f"VOLUME SUMMARY\n{pl.patient_id}\n\n"
             f"Whole-tumour Dice : {vd:.3f}\n"
             f"\n"
-            f"Slices processed  : {len(pl.slice_indices)} / {pl.depth}\n"
-            f"\n"
-            f"Whole volume (mm3) : {vol['whole_volume_mm3']:.1f}")
+            f"Slices processed  : {len(pl.slice_indices)} / {pl.depth}")
     b.text(0.02, 0.98, txt, transform=b.transAxes, ha="left", va="top",
            color=FG, fontsize=13, family="monospace")
     fig.suptitle("Volume summary", color=FG, fontsize=15, fontweight="bold")

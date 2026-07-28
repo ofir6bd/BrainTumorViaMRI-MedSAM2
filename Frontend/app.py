@@ -3,7 +3,7 @@ import os
 import sys
 from functools import lru_cache
 
-# Repo root on sys.path so the Assymetry package (at repo root) is importable.
+# Repo root on sys.path so the FCMSegmentation package (at repo root) is importable.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
@@ -41,9 +41,9 @@ app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
-# Asymmetry pipeline routes (served under /asym).
-from Assymetry.routes import asym_bp  # noqa: E402
-app.register_blueprint(asym_bp)
+# FCM segmentation pipeline routes (served under /fcm).
+from FCMSegmentation.routes import fcm_bp  # noqa: E402
+app.register_blueprint(fcm_bp)
 
 
 def find_patients():

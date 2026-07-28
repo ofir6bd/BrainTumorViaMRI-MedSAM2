@@ -16,7 +16,7 @@ synapseclient          # also provides the synapseutils module
 Flask
 livereload             # serves the site and reloads the browser on file changes
 
-# --- Asymmetry pipeline (Assymetry/) ---
+# --- FCM segmentation pipeline (FCMSegmentation/) ---
 scikit-learn           # GaussianMixture (per-hemisphere GMM clustering)
 scikit-image           # histogram matching, Otsu threshold
 
