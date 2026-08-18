@@ -152,11 +152,12 @@ if (copyPageBtn) {
   copyPageBtn.addEventListener("click", copyPageAsImage);
 }
 
-// ---- sidebar mode switching (Explore / FCM Segmentation) ----
+// ---- sidebar mode switching (Explore / FCM Segmentation / YOLO Detection) ----
 const sidenav = document.getElementById("sidenav");
 const panels = {
   explore: document.getElementById("explorePanel"),
   "fcm-segmentation": document.getElementById("fcmPanel"),
+  "yolo-detection": document.getElementById("yoloPanel"),
 };
 sidenav.addEventListener("click", (e) => {
   const btn = e.target.closest(".navbtn");
@@ -169,4 +170,5 @@ sidenav.addEventListener("click", (e) => {
     el.classList.toggle("hidden", name !== mode);
   }
   if (mode === "fcm-segmentation" && window.initFcmSegmentation) window.initFcmSegmentation();
+  if (mode === "yolo-detection" && window.initYolo) window.initYolo();
 });

@@ -18,7 +18,10 @@ livereload             # serves the site and reloads the browser on file changes
 
 # --- FCM segmentation pipeline (FCMSegmentation/) ---
 scikit-learn           # GaussianMixture (per-hemisphere GMM clustering)
-scikit-image           # histogram matching, Otsu threshold
+scikit-image           # histogram matching, Otsu threshold; also used for YOLO/ polygon contours
+
+# --- YOLO tumour segmentation pipeline (YOLO/) ---
+ultralytics             # YOLO11-seg fine-tuning + inference
 
 # --- MedSAM2 / SAM2 runtime ---
 # NOTE: torch/torchvision are intentionally NOT pinned here. This project runs

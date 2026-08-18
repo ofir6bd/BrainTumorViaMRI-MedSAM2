@@ -19,3 +19,8 @@ data/*
 !data/sample/
 !data/sample/**
 outputs/
+
+# --- YOLO generated dataset ---
+YOLO/dataset/
+YOLO/runs/
+YOLO/weights/

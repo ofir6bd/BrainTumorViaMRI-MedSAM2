@@ -18,6 +18,9 @@
         <button class="navbtn" data-mode="fcm-segmentation" type="button">
           <span class="ic">&#9695;</span> FCM Segmentation
         </button>
+        <button class="navbtn" data-mode="yolo-detection" type="button">
+          <span class="ic">&#9678;</span> YOLO Detection
+        </button>
       </nav>
       <button id="copyPageBtn" type="button" class="copy-page-btn">Copy page image</button>
       <p id="copyPageStatus" class="copy-page-status" aria-live="polite"></p>
@@ -112,10 +115,55 @@
           <div id="fcmSummaryTableWrap" class="fcm-summary-table-wrap"></div>
         </section>
       </section>
+
+      <!-- ============ YOLO DETECTION ============ -->
+      <section class="mode-panel hidden" id="yoloPanel">
+        <header>
+          <h2>YOLO tumour detection</h2>
+          <p class="sub">RGB slice (T1C&minus;T1 / T2 / FLAIR) &middot; predicted vs. expert whole-tumour mask &middot; per-slice Dice</p>
+        </header>
+
+        <section class="controls yolo-subnav-wrap">
+          <div class="field">
+            <span>View</span>
+            <div class="tabs" id="yoloViews">
+              <button class="tab active" data-yview="segment" type="button">Segmentation</button>
+              <button class="tab" data-yview="summary" type="button">Slice summary</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="controls">
+          <label class="field">
+            <span>Patient</span>
+            <select id="yoloPatient"></select>
+          </label>
+
+          <div class="field slice-field" id="yoloSliceField">
+            <span>Slice</span>
+            <button id="yoloBest" type="button">Best</button>
+            <input type="range" id="yoloZ" min="0" max="0" value="0">
+            <span id="yoloZLabel" class="zlabel">z = 0</span>
+          </div>
+        </section>
+
+        <main>
+          <p id="yoloStatus" class="status">Loading&hellip;</p>
+          <img id="yoloViewer" alt="" />
+        </main>
+
+        <section id="yoloSummaryPanel" class="yolo-summary hidden">
+          <div class="yolo-summary-head">
+            <h3>Per-slice Dice summary</h3>
+          </div>
+          <div id="yoloSummaryTableWrap" class="yolo-summary-table-wrap"></div>
+        </section>
+      </section>
     </div>
   </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   <script src="{{ url_for('static', filename='fcm_segmentation.js') }}"></script>
+  <script src="{{ url_for('static', filename='yolo.js') }}"></script>
 </body>
 </html>

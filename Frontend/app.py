@@ -45,6 +45,10 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 from FCMSegmentation.routes import fcm_bp  # noqa: E402
 app.register_blueprint(fcm_bp)
 
+# YOLO tumour segmentation routes (served under /yolo).
+from YOLO.routes import yolo_bp  # noqa: E402
+app.register_blueprint(yolo_bp)
+
 
 def find_patients():
     patients = []
