@@ -232,6 +232,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 #yoloViewer {
   max-width: 100%;
+  width: 100%;
   height: auto;
   background: #fff;
   border-radius: 8px;
