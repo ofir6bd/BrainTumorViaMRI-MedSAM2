@@ -1,6 +1,6 @@
 # FCM Segmentation Pipeline — Spec (IMPLEMENTED)
 
-> Status: **implemented.** Code lives in `Assymetry/` (`pipeline.py`, `render.py`,
+> Status: **implemented.** Code lives in `FCMSegmentation/` (`pipeline.py`, `render.py`,
 > `routes.py`); the UI is wired into `Frontend/` (sidebar "FCM Segmentation" button).
 > Launch with `run_web.bat` and open the **FCM Segmentation** tab.
 >
@@ -16,10 +16,10 @@
 
 ## 0. Scope & constraints
 
-- **Pipeline code, outputs, and rendering logic live in `Assymetry/`.** The UI hooks into
+- **Pipeline code, outputs, and rendering logic live in `FCMSegmentation/`.** The UI hooks into
   the **existing viewer in `Frontend/`**: a new **"FCM Segmentation"** sidebar entry calls into
-  `Assymetry/`. Files touched outside `Assymetry/` are the web app's `index.html`,
-  `app.js` (nav switch), `asymmetry.js` (new), `style.css`, and `app.py` (blueprint wiring).
+  `FCMSegmentation/`. Files touched outside `FCMSegmentation/` are the web app's `index.html`,
+  `app.js` (nav switch), `fcm_segmentation.js` (new), `style.css`, and `app.py` (blueprint wiring).
 - **Clustering = Gaussian Mixture Models** (`sklearn.mixture.GaussianMixture`) — used both
   for per-hemisphere clustering (Stage B) and for the Area Difference feature (Stage C).
 - Data source is **`data/sample/`** only (read-only). Current patients:
@@ -85,10 +85,10 @@ and aggregated per volume:
 
 ---
 
-## 3. Web UI (in `Frontend/`, backed by `Assymetry/`)
+## 3. Web UI (in `Frontend/`, backed by `FCMSegmentation/`)
 
 The `Frontend/` viewer has a **left sidebar** with an **"FCM Segmentation"** entry; it calls the
-`/asym` blueprint served from `Assymetry/routes.py`.
+`/fcm` blueprint served from `FCMSegmentation/routes.py`.
 
 **Interaction model — one page per slice (no Next button):**
 - A permanent, sticky bar at the top shows the **whole-tumour (volume) Dice**, computed
@@ -127,7 +127,7 @@ Difference-map threshold is **Otsu** on the `|difference|` values (not a fixed p
 
 - Rendered PNGs streamed to the browser on demand.
 - Per-slice `z, brain_voxels, AD, MD, BC, dice` (+ a `volume` Dice row) saved to
-  `Assymetry/outputs/<patient>/features.csv` on the summary step.
+  `FCMSegmentation/outputs/<patient>/features.csv` on the summary step.
 
 ---
 
@@ -158,5 +158,5 @@ _UI = added into the `Frontend/` viewer. Clusterer = GMM with auto-K by BIC (K =
 4. **Difference-map threshold:** **Otsu** on the `|difference|` values.
 5. **Features:** computed **per slice and aggregated per volume** (mean).
 6. **Persist outputs:** per-slice `AD,MD,BC,dice` **CSV saved to
-   `Assymetry/outputs/<patient>/features.csv`** on the summary step.
+  `FCMSegmentation/outputs/<patient>/features.csv`** on the summary step.
 7. **Volume Dice denominator:** **all slices** (skipped slices predict empty).

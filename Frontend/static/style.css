@@ -41,6 +41,19 @@ body {
 
 .sidenav { display: flex; flex-direction: column; gap: 8px; }
 
+.copy-page-btn {
+  margin-top: 10px;
+  width: 100%;
+  text-align: center;
+}
+
+.copy-page-status {
+  min-height: 1.2em;
+  margin: 6px 2px 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
 .navbtn {
   text-align: left;
   padding: 10px 12px;
@@ -80,13 +93,13 @@ header .sub {
   font-size: 0.85rem;
 }
 
-/* ---- asymmetry ---- */
-.asym-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+/* ---- fcm segmentation ---- */
+.fcm-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* permanent, sticky whole-tumour Dice bar */
-.asym-dicebar {
+.fcm-dicebar {
   position: sticky;
   top: 0;
   z-index: 10;
@@ -112,7 +125,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .dice-slice { color: var(--fg); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
 
 /* stacked per-slice figures */
-.asym-stack {
+.fcm-stack {
   display: flex;
   flex-direction: column;
   gap: 22px;
@@ -120,30 +133,169 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   max-width: 900px;
   margin: 0 auto;
 }
-.asym-fig {
+.fcm-fig {
   margin: 0;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 16px 16px;
 }
-.asym-fig-title {
+.fcm-fig-title {
   margin: 0 0 10px;
   font-size: 1rem;
   color: var(--fg);
 }
-.asym-fig img {
+.fcm-fig img {
   display: block;
   width: 100%;
   height: auto;
   background: #141428;
   border-radius: 6px;
 }
-.asym-fig-cap {
+.fcm-fig-cap {
   margin: 12px 2px 0;
   color: var(--muted);
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+.fcm-subnav-wrap {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.fcm-summary {
+  padding: 18px 24px 40px;
+}
+
+.fcm-summary-head h3 {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+}
+
+.fcm-summary-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 72vh;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.fcm-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 540px;
+}
+
+.fcm-summary-table th,
+.fcm-summary-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fcm-summary-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.fcm-summary-table tbody tr:nth-child(odd) td {
+  background: var(--panel);
+}
+
+.fcm-summary-table tbody tr:nth-child(even) td {
+  background: var(--bg);
+}
+
+.fcm-summary-table tbody tr.active-row td {
+  background: #273158;
+}
+
+.fcm-summary-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* ---- yolo detection ---- */
+.yolo-subnav-wrap {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+#yoloViewer {
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+.yolo-summary {
+  padding: 18px 24px 40px;
+}
+
+.yolo-summary-head h3 {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+}
+
+.yolo-summary-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 72vh;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.yolo-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 320px;
+}
+
+.yolo-summary-table th,
+.yolo-summary-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.yolo-summary-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.yolo-summary-table tbody tr:nth-child(odd) td {
+  background: var(--panel);
+}
+
+.yolo-summary-table tbody tr:nth-child(even) td {
+  background: var(--bg);
+}
+
+.yolo-summary-table tbody tr.active-row td {
+  background: #273158;
+}
+
+.yolo-summary-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .controls {

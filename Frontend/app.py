@@ -3,7 +3,7 @@ import os
 import sys
 from functools import lru_cache
 
-# Repo root on sys.path so the Assymetry package (at repo root) is importable.
+# Repo root on sys.path so the FCMSegmentation package (at repo root) is importable.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
@@ -21,7 +21,8 @@ from flask import Flask, jsonify, send_file, abort, render_template, request
 
 with open("config.yaml", "r") as _f:
     _CFG = yaml.safe_load(_f)
-DATASET_DIR = _CFG["paths"]["dataset"]
+_USE_SAMPLE = bool(_CFG.get("inference", {}).get("use_sample", False))
+DATASET_DIR = _CFG["paths"]["sample"] if _USE_SAMPLE else _CFG["paths"]["dataset"]
 
 LABEL_NAMES = {1: "NETC", 2: "SNFH", 3: "ET", 4: "RC"}
 BRATS_COLORS = ["none", "red", "green", "blue", "yellow"]
@@ -40,9 +41,13 @@ app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
-# Asymmetry pipeline routes (served under /asym).
-from Assymetry.routes import asym_bp  # noqa: E402
-app.register_blueprint(asym_bp)
+# FCM segmentation pipeline routes (served under /fcm).
+from FCMSegmentation.routes import fcm_bp  # noqa: E402
+app.register_blueprint(fcm_bp)
+
+# YOLO tumour segmentation routes (served under /yolo).
+from YOLO.routes import yolo_bp  # noqa: E402
+app.register_blueprint(yolo_bp)
 
 
 def find_patients():
