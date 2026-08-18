@@ -187,6 +187,15 @@ def build_rgb_slice(t1c_slice, t1_slice, t2w_slice, t2f_slice, min_fg_voxels):
     return np.stack([r, g, b], axis=-1)
 
 
+def build_rgb_slice_raw(t1c_slice, t2w_slice, t2f_slice, min_fg_voxels):
+    """Alternate RGB (Explore tab comparison only, not used for training/inference):
+    R = raw T1C (no T1 subtraction), G = T2, B = FLAIR -> HxWx3 uint8."""
+    r = _norm_slice_uint8(t1c_slice, min_fg_voxels)
+    g = _norm_slice_uint8(t2w_slice, min_fg_voxels)
+    b = _norm_slice_uint8(t2f_slice, min_fg_voxels)
+    return np.stack([r, g, b], axis=-1)
+
+
 def _has_foreground(t2f_slice, min_fg_voxels):
     return int((t2f_slice != 0).sum()) >= min_fg_voxels
 
@@ -426,12 +435,15 @@ class YoloPipeline:
         rgb = self.rgb_slice(z)
         gt_wt = self.seg[:, :, z] > 0
         pred_wt = np.zeros_like(gt_wt, dtype=bool)
+        confs = []
 
         model = self._model_instance()
         if model is not None:
             results = model.predict(rgb, conf=self.p["conf_threshold"], verbose=False)
             r0 = results[0]
             if r0.masks is not None:
+                if r0.boxes is not None and r0.boxes.conf is not None:
+                    confs = [float(c) for c in r0.boxes.conf.cpu().numpy()]
                 for m in r0.masks.data.cpu().numpy():
                     mask_bin = m >= self.p["mask_threshold"]
                     if mask_bin.shape != gt_wt.shape:
@@ -448,6 +460,9 @@ class YoloPipeline:
             "pred_wt": pred_wt,
             "dice": _dice(pred_wt, gt_wt),
             "model_error": self._model_error,
+            "num_pred_instances": len(confs),
+            "mean_conf": float(np.mean(confs)) if confs else None,
+            "num_gt_components": int(ndimage.label(gt_wt)[1]) if gt_wt.any() else 0,
         }
         self._slice_cache[z] = out
         return out

@@ -14,6 +14,7 @@ const VIEWS = {
   modalities: { slice: true,  url: (id, z) => `/modalities.png?id=${id}&z=${z}` },
   bbox:       { slice: false, url: (id) => `/bbox.png?id=${id}` },
   scatter:    { slice: false, url: (id) => `/scatter.png?id=${id}` },
+  rgb:        { slice: true,  url: (id, z) => `/rgb.png?id=${id}&z=${z}` },
 };
 
 const current = { id: null, best: 0, view: "panels" };
