@@ -14,6 +14,8 @@ Data source (config.yaml -> paths.extract_to, default `data/dataset`):
 import glob
 import os
 import random
+import re
+from datetime import datetime
 
 import nibabel as nib
 import numpy as np
@@ -40,7 +42,72 @@ MODALITY_SUFFIX = {"T1C": "-t1c", "T1": "-t1n", "T2": "-t2w", "FLAIR": "-t2f"}
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DATASET_DIR = os.path.join(_HERE, "dataset")
-_WEIGHTS_PATH = os.path.join(_HERE, "weights", "best.pt")
+_WEIGHTS_DIR = os.path.join(_HERE, "weights")
+_WEIGHTS_PATH = os.path.join(_WEIGHTS_DIR, "best.pt")  # legacy fallback, no metadata
+
+_WEIGHTS_NAME_RE = re.compile(
+    r"^best_(?P<stamp>\d{8}-\d{6})(?:_valloss(?P<valloss>\d+p\d+))?\.pt$"
+)
+
+
+# ---------------------------------------------------------------------------
+# Weight-file discovery (README.md Stage D/F — one `.pt` per training run)
+# ---------------------------------------------------------------------------
+def list_weight_files():
+    """List available YOLO weight checkpoints in `YOLO/weights/`.
+
+    Each entry: {"filename", "path", "timestamp" (datetime|None), "val_loss" (float|None)}.
+    Sorted best-first: lowest `val_loss` first (unknown `val_loss` last), ties broken by
+    most recent. Supports both the `best_<timestamp>_valloss<value>.pt` naming written by
+    `YOLO/train.py` and a legacy bare `best.pt` (no metadata) for backward compatibility.
+    """
+    if not os.path.isdir(_WEIGHTS_DIR):
+        return []
+    entries = []
+    for name in sorted(os.listdir(_WEIGHTS_DIR)):
+        if not name.lower().endswith(".pt"):
+            continue
+        path = os.path.join(_WEIGHTS_DIR, name)
+        if not os.path.isfile(path):
+            continue
+        m = _WEIGHTS_NAME_RE.match(name)
+        timestamp = None
+        val_loss = None
+        if m:
+            try:
+                timestamp = datetime.strptime(m.group("stamp"), "%Y%m%d-%H%M%S")
+            except ValueError:
+                timestamp = None
+            if m.group("valloss"):
+                try:
+                    val_loss = float(m.group("valloss").replace("p", "."))
+                except ValueError:
+                    val_loss = None
+        entries.append({
+            "filename": name,
+            "path": path,
+            "timestamp": timestamp,
+            "val_loss": val_loss,
+        })
+
+    def sort_key(e):
+        return (
+            0 if e["val_loss"] is not None else 1,
+            e["val_loss"] if e["val_loss"] is not None else 0.0,
+            -(e["timestamp"].timestamp() if e["timestamp"] else 0),
+        )
+
+    entries.sort(key=sort_key)
+    return entries
+
+
+def default_weights_path():
+    """Best-first choice among `list_weight_files()`; falls back to the fixed
+    `weights/best.pt` path (pre-existing behaviour when nothing new has been trained
+    yet — the model loader then reports a clear "weights not found" error).
+    """
+    entries = list_weight_files()
+    return entries[0]["path"] if entries else _WEIGHTS_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +400,7 @@ class YoloPipeline:
         if params:
             self.p.update(params)
         self.paths = _find_modalities(patient_dir)
-        self.weights_path = weights_path or _WEIGHTS_PATH
+        self.weights_path = weights_path or default_weights_path()
         self._cache = {}
         self._slice_cache = {}
         self._model = None

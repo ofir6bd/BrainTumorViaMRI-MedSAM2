@@ -7,7 +7,9 @@ const Y = {
   patients: [],
   patientIdx: 0,
   patient: null,      // { patient_id, depth, slice_indices, best_slice_index, min_fg_voxels }
-  diceRows: {},        // patientIdx -> rows from /yolo/api/dice
+  weights: [],         // [{ filename, label, val_loss }] from /yolo/api/weights, best-first
+  weightsFile: "",     // selected filename, "" = server default (best by val_loss)
+  diceRows: {},        // `${patientIdx}::${weightsFile}` -> rows from /yolo/api/dice
   view: "segment",     // "segment" | "summary"
   ready: false,
 };
@@ -18,6 +20,7 @@ async function initYolo() {
   if (Y.ready) return;
   Y.ready = true;
   yel.sel = document.getElementById("yoloPatient");
+  yel.modelSel = document.getElementById("yoloModel");
   yel.zSlider = document.getElementById("yoloZ");
   yel.zLabel = document.getElementById("yoloZLabel");
   yel.sliceField = document.getElementById("yoloSliceField");
@@ -43,7 +46,14 @@ async function initYolo() {
     yel.sel.appendChild(opt);
   }
 
+  await loadWeightsList();
+
   yel.sel.addEventListener("change", (e) => loadPatient(Number(e.target.value)));
+  yel.modelSel.addEventListener("change", (e) => {
+    Y.weightsFile = e.target.value;
+    renderSlice();
+    if (Y.view === "summary") renderSummaryTable(Y.patientIdx);
+  });
   yel.zSlider.addEventListener("input", renderSlice);
   yel.bestBtn.addEventListener("click", () => {
     yel.zSlider.value = bestZ();
@@ -58,6 +68,31 @@ async function initYolo() {
   await loadPatient(0);
 }
 window.initYolo = initYolo;
+
+async function loadWeightsList() {
+  if (!yel.modelSel) return;
+  Y.weights = await (await fetch("/yolo/api/weights")).json();
+  yel.modelSel.innerHTML = "";
+  if (!Y.weights.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No trained weights found";
+    yel.modelSel.appendChild(opt);
+    yel.modelSel.disabled = true;
+    Y.weightsFile = "";
+    return;
+  }
+  yel.modelSel.disabled = false;
+  for (const w of Y.weights) {
+    const opt = document.createElement("option");
+    opt.value = w.filename;
+    opt.textContent = w.label;
+    yel.modelSel.appendChild(opt);
+  }
+  // First entry is the best-by-val_loss model (see list_weight_files sort order).
+  Y.weightsFile = Y.weights[0].filename;
+  yel.modelSel.value = Y.weightsFile;
+}
 
 function bestZ() {
   if (!Y.patient) return 0;
@@ -90,7 +125,8 @@ function renderSlice() {
   yel.status.textContent = "Rendering…";
   yel.viewer.onload = () => (yel.status.textContent = "");
   yel.viewer.onerror = () => (yel.status.textContent = "Failed to render this slice.");
-  yel.viewer.src = `/yolo/segment.png?id=${Y.patientIdx}&z=${z}&_=${Date.now()}`;
+  const w = Y.weightsFile ? `&weights=${encodeURIComponent(Y.weightsFile)}` : "";
+  yel.viewer.src = `/yolo/segment.png?id=${Y.patientIdx}&z=${z}${w}&_=${Date.now()}`;
 }
 
 function setYoloView(view) {
@@ -109,11 +145,13 @@ function setYoloView(view) {
 }
 
 async function loadDiceRows(idx) {
-  if (Y.diceRows[idx] !== undefined) return Y.diceRows[idx];
-  const resp = await fetch(`/yolo/api/dice?id=${idx}`);
+  const cacheKey = `${idx}::${Y.weightsFile}`;
+  if (Y.diceRows[cacheKey] !== undefined) return Y.diceRows[cacheKey];
+  const w = Y.weightsFile ? `&weights=${encodeURIComponent(Y.weightsFile)}` : "";
+  const resp = await fetch(`/yolo/api/dice?id=${idx}${w}`);
   const payload = await resp.json();
-  Y.diceRows[idx] = Array.isArray(payload.rows) ? payload.rows : [];
-  return Y.diceRows[idx];
+  Y.diceRows[cacheKey] = Array.isArray(payload.rows) ? payload.rows : [];
+  return Y.diceRows[cacheKey];
 }
 
 async function renderSummaryTable(idx) {

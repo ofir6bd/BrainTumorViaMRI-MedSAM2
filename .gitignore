@@ -23,4 +23,3 @@ outputs/
 # --- YOLO generated dataset ---
 YOLO/dataset/
 YOLO/runs/
-YOLO/weights/
