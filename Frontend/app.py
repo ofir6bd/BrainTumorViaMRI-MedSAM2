@@ -248,6 +248,49 @@ def modalities_png():
     return send_file(figure_to_png(fig), mimetype="image/png")
 
 
+@app.route("/rgb.png")
+def rgb_png():
+    """Explore tab: side-by-side comparison of two RGB channel-construction schemes.
+
+    Left  = R: T1C-T1 subtraction, G: T2, B: FLAIR (what the YOLO pipeline trains on).
+    Right = R: raw T1C,            G: T2, B: FLAIR (no subtraction, for comparison).
+    """
+    from YOLO.pipeline import PARAMS, build_rgb_slice, build_rgb_slice_raw
+
+    idx = int(request.args.get("id", -1))
+    p = get_patient(idx)
+    seg = load_volume(p["seg_file"])
+    z = max(0, min(int(request.args.get("z", best_slice(seg))), seg.shape[2] - 1))
+
+    required = ("T1C", "T1", "T2", "FLAIR")
+    if not all(k in p["modalities"] for k in required):
+        abort(404)
+    t1c = load_volume(p["modalities"]["T1C"])[:, :, z]
+    t1 = load_volume(p["modalities"]["T1"])[:, :, z]
+    t2w = load_volume(p["modalities"]["T2"])[:, :, z]
+    flair = load_volume(p["modalities"]["FLAIR"])[:, :, z]
+    min_fg = PARAMS["min_fg_voxels"]
+
+    rgb_sub = build_rgb_slice(t1c, t1, t2w, flair, min_fg)
+    rgb_raw = build_rgb_slice_raw(t1c, t2w, flair, min_fg)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 7), facecolor="#141428")
+    fig.suptitle(f'{p["patient_id"]}  -  slice z={z}  -  RGB channel construction',
+                 color="white", fontsize=15, fontweight="bold", y=1.02)
+    axes[0].imshow(rgb_sub)
+    axes[0].set_facecolor("#1b1b36")
+    axes[0].set_title("R = T1C \u2212 T1 (subtraction)\nG = T2      B = FLAIR",
+                       color="white", fontsize=11.5, fontweight="bold")
+    axes[0].axis("off")
+    axes[1].imshow(rgb_raw)
+    axes[1].set_facecolor("#1b1b36")
+    axes[1].set_title("R = T1C (raw)\nG = T2      B = FLAIR",
+                       color="white", fontsize=11.5, fontweight="bold")
+    axes[1].axis("off")
+    fig.tight_layout()
+    return send_file(figure_to_png(fig), mimetype="image/png")
+
+
 @app.route("/bbox.png")
 def bbox_png():
     idx = int(request.args.get("id", -1))
