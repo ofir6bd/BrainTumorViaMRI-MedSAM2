@@ -10,7 +10,7 @@ Here's the full pipeline end-to-end, stage by stage, based on the actual code in
 
 The train pool is sorted by patient id (deterministic), shuffled with `random.Random(seed=42)`, then split 80/20 into `train`/`val` by `val_fraction`. Optional `fraction`/`max_patients` knobs subsample this without breaking the ratio.
 
-## 2. RGB frame construction — `build_rgb_slice()`
+## 2. RGB frame construction — `build_rgb_slice()` 
 
 For each patient, each axial slice `z`, four raw NIfTI volumes (`T1C`, `T1`, `T2`, `FLAIR`) are loaded and one RGB image is built per slice:
 - **R** = `clip(T1C − T1, 0, ∞)` — contrast-uptake subtraction, normalized (`_norm_slice_uint8`: clip to p0.5–p99.5 of nonzero voxels, rescale to 0–255).
