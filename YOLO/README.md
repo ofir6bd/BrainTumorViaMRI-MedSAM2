@@ -1,10 +1,11 @@
-# YOLO Tumour Segmentation Pipeline — Spec (PLANNED)
+# YOLO Tumour Segmentation Pipeline — Spec (IMPLEMENTED)
 
-> Status: **spec / not yet implemented.** This file describes how to build and fine-tune a
-> YOLO segmentation model for the BraTS whole tumour, and how to wire it into the existing web viewer.
-> Code will live in `YOLO/` (`pipeline.py`, `render.py`, `routes.py`, plus a `train.py` used
-> once to fine-tune the weights); the UI hooks into `Frontend/` (a new sidebar
-> **"YOLO Detection"** entry), exactly like the `FCMSegmentation/` and `Assymetry/` packages.
+> Status: **implemented.** This file describes how the YOLO segmentation model for the BraTS
+> whole tumour is built/fine-tuned, and how it's wired into the existing web viewer.
+> Code lives in `YOLO/` (`pipeline.py`, `render.py`, `routes.py`, `evaluate.py`, plus a
+> `train.py` used to fine-tune the weights); the UI hooks into `Frontend/` (a sidebar
+> **"YOLO Detection"** entry), the same pattern as the `FCMSegmentation/` and `Assymetry/`
+> packages. See [PIPELINE.md](PIPELINE.md) for a step-by-step walkthrough of the actual code.
 >
 > Defaults live in a `PARAMS` dict at the top of `pipeline.py` (see §4).
 
@@ -22,21 +23,18 @@
 - **Ground truth is the expert `-seg.nii.gz` mask** (labels 1–4 merged to WT). Training labels
   are segmentation polygons derived from this mask. No synthetic labels.
 - Data source follows `config.yaml` (`paths.extract_to`, `data/dataset`):
-  - **Train split source**: `data/dataset/training_data1_v2` +
-    `data/dataset/training_data_additional` (1350 + 271 patients, **labeled** —
-    each has an expert `-seg.nii.gz` mask).
-  - **Valid split source**: patient holdout from the combined train source above
-    (default `val_fraction=0.2`, deterministic by `seed`) — also **labeled**, so
-    Dice/mAP can be computed on it.
-  - **Test split source**: `data/dataset/validation_data` (188 patients). **This is
-    the official BraTS challenge validation split and ships with no `-seg` mask** —
-    it is **unlabeled / inference-only**. It is used to preview predictions
-    qualitatively, never for Dice or loss (no ground truth exists to compare against).
+  - **Patient pool**: `data/dataset/training_data1_v2` + `data/dataset/training_data_additional`
+    (1350 + 271 patients, all **labeled** — each has an expert `-seg.nii.gz` mask).
+  - Split by patient into **train (60%) / val (20%) / test (20%)** (`val_fraction`/
+    `test_fraction`, deterministic by `seed`). All three splits are **labeled**, so Dice
+    can be computed on any of them. `test` is simply never trained on — it's held out
+    for the post-training Dice quality summary (`evaluate_test_split` / `evaluate.py`)
+    and is also the patient pool the web UI's Patient dropdown offers.
+  - The old BraTS challenge `validation_data` folder (unlabeled, no `-seg`) is **not**
+    read by the pipeline — labeled data alone is used for everything.
   - **Smoke test / demo** reads the single-patient `paths.sample` (`data/sample/`) when
-    `inference.use_sample: true`, same toggle the other stages use.
-  - **No synthetic labels**: slices from `validation_data` never get a label file —
-    fabricating an empty/negative label there would assert "no tumour" as if it were
-    ground truth, which it is not.
+    `inference.use_sample: true`, same toggle the other stages use (unrelated to the
+    YOLO tab, which uses the labeled test split instead — see Stage F).
 - Volumes are 3D NIfTI (`.nii.gz`). We process **axial slices** along axis 2. Slices are
   **numbered from 1** — the first axial slice is `z = 1`, the last is `z = D` (depth). This
   1-based number is what appears in filenames and in the web UI; internally it maps to array
@@ -114,16 +112,13 @@ For every kept slice `z` (1-based; array index `z − 1`):
 
 ### Stage C — Dataset assembly & split
 - Split **by patient** (all slices of a patient go to the same split) to avoid leakage.
-- Use these sources:
-  - `train`: patients from `training_data1_v2` + `training_data_additional`, after
-    removing the holdout set used for `val`. Writes `images/train/` + `labels/train/`.
-  - `val`: holdout patients sampled only from the combined train source above
-    (default 20% via `val_fraction`, deterministic by `seed`). Writes `images/val/` +
-    `labels/val/`.
-  - `test`: all patients from `validation_data` (never used for training). **No**
-    `-seg` mask exists for this split, so only `images/test/` is written — there is no
-    `labels/test/`. It's for qualitative inference preview only; Ultralytics `model.val()`
-    metrics are only meaningful on `train`/`val`.
+- All three splits come from the same labeled pool (`training_data1_v2` +
+  `training_data_additional`), deterministic 60/20/20 by `seed`:
+  - `train` (60%): writes `images/train/` + `labels/train/`.
+  - `val` (20%): writes `images/val/` + `labels/val/`.
+  - `test` (20%, never trained on): writes `images/test/` + `labels/test/` — it has
+    ground truth too, just held out. Used for the post-training Dice quality summary
+    (`evaluate_test_split` / `evaluate.py`) and as the web UI's patient list.
 - Emit `YOLO/dataset/data.yaml`:
   ```yaml
   path: YOLO/dataset
@@ -148,12 +143,19 @@ model.train(data="YOLO/dataset/data.yaml",
             imgsz=PARAMS["imgsz"],
             batch=PARAMS["batch"])
 ```
-Best weights are copied to **`YOLO/weights/best.pt`** (the path the web UI loads).
+Best weights are evaluated on the held-out **test** split (`evaluate_test_split`, computing
+the overall mean Dice) and saved to a uniquely named
+**`YOLO/weights/best_<timestamp>_valloss<v>_testdice<v>.pt`** — never overwriting a previous
+checkpoint — plus a sidecar `.json` with the same stem holding the full per-epoch
+`results.csv` history, run params, and per-patient test Dice. The web UI's "Model" dropdown
+picks among all saved checkpoints (best-first); its "Show training data" button reads that
+sidecar. To re-run just the Dice summary on an existing checkpoint: `python YOLO\evaluate.py`.
 
 ### Stage E — Inference & evaluation
-- **Segmentation inference:** load `YOLO/weights/best.pt`, run on a slice's RGB image →
-  predicted instance masks with confidence scores; keep instances above `conf_threshold`.
-  A slice may contain multiple predicted masks.
+- **Segmentation inference:** load the selected `YOLO/weights/best_*.pt` checkpoint (default:
+  best available, by `test_dice`/`val_loss`), run on a slice's RGB image → predicted instance
+  masks with confidence scores; keep instances above `conf_threshold`. A slice may contain
+  multiple predicted masks.
 - **Per-slice Dice:** merge all predicted tumour instances on a slice into one binary WT mask
   (`pred_wt`), merge expert labels (`gt_wt = seg > 0`), then compute:
   $$
@@ -165,18 +167,24 @@ Best weights are copied to **`YOLO/weights/best.pt`** (the path the web UI loads
 
 ### Stage F — Web UI integration (`routes.py`, `render.py`, `Frontend/`)
 A Flask blueprint `yolo_bp` (prefix `/yolo`), registered in `Frontend/app.py`, mirrors the
-FCM tab:
-- `GET /yolo/api/patients` — patient list.
+FCM tab, with patients drawn from the labeled, held-out **test** split (`list_test_patients`)
+instead of `data/sample`:
+- `GET /yolo/api/patients` — test-split patient list.
 - `GET /yolo/api/patient/<idx>` — depth, best slice, slice indices.
-- `GET /yolo/segment.png?id=<idx>&z=<z>` — server-rendered matplotlib PNG of the selected
-  slice with **predicted masks** and **expert GT mask** overlaid (alpha colors), including
-  Dice for that selected slice.
-- `GET /yolo/api/dice?id=<idx>` — returns per-slice Dice values (for all valid slices) used by
-  the frontend summary table.
+- `GET /yolo/segment.png?id=<idx>&z=<z>&weights=<file>` — server-rendered matplotlib PNG of
+  the selected slice with **predicted masks** and **expert GT mask** overlaid (alpha colors),
+  including Dice for that selected slice.
+- `GET /yolo/api/dice?id=<idx>&weights=<file>` — returns per-slice Dice values (for all valid
+  slices) used by the frontend summary table.
+- `GET /yolo/api/weights` — list of trained checkpoints (`val_loss`, `test_dice`), best-first,
+  for the "Model" dropdown.
+- `GET /yolo/api/weights/<file>/info` — that checkpoint's full training metadata (per-epoch
+  history, run params, per-patient test Dice) for the "Show training data" button.
 A new **"YOLO Detection"** sidebar button (`index.html`), a nav switch in `app.js`, a new
-`yolo.js` (patient dropdown + slice slider, same controls as Explore), and matching
-`style.css` rules. In the YOLO tab, the user-selected slice is shown with mask overlays and its
-Dice score, and a summary table lists Dice per slice.
+`yolo.js` (patient dropdown, model dropdown, slice slider, same controls as Explore), and
+matching `style.css` rules. In the YOLO tab, the user-selected slice is shown with mask
+overlays and its Dice score, a summary table lists Dice per slice, and the training-data panel
+shows that checkpoint's metrics.
 
 ---
 
@@ -187,6 +195,7 @@ Dice score, and a summary table lists Dice per slice.
 | `min_mask_area`   | drop tumour components smaller than this (px)        | `50`    |
 | `min_fg_voxels`   | min foreground voxels for a slice to be kept         | `100`   |
 | `val_fraction`    | fraction of **patients** held out for validation     | `0.2`   |
+| `test_fraction`   | fraction of **patients** held out for the test split | `0.2`   |
 | `seed`            | RNG seed for the deterministic patient split         | `42`    |
 | `imgsz`           | YOLO training/inference image size                   | `512`   |
 | `epochs`          | fine-tuning epochs                                   | `100`   |
@@ -201,16 +210,18 @@ Dice score, and a summary table lists Dice per slice.
 ```
 YOLO/
 ├── README.md            # this spec
-├── pipeline.py          # RGB frame + label generation, dataset assembly
-├── train.py             # one-shot ultralytics fine-tuning wrapper
+├── pipeline.py          # RGB frame + label generation, dataset assembly, evaluate_test_split
+├── train.py             # one-shot ultralytics fine-tuning wrapper + test-Dice tagging
+├── evaluate.py          # standalone Dice quality summary on an existing checkpoint
 ├── render.py            # matplotlib PNG rendering with mask overlays + Dice text
-├── routes.py            # Flask blueprint (/yolo), incl. per-slice Dice API
+├── routes.py            # Flask blueprint (/yolo), incl. per-slice Dice + weights API
 ├── weights/
-│   └── best.pt          # fine-tuned weights (loaded by the web UI)
+│   ├── best_<timestamp>_valloss<v>_testdice<v>.pt   # one per training run
+│   └── best_<timestamp>_....json                     # sidecar training metadata
 └── dataset/             # generated by pipeline.py
     ├── data.yaml
     ├── images/{train,val,test}/<patient>_z<zzz>.png
-    └── labels/{train,val}/<patient>_z<zzz>.txt   # YOLO-seg polygon labels (test is unlabeled)
+    └── labels/{train,val,test}/<patient>_z<zzz>.txt   # YOLO-seg polygon labels (all 3 splits)
 ```
 
 ---
@@ -219,7 +230,8 @@ YOLO/
 
 - `YOLO/dataset/` — the generated YOLO detection dataset (images + normalised label txts +
   `data.yaml`).
-- `YOLO/weights/best.pt` — fine-tuned segmentation model.
+- `YOLO/weights/best_<timestamp>_valloss<v>_testdice<v>.pt` (+ sidecar `.json`) — one fine-tuned
+  segmentation checkpoint per training run, with its held-out test Dice tagged in the filename.
 - Ultralytics `runs/` training logs + segmentation metrics from `model.val()`.
 - Per-slice Dice outputs (e.g., in API JSON and optional CSV cache) for each patient.
 - Rendered segmentation PNGs streamed to the browser on demand (predicted vs. expert masks).

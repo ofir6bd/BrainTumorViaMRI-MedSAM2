@@ -7,11 +7,15 @@ Implements README.md:
   `routes.py` (Stage F, web UI).
 
 Data source (config.yaml -> paths.extract_to, default `data/dataset`):
-- Train pool : `training_data1_v2` + `training_data_additional` (split into train/val
-  by patient, deterministic via `seed`/`val_fraction`).
-- Test       : `validation_data` (fully isolated, never trained on).
+- Patient pool: `training_data1_v2` + `training_data_additional`, split by patient
+  (deterministic via `seed`) into train (60%) / val (20%) / test (20%) — all three
+  **labeled** (have expert `-seg` masks). `test` is held out from training entirely;
+  it's used only for the post-training Dice quality summary (`evaluate_test_split`,
+  `YOLO/evaluate.py`) and as the web UI's patient list (`list_test_patients`), never
+  for gradient updates or hyperparameter selection.
 """
 import glob
+import json
 import os
 import random
 import re
@@ -30,6 +34,7 @@ PARAMS = {
     "min_mask_area": 50,
     "min_fg_voxels": 100,
     "val_fraction": 0.2,
+    "test_fraction": 0.2,
     "seed": 42,
     "imgsz": 512,
     "epochs": 100,
@@ -46,20 +51,59 @@ _WEIGHTS_DIR = os.path.join(_HERE, "weights")
 _WEIGHTS_PATH = os.path.join(_WEIGHTS_DIR, "best.pt")  # legacy fallback, no metadata
 
 _WEIGHTS_NAME_RE = re.compile(
-    r"^best_(?P<stamp>\d{8}-\d{6})(?:_valloss(?P<valloss>\d+p\d+))?\.pt$"
+    r"^best_(?P<stamp>\d{8}-\d{6})"
+    r"(?:_valloss(?P<valloss>\d+p\d+))?"
+    r"(?:_testdice(?P<testdice>\d+p\d+))?"
+    r"\.pt$"
 )
 
 
 # ---------------------------------------------------------------------------
 # Weight-file discovery (README.md Stage D/F — one `.pt` per training run)
 # ---------------------------------------------------------------------------
+def weights_metadata_path(pt_path):
+    """Sidecar `.json` path for a weights `.pt` path (same stem, see `save_weights_metadata`)."""
+    return os.path.splitext(pt_path)[0] + ".json"
+
+
+def load_weights_metadata(pt_path):
+    """Load the sidecar training-metadata JSON for a weights file, if present.
+
+    Written by `YOLO/train.py` right after saving a run's checkpoint — holds the run's
+    params (epochs/imgsz/batch/data_fraction/max_patients), final val_loss/test_dice,
+    per-patient test Dice, and the full per-epoch `results.csv` history, so the UI's
+    "Show training data" button works even after `YOLO/runs/` is deleted. Returns `None`
+    if missing/unreadable (e.g. a manually renamed or pre-existing `.pt` with no sidecar).
+    """
+    meta_path = weights_metadata_path(pt_path)
+    if not os.path.exists(meta_path):
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def save_weights_metadata(pt_path, metadata):
+    """Write the sidecar `.json` next to a weights `.pt` (see `load_weights_metadata`)."""
+    meta_path = weights_metadata_path(pt_path)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+    return meta_path
+
+
 def list_weight_files():
     """List available YOLO weight checkpoints in `YOLO/weights/`.
 
-    Each entry: {"filename", "path", "timestamp" (datetime|None), "val_loss" (float|None)}.
-    Sorted best-first: lowest `val_loss` first (unknown `val_loss` last), ties broken by
-    most recent. Supports both the `best_<timestamp>_valloss<value>.pt` naming written by
-    `YOLO/train.py` and a legacy bare `best.pt` (no metadata) for backward compatibility.
+    Each entry: {"filename", "path", "timestamp" (datetime|None), "val_loss" (float|None),
+    "test_dice" (float|None), "has_training_info" (bool)}. Metadata is read first from
+    the sidecar `.json` (see `load_weights_metadata`) and falls back to parsing the
+    `best_<timestamp>[_valloss<v>][_testdice<v>].pt` filename for older/manually-placed
+    checkpoints with no sidecar.
+
+    Sorted best-first: highest `test_dice`, then lowest `val_loss`, then most recent —
+    entries missing a given metric sort after those that have it.
     """
     if not os.path.isdir(_WEIGHTS_DIR):
         return []
@@ -70,28 +114,54 @@ def list_weight_files():
         path = os.path.join(_WEIGHTS_DIR, name)
         if not os.path.isfile(path):
             continue
+
+        meta = load_weights_metadata(path)
         m = _WEIGHTS_NAME_RE.match(name)
+
         timestamp = None
         val_loss = None
+        test_dice = None
+
+        if meta:
+            ts = meta.get("timestamp")
+            if ts:
+                try:
+                    timestamp = datetime.fromisoformat(ts)
+                except ValueError:
+                    timestamp = None
+            val_loss = meta.get("val_loss")
+            test_dice = meta.get("test_dice")
+
         if m:
-            try:
-                timestamp = datetime.strptime(m.group("stamp"), "%Y%m%d-%H%M%S")
-            except ValueError:
-                timestamp = None
-            if m.group("valloss"):
+            if timestamp is None:
+                try:
+                    timestamp = datetime.strptime(m.group("stamp"), "%Y%m%d-%H%M%S")
+                except ValueError:
+                    timestamp = None
+            if val_loss is None and m.group("valloss"):
                 try:
                     val_loss = float(m.group("valloss").replace("p", "."))
                 except ValueError:
-                    val_loss = None
+                    pass
+            if test_dice is None and m.group("testdice"):
+                try:
+                    test_dice = float(m.group("testdice").replace("p", "."))
+                except ValueError:
+                    pass
+
         entries.append({
             "filename": name,
             "path": path,
             "timestamp": timestamp,
             "val_loss": val_loss,
+            "test_dice": test_dice,
+            "has_training_info": meta is not None,
         })
 
     def sort_key(e):
         return (
+            0 if e["test_dice"] is not None else 1,
+            -(e["test_dice"] if e["test_dice"] is not None else 0.0),
             0 if e["val_loss"] is not None else 1,
             e["val_loss"] if e["val_loss"] is not None else 0.0,
             -(e["timestamp"].timestamp() if e["timestamp"] else 0),
@@ -128,17 +198,12 @@ def _data_root():
 
 
 def train_pool_dirs():
-    """Folders that make up the combined train+val patient pool."""
+    """Folders that make up the combined train/val/test patient pool (all labeled)."""
     root = _data_root()
     return [
         os.path.join(root, "training_data1_v2"),
         os.path.join(root, "training_data_additional"),
     ]
-
-
-def test_dir():
-    """Folder used as the held-out test split (never trained on)."""
-    return os.path.join(_data_root(), "validation_data")
 
 
 def _find_modalities(patient_dir):
@@ -155,12 +220,8 @@ def _find_modalities(patient_dir):
 
 
 def _list_patients(root, require_seg=True):
-    """List patient dirs under `root` that have all four modalities.
-
-    `validation_data` is the official BraTS *challenge* validation split — it ships
-    without expert `-seg` masks (held out for leaderboard submission), so callers must
-    pass `require_seg=False` for it.
-    """
+    """List patient dirs under `root` that have all four modalities (and `-seg` if
+    `require_seg`)."""
     patients = []
     if not os.path.isdir(root):
         return patients
@@ -176,22 +237,24 @@ def _list_patients(root, require_seg=True):
 
 
 def split_patients(params=None, max_patients=None, fraction=None):
-    """Deterministic patient-level split: train / val (from the train pool) / test.
+    """Deterministic patient-level split: train / val / test — all three **labeled**
+    (have `-seg`), from the combined pool `training_data1_v2` + `training_data_additional`.
 
-    - `train`/`val`: from the combined train pool, both **labeled** (have `-seg`).
-    - `test`: `validation_data` patients — **unlabeled** (no `-seg`; BraTS challenge
-      validation split). Usable only for qualitative inference, never for Dice/mAP.
+    Ratios: train 60% / val 20% / test 20% (`PARAMS["val_fraction"]`/`["test_fraction"]`).
+    `test` is fully held out from training — used only for the post-training Dice
+    quality summary (`evaluate_test_split`) and as the web UI's patient list, never for
+    gradient updates or hyperparameter selection.
 
     `fraction` (0 < fraction <= 1, default `None` = all): keeps this fraction of each
-    split's patients (train, val, test independently), preserving the train/val ratio
-    -- e.g. `fraction=0.5` trains on half the data while keeping the same ~80/20
-    train/val proportion. Applied on the already-shuffled deterministic order, so it's
-    still a reproducible subset.
+    split's patients (train, val, test independently), preserving the 60/20/20 ratio
+    -- e.g. `fraction=0.5` trains on half the data while keeping the same proportions.
+    Applied on the already-shuffled deterministic order, so it's still a reproducible
+    subset.
 
     `max_patients` caps each split's **absolute** patient count on top of `fraction`.
     It's a smoke-test-only knob (small n) — leave it `None` for a real run; unlike
-    `fraction` it does NOT preserve the train/val ratio (a small absolute cap applied
-    to both splits equally will disproportionately shrink the larger split).
+    `fraction` it does NOT preserve the split ratio (a small absolute cap applied to
+    all splits equally will disproportionately shrink the larger ones).
 
     Returns {"train": [...], "val": [...], "test": [...]}, each a list of
     {"patient_id", "dir"} dicts.
@@ -209,10 +272,12 @@ def split_patients(params=None, max_patients=None, fraction=None):
     shuffled = list(pool)
     rng.shuffle(shuffled)
 
-    n_val = int(round(len(shuffled) * p["val_fraction"]))
-    val = shuffled[:n_val]
-    train = shuffled[n_val:]
-    test = _list_patients(test_dir(), require_seg=False)
+    n = len(shuffled)
+    n_test = int(round(n * p["test_fraction"]))
+    n_val = int(round(n * p["val_fraction"]))
+    test = shuffled[:n_test]
+    val = shuffled[n_test:n_test + n_val]
+    train = shuffled[n_test + n_val:]
 
     if fraction is not None:
         if not (0 < fraction <= 1):
@@ -226,6 +291,17 @@ def split_patients(params=None, max_patients=None, fraction=None):
         val = val[:max_patients]
         test = test[:max_patients]
     return {"train": train, "val": val, "test": test}
+
+
+def list_test_patients(params=None):
+    """Patients in the labeled, held-out test split — used as the YOLO web UI's Patient
+    dropdown (only test-split patients are offered, never train/val, so every Dice score
+    shown in the UI is on data the model never saw during training).
+    """
+    p = dict(PARAMS)
+    if params:
+        p.update(params)
+    return split_patients(p)["test"]
 
 
 # ---------------------------------------------------------------------------
@@ -303,14 +379,12 @@ def _yolo_seg_lines(polys, h, w):
 # Stage A-C — dataset build
 # ---------------------------------------------------------------------------
 def build_dataset(output_dir=None, params=None, log=print, max_patients=None, fraction=None):
-    """Build `YOLO/dataset/images/{train,val,test}` + `labels/{train,val}` + `data.yaml`.
-
-    `test` (validation_data) has no expert `-seg` mask, so no `labels/test/` is written
-    for it — see `split_patients`. Writing empty/negative labels there would fabricate
-    ground truth that doesn't exist, which this project never does.
+    """Build `YOLO/dataset/images/{train,val,test}` + `labels/{train,val,test}` +
+    `data.yaml`. All three splits are labeled (see `split_patients`), so `labels/test/`
+    is written just like `train`/`val` — `test` just isn't trained on.
 
     `fraction` (0 < fraction <= 1, default `None` = all): train on this fraction of
-    each split's patients while preserving the train/val ratio — see `split_patients`.
+    each split's patients while preserving the 60/20/20 ratio — see `split_patients`.
 
     `max_patients` (smoke-test only, default `None`): cap each split to this many
     patients — see `split_patients`.
@@ -370,8 +444,7 @@ def build_dataset(output_dir=None, params=None, log=print, max_patients=None, fr
 
             log(f"[{split_name}] {pid}: {depth} slices scanned")
         counts[split_name] = n_slices
-        log(f"[{split_name}] {len(patients)} patients, {n_slices} slices kept"
-            + ("" if split_name != "test" else " (unlabeled, inference-only)"))
+        log(f"[{split_name}] {len(patients)} patients, {n_slices} slices kept")
 
     data_yaml = os.path.join(out_root, "data.yaml")
     with open(data_yaml, "w", encoding="utf-8") as f:
@@ -506,7 +579,15 @@ class YoloPipeline:
 
         model = self._model_instance()
         if model is not None:
-            results = model.predict(rgb, conf=self.p["conf_threshold"], verbose=False)
+            # `rgb` is RGB (R=T1C-T1, G=T2, B=FLAIR), matching the RGB PNGs training
+            # was built from. Ultralytics assumes a *numpy* array is already BGR and
+            # would silently swap R<->B, feeding the model FLAIR where it learned
+            # enhancement (great val metrics on the PNGs, poor real inference here).
+            # Passing a PIL image makes Ultralytics honour the true RGB order, so
+            # inference sees exactly what training did.
+            from PIL import Image
+            results = model.predict(Image.fromarray(rgb), conf=self.p["conf_threshold"],
+                                     verbose=False)
             r0 = results[0]
             if r0.masks is not None:
                 if r0.boxes is not None and r0.boxes.conf is not None:
@@ -537,3 +618,59 @@ class YoloPipeline:
     def dice_table(self):
         """Per-slice Dice for all valid (processed) slices."""
         return [{"z": z, "dice": self.process_slice(z)["dice"]} for z in self.slice_indices]
+
+
+# ---------------------------------------------------------------------------
+# Stage D+ — post-training Dice quality summary on the held-out test split
+# ---------------------------------------------------------------------------
+def evaluate_test_split(weights_path=None, params=None, max_patients=None, fraction=None,
+                         log=print):
+    """Run inference with `weights_path` (default: best available checkpoint) over every
+    patient in the labeled, held-out test split (`list_test_patients`) and report
+    per-patient + overall mean Dice — the "quality of the training" summary. Used by
+    both `YOLO/train.py` (right after a training run, to tag the saved checkpoint) and
+    the standalone `YOLO/evaluate.py` CLI.
+
+    `max_patients`/`fraction`: forwarded to `split_patients` so a training run that
+    subsampled its dataset evaluates on the *same* test patients it built, rather than
+    the full test split.
+
+    Returns {"weights_path", "n_patients", "per_patient": [{"patient_id", "mean_dice",
+    "n_slices"}], "overall_mean_dice"}. `overall_mean_dice` is the mean Dice over every
+    processed slice across every test patient (not a mean-of-means), so patients with
+    more slices contribute proportionally more. `None` values mean no processed slices
+    were found at all (e.g. an empty test split).
+    """
+    wp = weights_path or default_weights_path()
+    p = dict(PARAMS)
+    if params:
+        p.update(params)
+    test_patients = split_patients(p, max_patients=max_patients, fraction=fraction)["test"]
+
+    per_patient = []
+    all_dices = []
+    for entry in test_patients:
+        pl = YoloPipeline(entry["dir"], params=p, weights_path=wp)
+        rows = pl.dice_table()
+        dices = [r["dice"] for r in rows]
+        mean_dice = float(np.mean(dices)) if dices else None
+        per_patient.append({
+            "patient_id": entry["patient_id"],
+            "mean_dice": mean_dice,
+            "n_slices": len(dices),
+        })
+        all_dices.extend(dices)
+        log(f"[evaluate] {entry['patient_id']}: mean Dice = "
+            + (f"{mean_dice:.4f}" if mean_dice is not None else "n/a")
+            + f"  ({len(dices)} slices)")
+
+    overall = float(np.mean(all_dices)) if all_dices else None
+    log(f"[evaluate] Overall mean Dice over {len(all_dices)} slices, "
+        f"{len(test_patients)} patients: "
+        + (f"{overall:.4f}" if overall is not None else "n/a"))
+    return {
+        "weights_path": wp,
+        "n_patients": len(test_patients),
+        "per_patient": per_patient,
+        "overall_mean_dice": overall,
+    }
