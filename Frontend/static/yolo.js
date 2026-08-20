@@ -7,10 +7,11 @@ const Y = {
   patients: [],
   patientIdx: 0,
   patient: null,      // { patient_id, depth, slice_indices, best_slice_index, min_fg_voxels }
-  weights: [],         // [{ filename, label, val_loss }] from /yolo/api/weights, best-first
-  weightsFile: "",     // selected filename, "" = server default (best by val_loss)
+  weights: [],         // [{ filename, label, val_loss, test_dice, has_training_info }] best-first
+  weightsFile: "",     // selected filename, "" = server default (best available)
   diceRows: {},        // `${patientIdx}::${weightsFile}` -> rows from /yolo/api/dice
   view: "segment",     // "segment" | "summary"
+  trainingOpen: false,
   ready: false,
 };
 
@@ -31,6 +32,9 @@ async function initYolo() {
   yel.summaryPanel = document.getElementById("yoloSummaryPanel");
   yel.summaryWrap = document.getElementById("yoloSummaryTableWrap");
   yel.main = document.querySelector("#yoloPanel main");
+  yel.showTrainingBtn = document.getElementById("yoloShowTraining");
+  yel.trainingPanel = document.getElementById("yoloTrainingPanel");
+  yel.trainingWrap = document.getElementById("yoloTrainingWrap");
 
   Y.patients = await (await fetch("/yolo/api/patients")).json();
   yel.sel.innerHTML = "";
@@ -53,6 +57,7 @@ async function initYolo() {
     Y.weightsFile = e.target.value;
     renderSlice();
     if (Y.view === "summary") renderSummaryTable(Y.patientIdx);
+    if (Y.trainingOpen) loadTrainingInfo();
   });
   yel.zSlider.addEventListener("input", renderSlice);
   yel.bestBtn.addEventListener("click", () => {
@@ -64,6 +69,9 @@ async function initYolo() {
     if (!btn) return;
     setYoloView(btn.dataset.yview);
   });
+  if (yel.showTrainingBtn) {
+    yel.showTrainingBtn.addEventListener("click", toggleTrainingInfo);
+  }
 
   await loadPatient(0);
 }
@@ -92,6 +100,132 @@ async function loadWeightsList() {
   // First entry is the best-by-val_loss model (see list_weight_files sort order).
   Y.weightsFile = Y.weights[0].filename;
   yel.modelSel.value = Y.weightsFile;
+}
+
+async function toggleTrainingInfo() {
+  if (!yel.trainingPanel) return;
+  Y.trainingOpen = !Y.trainingOpen;
+  yel.trainingPanel.classList.toggle("hidden", !Y.trainingOpen);
+  yel.showTrainingBtn.textContent = Y.trainingOpen ? "Hide training data" : "Show training data";
+  if (Y.trainingOpen) await loadTrainingInfo();
+}
+
+async function loadTrainingInfo() {
+  if (!yel.trainingWrap) return;
+  if (!Y.weightsFile) {
+    yel.trainingWrap.textContent = "No model selected.";
+    return;
+  }
+  yel.trainingWrap.textContent = "Loading training data…";
+  try {
+    const resp = await fetch(`/yolo/api/weights/${encodeURIComponent(Y.weightsFile)}/info`);
+    const meta = await resp.json();
+    renderTrainingInfo(meta);
+  } catch (e) {
+    yel.trainingWrap.textContent = "Failed to load training data.";
+  }
+}
+
+function _trainingTable(columns, rows, formatters) {
+  const wrap = document.createElement("div");
+  wrap.className = "yolo-training-table-wrap";
+  const table = document.createElement("table");
+  table.className = "yolo-summary-table";
+
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  columns.forEach((c) => {
+    const th = document.createElement("th");
+    th.textContent = c.label;
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    columns.forEach((c) => {
+      const td = document.createElement("td");
+      td.textContent = formatters(row, c.key);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  return wrap;
+}
+
+function renderTrainingInfo(meta) {
+  yel.trainingWrap.innerHTML = "";
+  if (!meta || meta.available === false) {
+    yel.trainingWrap.textContent = "No training data recorded for this checkpoint.";
+    return;
+  }
+
+  const fmt = (v, d = 4) => (typeof v === "number" ? v.toFixed(d) : "—");
+
+  const summary = document.createElement("div");
+  summary.className = "yolo-training-grid";
+  const summaryRows = [
+    ["Trained", meta.timestamp ? meta.timestamp.replace("T", " ") : "—"],
+    ["Epochs", meta.epochs ?? "—"],
+    ["Image size", meta.imgsz ?? "—"],
+    ["Batch size", meta.batch ?? "—"],
+    ["Best val loss", fmt(meta.val_loss)],
+    ["Test Dice (mean)", fmt(meta.test_dice)],
+    ["Test patients", meta.n_test_patients ?? "—"],
+    ["Data fraction", meta.data_fraction ?? "full"],
+    ["Max patients", meta.max_patients ?? "—"],
+  ];
+  summaryRows.forEach(([k, v]) => {
+    const item = document.createElement("div");
+    item.className = "yolo-training-item";
+    const kSpan = document.createElement("span");
+    kSpan.className = "k";
+    kSpan.textContent = k;
+    const vSpan = document.createElement("span");
+    vSpan.className = "v";
+    vSpan.textContent = String(v);
+    item.appendChild(kSpan);
+    item.appendChild(vSpan);
+    summary.appendChild(item);
+  });
+  yel.trainingWrap.appendChild(summary);
+
+  const history = Array.isArray(meta.metrics_history) ? meta.metrics_history : [];
+  if (history.length) {
+    const allCols = ["epoch", "train/box_loss", "train/seg_loss", "val/box_loss",
+                     "val/seg_loss", "metrics/mAP50(M)", "metrics/mAP50-95(M)"];
+    const cols = allCols.filter((c) => history.some((r) => c in r))
+      .map((c) => ({ key: c, label: c }));
+    const h4 = document.createElement("h4");
+    h4.textContent = "Per-epoch metrics";
+    yel.trainingWrap.appendChild(h4);
+    yel.trainingWrap.appendChild(_trainingTable(cols, history, (row, key) => {
+      const v = row[key];
+      if (typeof v !== "number") return "";
+      return key === "epoch" ? String(v) : v.toFixed(4);
+    }));
+  }
+
+  const perPatient = Array.isArray(meta.per_patient_test_dice) ? meta.per_patient_test_dice : [];
+  if (perPatient.length) {
+    const h4 = document.createElement("h4");
+    h4.textContent = "Per-patient test Dice";
+    yel.trainingWrap.appendChild(h4);
+    const cols = [
+      { key: "patient_id", label: "patient" },
+      { key: "mean_dice", label: "mean dice" },
+      { key: "n_slices", label: "slices" },
+    ];
+    yel.trainingWrap.appendChild(_trainingTable(cols, perPatient, (row, key) => {
+      const v = row[key];
+      if (key === "mean_dice") return typeof v === "number" ? v.toFixed(4) : "—";
+      return v === undefined || v === null ? "" : String(v);
+    }));
+  }
 }
 
 function bestZ() {

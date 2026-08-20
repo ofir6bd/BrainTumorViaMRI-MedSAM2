@@ -299,6 +299,52 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   border-bottom: 0;
 }
 
+.yolo-training {
+  padding: 4px 24px 20px;
+}
+
+.yolo-training-wrap h4 {
+  margin: 18px 0 10px;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.yolo-training-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 24px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.yolo-training-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.yolo-training-item .k {
+  color: var(--muted);
+}
+
+.yolo-training-item .v {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.yolo-training-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  margin-bottom: 10px;
+}
+
 .controls {
   display: flex;
   flex-wrap: wrap;

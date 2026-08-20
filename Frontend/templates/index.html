@@ -145,12 +145,24 @@
             <select id="yoloModel"></select>
           </label>
 
+          <div class="field">
+            <span>&nbsp;</span>
+            <button id="yoloShowTraining" type="button">Show training data</button>
+          </div>
+
           <div class="field slice-field" id="yoloSliceField">
             <span>Slice</span>
             <button id="yoloBest" type="button">Best</button>
             <input type="range" id="yoloZ" min="0" max="0" value="0">
             <span id="yoloZLabel" class="zlabel">z = 0</span>
           </div>
+        </section>
+
+        <section id="yoloTrainingPanel" class="yolo-training hidden">
+          <div class="yolo-summary-head">
+            <h3>Training data</h3>
+          </div>
+          <div id="yoloTrainingWrap" class="yolo-training-wrap"></div>
         </section>
 
         <main>
