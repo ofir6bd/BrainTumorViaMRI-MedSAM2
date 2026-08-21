@@ -157,6 +157,82 @@ function _trainingTable(columns, rows, formatters) {
   return wrap;
 }
 
+// Minimal dependency-free SVG line chart (no external chart library / CDN needed).
+// seriesList: [{ label, color, data: [{x, y}, ...] }, ...]. Returns null if there is
+// no plottable data at all.
+function _lineChartSVG(seriesList, opts = {}) {
+  const width = opts.width || 580;
+  const height = opts.height || 200;
+  const padLeft = 46;
+  const padRight = 12;
+  const padTop = 12;
+  const padBottom = 26;
+
+  const plottable = seriesList.filter((s) => s.data && s.data.length);
+  const allPoints = plottable.flatMap((s) => s.data);
+  if (!allPoints.length) return null;
+
+  const xs = allPoints.map((p) => p.x);
+  const ys = allPoints.map((p) => p.y);
+  let xMin = Math.min(...xs), xMax = Math.max(...xs);
+  let yMin = Math.min(...ys), yMax = Math.max(...ys);
+  if (xMax === xMin) xMax = xMin + 1;
+  if (yMax === yMin) { yMax += 1; yMin -= 1; }
+
+  const plotW = width - padLeft - padRight;
+  const plotH = height - padTop - padBottom;
+  const sx = (x) => padLeft + ((x - xMin) / (xMax - xMin)) * plotW;
+  const sy = (y) => padTop + plotH - ((y - yMin) / (yMax - yMin)) * plotH;
+
+  let svg = `<svg viewBox="0 0 ${width} ${height}" class="yolo-chart-svg" `
+    + `preserveAspectRatio="xMidYMid meet">`;
+
+  const yTicks = [yMin, (yMin + yMax) / 2, yMax];
+  yTicks.forEach((t) => {
+    const y = sy(t);
+    svg += `<line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${padLeft + plotW}" `
+      + `y2="${y.toFixed(1)}" class="yolo-chart-grid" />`;
+    svg += `<text x="${padLeft - 6}" y="${(y + 3).toFixed(1)}" `
+      + `class="yolo-chart-ticklabel" text-anchor="end">${t.toFixed(2)}</text>`;
+  });
+  [xMin, xMax].forEach((t) => {
+    const x = sx(t);
+    svg += `<text x="${x.toFixed(1)}" y="${(padTop + plotH + 18).toFixed(1)}" `
+      + `class="yolo-chart-ticklabel" text-anchor="middle">${Math.round(t)}</text>`;
+  });
+  svg += `<line x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${padTop + plotH}" `
+    + `class="yolo-chart-axis" />`;
+  svg += `<line x1="${padLeft}" y1="${padTop + plotH}" x2="${padLeft + plotW}" `
+    + `y2="${padTop + plotH}" class="yolo-chart-axis" />`;
+
+  plottable.forEach((s) => {
+    const d = s.data
+      .map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`)
+      .join(" ");
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" />`;
+  });
+  svg += `</svg>`;
+
+  const wrap = document.createElement("div");
+  wrap.className = "yolo-chart-wrap";
+  wrap.innerHTML = svg;
+
+  const legend = document.createElement("div");
+  legend.className = "yolo-chart-legend";
+  plottable.forEach((s) => {
+    const item = document.createElement("span");
+    item.className = "yolo-chart-legend-item";
+    const swatch = document.createElement("i");
+    swatch.style.background = s.color;
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(s.label));
+    legend.appendChild(item);
+  });
+  wrap.appendChild(legend);
+  return wrap;
+}
+
+
 function renderTrainingInfo(meta) {
   yel.trainingWrap.innerHTML = "";
   if (!meta || meta.available === false) {
@@ -175,6 +251,8 @@ function renderTrainingInfo(meta) {
     ["Batch size", meta.batch ?? "—"],
     ["Best val loss", fmt(meta.val_loss)],
     ["Test Dice (mean)", fmt(meta.test_dice)],
+    ["Train patients", meta.n_train_patients ?? "—"],
+    ["Val patients", meta.n_val_patients ?? "—"],
     ["Test patients", meta.n_test_patients ?? "—"],
     ["Data fraction", meta.data_fraction ?? "full"],
     ["Max patients", meta.max_patients ?? "—"],
@@ -196,6 +274,52 @@ function renderTrainingInfo(meta) {
 
   const history = Array.isArray(meta.metrics_history) ? meta.metrics_history : [];
   if (history.length) {
+    const epochs = history.map((r, i) => (typeof r.epoch === "number" ? r.epoch : i + 1));
+    const cols0 = Object.keys(history[0] || {});
+    const trainLossCols = cols0.filter((c) => c.startsWith("train/") && c.endsWith("_loss"));
+    const valLossCols = cols0.filter((c) => c.startsWith("val/") && c.endsWith("_loss"));
+    const sumCols = (row, cols) =>
+      cols.reduce((s, c) => s + (typeof row[c] === "number" ? row[c] : 0), 0);
+
+    const lossSeries = [];
+    if (trainLossCols.length) {
+      lossSeries.push({
+        label: "Train loss", color: "#3b82f6",
+        data: history.map((r, i) => ({ x: epochs[i], y: sumCols(r, trainLossCols) })),
+      });
+    }
+    if (valLossCols.length) {
+      lossSeries.push({
+        label: "Val loss", color: "#ef4444",
+        data: history.map((r, i) => ({ x: epochs[i], y: sumCols(r, valLossCols) })),
+      });
+    }
+    const lossChart = lossSeries.length ? _lineChartSVG(lossSeries) : null;
+    if (lossChart) {
+      const h4 = document.createElement("h4");
+      h4.textContent = "Training curves — loss (train vs. val)";
+      yel.trainingWrap.appendChild(h4);
+      yel.trainingWrap.appendChild(lossChart);
+    }
+
+    const mapCols = [
+      ["metrics/mAP50(M)", "mAP50", "#10b981"],
+      ["metrics/mAP50-95(M)", "mAP50-95", "#f59e0b"],
+    ].filter(([key]) => cols0.includes(key));
+    const mapSeries = mapCols.map(([key, label, color]) => ({
+      label, color,
+      data: history.map((r, i) => ({
+        x: epochs[i], y: typeof r[key] === "number" ? r[key] : 0,
+      })),
+    }));
+    const mapChart = mapSeries.length ? _lineChartSVG(mapSeries) : null;
+    if (mapChart) {
+      const h4b = document.createElement("h4");
+      h4b.textContent = "Training curves — mAP";
+      yel.trainingWrap.appendChild(h4b);
+      yel.trainingWrap.appendChild(mapChart);
+    }
+
     const allCols = ["epoch", "train/box_loss", "train/seg_loss", "val/box_loss",
                      "val/seg_loss", "metrics/mAP50(M)", "metrics/mAP50-95(M)"];
     const cols = allCols.filter((c) => history.some((r) => c in r))
