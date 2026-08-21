@@ -78,7 +78,14 @@ def _legend(ax, entries):
         text.set_color(FG)
 
 
-def render(pipeline, z, slice_no=None):
+def render(pipeline, z, slice_no=None, show_gt=True, show_pred=True, show_overlap=True):
+    """Render the 3-panel segmentation figure.
+
+    `show_gt` / `show_pred` / `show_overlap` (all default True) let the caller hide any
+    of the three overlay layers from the drawing without touching the underlying Dice
+    computation (that always uses the full masks) — driven by the clickable legend in
+    the web UI (see `routes.py:segment_png`).
+    """
     pl = pipeline
     slice_label = f"slice #{slice_no}" if slice_no is not None else f"z={z}"
 
@@ -98,30 +105,39 @@ def render(pipeline, z, slice_no=None):
 
     s = pl.process_slice(z)
     gt, pred = s["gt_wt"], s["pred_wt"]
+    gt_disp = gt if show_gt else np.zeros_like(gt)
+    pred_disp = pred if show_pred else np.zeros_like(pred)
     dim = _dimmed(s["rgb"])
 
     fig, axes = plt.subplots(1, 3, figsize=(16, 6.6), facecolor=BG)
 
     # -- Ground truth ---------------------------------------------------
     ax_gt = axes[0]
-    ax_gt.imshow(_paint(dim, gt, GT_RGB))
-    _style(ax_gt, "Expert ground truth")
+    ax_gt.imshow(_paint(dim, gt_disp, GT_RGB))
+    gt_title = "Expert ground truth" + ("" if show_gt else "  (hidden)")
+    _style(ax_gt, gt_title)
     _legend(ax_gt, [("Ground truth", GT_RGB)])
 
     # -- Prediction -------------------------------------------------------
     ax_pred = axes[1]
-    ax_pred.imshow(_paint(dim, pred, PRED_RGB))
+    ax_pred.imshow(_paint(dim, pred_disp, PRED_RGB))
     pred_title = "YOLO prediction"
     if s["model_error"]:
         pred_title += "  (no model)"
+    elif not show_pred:
+        pred_title += "  (hidden)"
     _style(ax_pred, pred_title)
     _legend(ax_pred, [("Prediction", PRED_RGB)])
 
     # -- Combined ---------------------------------------------------------
     ax_comb = axes[2]
-    combined = _paint(dim, gt, GT_RGB)
-    combined = _paint(combined, pred, PRED_RGB)
-    combined = _paint(combined, gt & pred, OVERLAP_RGB, fill_alpha=0.5)
+    combined = dim
+    if show_gt:
+        combined = _paint(combined, gt, GT_RGB)
+    if show_pred:
+        combined = _paint(combined, pred, PRED_RGB)
+    if show_gt and show_pred and show_overlap:
+        combined = _paint(combined, gt & pred, OVERLAP_RGB, fill_alpha=0.5)
     ax_comb.imshow(combined)
     _style(ax_comb, f"Combined  -  Dice={s['dice']:.3f}")
     _legend(ax_comb, [

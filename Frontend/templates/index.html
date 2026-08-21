@@ -168,12 +168,24 @@
         <main>
           <p id="yoloStatus" class="status">Loading&hellip;</p>
           <img id="yoloViewer" alt="" />
+          <div id="yoloMaskLegend" class="yolo-chart-legend yolo-mask-legend">
+            <span class="yolo-chart-legend-item" data-mask="gt" title="Click to show/hide ground truth">
+              <i style="background:#26ff26"></i>Ground truth
+            </span>
+            <span class="yolo-chart-legend-item" data-mask="pred" title="Click to show/hide prediction">
+              <i style="background:#ff2626"></i>Prediction
+            </span>
+            <span class="yolo-chart-legend-item" data-mask="overlap" title="Click to show/hide overlap">
+              <i style="background:#fff21a"></i>Overlap
+            </span>
+          </div>
         </main>
 
         <section id="yoloSummaryPanel" class="yolo-summary hidden">
           <div class="yolo-summary-head">
             <h3>Per-slice Dice summary</h3>
           </div>
+          <div id="yoloSliceDiceChart" class="yolo-slice-dice-chart"></div>
           <div id="yoloSummaryTableWrap" class="yolo-summary-table-wrap"></div>
         </section>
       </section>

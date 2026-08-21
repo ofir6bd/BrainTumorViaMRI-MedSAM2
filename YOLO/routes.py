@@ -100,6 +100,13 @@ def api_patient(idx):
     })
 
 
+def _parse_bool(value, default=True):
+    """`"0"`/`"false"`/`""` -> False, anything else (including missing) -> `default`."""
+    if value is None:
+        return default
+    return value.lower() not in ("0", "false")
+
+
 @yolo_bp.route("/segment.png")
 def segment_png():
     idx = int(request.args.get("id", -1))
@@ -109,7 +116,11 @@ def segment_png():
         slice_no = pl.slice_indices.index(z) + 1
     except ValueError:
         slice_no = None
-    buf = R.render(pl, z, slice_no=slice_no)
+    show_gt = _parse_bool(request.args.get("gt"))
+    show_pred = _parse_bool(request.args.get("pred"))
+    show_overlap = _parse_bool(request.args.get("overlap"))
+    buf = R.render(pl, z, slice_no=slice_no,
+                   show_gt=show_gt, show_pred=show_pred, show_overlap=show_overlap)
     return send_file(buf, mimetype="image/png")
 
 

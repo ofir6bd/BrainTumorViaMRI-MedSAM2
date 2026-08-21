@@ -13,6 +13,9 @@ const Y = {
   view: "segment",     // "segment" | "summary"
   trainingOpen: false,
   ready: false,
+  showGT: true,
+  showPred: true,
+  showOverlap: true,
 };
 
 const yel = {};
@@ -31,10 +34,12 @@ async function initYolo() {
   yel.views = document.getElementById("yoloViews");
   yel.summaryPanel = document.getElementById("yoloSummaryPanel");
   yel.summaryWrap = document.getElementById("yoloSummaryTableWrap");
+  yel.summaryChartWrap = document.getElementById("yoloSliceDiceChart");
   yel.main = document.querySelector("#yoloPanel main");
   yel.showTrainingBtn = document.getElementById("yoloShowTraining");
   yel.trainingPanel = document.getElementById("yoloTrainingPanel");
   yel.trainingWrap = document.getElementById("yoloTrainingWrap");
+  yel.maskLegend = document.getElementById("yoloMaskLegend");
 
   Y.patients = await (await fetch("/yolo/api/patients")).json();
   yel.sel.innerHTML = "";
@@ -71,6 +76,19 @@ async function initYolo() {
   });
   if (yel.showTrainingBtn) {
     yel.showTrainingBtn.addEventListener("click", toggleTrainingInfo);
+  }
+  if (yel.maskLegend) {
+    yel.maskLegend.addEventListener("click", (e) => {
+      const item = e.target.closest(".yolo-chart-legend-item");
+      if (!item) return;
+      const mask = item.dataset.mask;
+      if (mask === "gt") Y.showGT = !Y.showGT;
+      else if (mask === "pred") Y.showPred = !Y.showPred;
+      else if (mask === "overlap") Y.showOverlap = !Y.showOverlap;
+      else return;
+      item.classList.toggle("off");
+      renderSlice();
+    });
   }
 
   await loadPatient(0);
@@ -163,10 +181,10 @@ function _trainingTable(columns, rows, formatters) {
 function _lineChartSVG(seriesList, opts = {}) {
   const width = opts.width || 580;
   const height = opts.height || 200;
-  const padLeft = 46;
+  const padLeft = 54;
   const padRight = 12;
   const padTop = 12;
-  const padBottom = 26;
+  const padBottom = 30;
 
   const plottable = seriesList.filter((s) => s.data && s.data.length);
   const allPoints = plottable.flatMap((s) => s.data);
@@ -185,7 +203,7 @@ function _lineChartSVG(seriesList, opts = {}) {
   const sy = (y) => padTop + plotH - ((y - yMin) / (yMax - yMin)) * plotH;
 
   let svg = `<svg viewBox="0 0 ${width} ${height}" class="yolo-chart-svg" `
-    + `preserveAspectRatio="xMidYMid meet">`;
+    + `style="height:${height}px" preserveAspectRatio="xMidYMid meet">`;
 
   const yTicks = [yMin, (yMin + yMax) / 2, yMax];
   yTicks.forEach((t) => {
@@ -193,23 +211,32 @@ function _lineChartSVG(seriesList, opts = {}) {
     svg += `<line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${padLeft + plotW}" `
       + `y2="${y.toFixed(1)}" class="yolo-chart-grid" />`;
     svg += `<text x="${padLeft - 6}" y="${(y + 3).toFixed(1)}" `
-      + `class="yolo-chart-ticklabel" text-anchor="end">${t.toFixed(2)}</text>`;
+      + `class="yolo-chart-ticklabel yolo-chart-ylabel" text-anchor="end">${t.toFixed(2)}</text>`;
   });
-  [xMin, xMax].forEach((t) => {
+  const xTickCount = opts.xTickCount || 2;
+  for (let i = 0; i <= xTickCount; i++) {
+    const t = xMin + (i / xTickCount) * (xMax - xMin);
     const x = sx(t);
     svg += `<text x="${x.toFixed(1)}" y="${(padTop + plotH + 18).toFixed(1)}" `
-      + `class="yolo-chart-ticklabel" text-anchor="middle">${Math.round(t)}</text>`;
-  });
+      + `class="yolo-chart-ticklabel yolo-chart-xlabel" text-anchor="middle">${Math.round(t)}</text>`;
+  }
   svg += `<line x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${padTop + plotH}" `
     + `class="yolo-chart-axis" />`;
   svg += `<line x1="${padLeft}" y1="${padTop + plotH}" x2="${padLeft + plotW}" `
     + `y2="${padTop + plotH}" class="yolo-chart-axis" />`;
 
-  plottable.forEach((s) => {
+  if (typeof opts.markerX === "number" && opts.markerX >= xMin && opts.markerX <= xMax) {
+    const mx = sx(opts.markerX);
+    svg += `<line x1="${mx.toFixed(1)}" y1="${padTop}" x2="${mx.toFixed(1)}" `
+      + `y2="${padTop + plotH}" class="yolo-chart-mean-line" />`;
+  }
+
+  plottable.forEach((s, i) => {
     const d = s.data
-      .map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`)
+      .map((p, j) => `${j === 0 ? "M" : "L"} ${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`)
       .join(" ");
-    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" />`;
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" `
+      + `class="yolo-series-line" data-series-idx="${i}" />`;
   });
   svg += `</svg>`;
 
@@ -219,16 +246,124 @@ function _lineChartSVG(seriesList, opts = {}) {
 
   const legend = document.createElement("div");
   legend.className = "yolo-chart-legend";
-  plottable.forEach((s) => {
+  plottable.forEach((s, i) => {
     const item = document.createElement("span");
     item.className = "yolo-chart-legend-item";
+    item.title = "Click to show/hide this series";
     const swatch = document.createElement("i");
     swatch.style.background = s.color;
     item.appendChild(swatch);
     item.appendChild(document.createTextNode(s.label));
+    item.addEventListener("click", () => {
+      const path = wrap.querySelector(`path[data-series-idx="${i}"]`);
+      const nowOff = item.classList.toggle("off");
+      if (path) path.style.display = nowOff ? "none" : "";
+    });
     legend.appendChild(item);
   });
   wrap.appendChild(legend);
+  return wrap;
+}
+
+// Minimal dependency-free SVG histogram. `values`: array of numbers (e.g. per-patient
+// mean Dice). Bins the range [0, 1] (or the data's own min/max if `range` isn't given)
+// into equal-width buckets and draws a bar chart, with an optional vertical marker line
+// for the overall mean. Returns null if there are no values to plot.
+function _histogramSVG(values, opts = {}) {
+  const width = opts.width || 580;
+  const height = opts.height || 200;
+  const padLeft = 54;
+  const padRight = 12;
+  const padTop = 12;
+  const padBottom = 38;
+  const bins = opts.bins || 10;
+  const color = opts.color || "#8b5cf6";
+  const meanValue = opts.meanValue;
+
+  const nums = values.filter((v) => typeof v === "number" && !Number.isNaN(v));
+  if (!nums.length) return null;
+
+  const [rangeMin, rangeMax] = opts.range || [0, 1];
+  const binWidth = (rangeMax - rangeMin) / bins;
+  const counts = new Array(bins).fill(0);
+  nums.forEach((v) => {
+    let idx = Math.floor((v - rangeMin) / binWidth);
+    if (idx < 0) idx = 0;
+    if (idx >= bins) idx = bins - 1;
+    counts[idx] += 1;
+  });
+  const maxCount = Math.max(...counts, 1);
+
+  const plotW = width - padLeft - padRight;
+  const plotH = height - padTop - padBottom;
+  const sx = (binIdx) => padLeft + (binIdx / bins) * plotW;
+  const sy = (c) => padTop + plotH - (c / maxCount) * plotH;
+  const barGap = 2;
+  const barW = plotW / bins - barGap;
+
+  let svg = `<svg viewBox="0 0 ${width} ${height}" class="yolo-chart-svg" `
+    + `style="height:${height}px" preserveAspectRatio="xMidYMid meet">`;
+
+  const yTickStep = 10;
+  for (let t = 0; t <= maxCount + 1e-9; t += yTickStep) {
+    const y = sy(t);
+    svg += `<line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${padLeft + plotW}" `
+      + `y2="${y.toFixed(1)}" class="yolo-chart-grid" />`;
+    svg += `<text x="${padLeft - 6}" y="${(y + 3).toFixed(1)}" `
+      + `class="yolo-chart-ticklabel yolo-chart-ylabel" text-anchor="end">${Math.round(t)}</text>`;
+  }
+  if (maxCount % yTickStep !== 0) {
+    const y = sy(maxCount);
+    svg += `<line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${padLeft + plotW}" `
+      + `y2="${y.toFixed(1)}" class="yolo-chart-grid" />`;
+    svg += `<text x="${padLeft - 6}" y="${(y + 3).toFixed(1)}" `
+      + `class="yolo-chart-ticklabel yolo-chart-ylabel" text-anchor="end">${Math.round(maxCount)}</text>`;
+  }
+
+  counts.forEach((c, i) => {
+    if (c <= 0) return;
+    const x = sx(i) + barGap / 2;
+    const y = sy(c);
+    const h = padTop + plotH - y;
+    svg += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" `
+      + `height="${h.toFixed(1)}" fill="${color}" rx="2" />`;
+  });
+
+  for (let t = rangeMin; t <= rangeMax + 1e-9; t += 0.1) {
+    const i = (t - rangeMin) / binWidth;
+    const x = sx(i);
+    svg += `<text x="${x.toFixed(1)}" y="${(padTop + plotH + 20).toFixed(1)}" `
+      + `class="yolo-chart-ticklabel yolo-chart-xlabel" text-anchor="middle">${t.toFixed(2)}</text>`;
+  }
+
+  if (typeof meanValue === "number") {
+    const mx = padLeft + ((meanValue - rangeMin) / (rangeMax - rangeMin)) * plotW;
+    svg += `<line x1="${mx.toFixed(1)}" y1="${padTop}" x2="${mx.toFixed(1)}" `
+      + `y2="${padTop + plotH}" class="yolo-chart-mean-line" />`;
+  }
+
+  svg += `<line x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${padTop + plotH}" `
+    + `class="yolo-chart-axis" />`;
+  svg += `<line x1="${padLeft}" y1="${padTop + plotH}" x2="${padLeft + plotW}" `
+    + `y2="${padTop + plotH}" class="yolo-chart-axis" />`;
+  svg += `</svg>`;
+
+  const wrap = document.createElement("div");
+  wrap.className = "yolo-chart-wrap";
+  wrap.innerHTML = svg;
+
+  if (typeof meanValue === "number") {
+    const legend = document.createElement("div");
+    legend.className = "yolo-chart-legend";
+    const item = document.createElement("span");
+    item.className = "yolo-chart-legend-item";
+    const swatch = document.createElement("i");
+    swatch.className = "yolo-chart-legend-dash";
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(`Overall mean Dice = ${meanValue.toFixed(4)}`));
+    legend.appendChild(item);
+    wrap.appendChild(legend);
+  }
   return wrap;
 }
 
@@ -295,12 +430,6 @@ function renderTrainingInfo(meta) {
       });
     }
     const lossChart = lossSeries.length ? _lineChartSVG(lossSeries) : null;
-    if (lossChart) {
-      const h4 = document.createElement("h4");
-      h4.textContent = "Training curves — loss (train vs. val)";
-      yel.trainingWrap.appendChild(h4);
-      yel.trainingWrap.appendChild(lossChart);
-    }
 
     const mapCols = [
       ["metrics/mAP50(M)", "mAP50", "#10b981"],
@@ -313,12 +442,31 @@ function renderTrainingInfo(meta) {
       })),
     }));
     const mapChart = mapSeries.length ? _lineChartSVG(mapSeries) : null;
-    if (mapChart) {
-      const h4b = document.createElement("h4");
-      h4b.textContent = "Training curves — mAP";
-      yel.trainingWrap.appendChild(h4b);
-      yel.trainingWrap.appendChild(mapChart);
+
+    if (lossChart || mapChart) {
+      const row = document.createElement("div");
+      row.className = "yolo-chart-row";
+      if (lossChart) {
+        const col = document.createElement("div");
+        col.className = "yolo-chart-col";
+        const h4 = document.createElement("h4");
+        h4.textContent = "Training curves — loss (train vs. val)";
+        col.appendChild(h4);
+        col.appendChild(lossChart);
+        row.appendChild(col);
+      }
+      if (mapChart) {
+        const colB = document.createElement("div");
+        colB.className = "yolo-chart-col";
+        const h4b = document.createElement("h4");
+        h4b.textContent = "Training curves — mAP";
+        colB.appendChild(h4b);
+        colB.appendChild(mapChart);
+        row.appendChild(colB);
+      }
+      yel.trainingWrap.appendChild(row);
     }
+
 
     const allCols = ["epoch", "train/box_loss", "train/seg_loss", "val/box_loss",
                      "val/seg_loss", "metrics/mAP50(M)", "metrics/mAP50-95(M)"];
@@ -349,6 +497,20 @@ function renderTrainingInfo(meta) {
       if (key === "mean_dice") return typeof v === "number" ? v.toFixed(4) : "—";
       return v === undefined || v === null ? "" : String(v);
     }));
+
+    const diceValues = perPatient
+      .map((r) => r.mean_dice)
+      .filter((v) => typeof v === "number");
+    const overallMeanDice = typeof meta.test_dice === "number"
+      ? meta.test_dice
+      : (diceValues.length ? diceValues.reduce((a, b) => a + b, 0) / diceValues.length : undefined);
+    const histChart = _histogramSVG(diceValues, { meanValue: overallMeanDice, bins: 50, height: 400, width: 1160 });
+    if (histChart) {
+      const h4b = document.createElement("h4");
+      h4b.textContent = "Distribution of mean Dice across test patients";
+      yel.trainingWrap.appendChild(h4b);
+      yel.trainingWrap.appendChild(histChart);
+    }
   }
 }
 
@@ -384,7 +546,8 @@ function renderSlice() {
   yel.viewer.onload = () => (yel.status.textContent = "");
   yel.viewer.onerror = () => (yel.status.textContent = "Failed to render this slice.");
   const w = Y.weightsFile ? `&weights=${encodeURIComponent(Y.weightsFile)}` : "";
-  yel.viewer.src = `/yolo/segment.png?id=${Y.patientIdx}&z=${z}${w}&_=${Date.now()}`;
+  const flags = `&gt=${Y.showGT ? 1 : 0}&pred=${Y.showPred ? 1 : 0}&overlap=${Y.showOverlap ? 1 : 0}`;
+  yel.viewer.src = `/yolo/segment.png?id=${Y.patientIdx}&z=${z}${w}${flags}&_=${Date.now()}`;
 }
 
 function setYoloView(view) {
@@ -415,6 +578,7 @@ async function loadDiceRows(idx) {
 async function renderSummaryTable(idx) {
   if (!yel.summaryWrap) return;
   yel.summaryWrap.innerHTML = "";
+  if (yel.summaryChartWrap) yel.summaryChartWrap.innerHTML = "";
   yel.status.textContent = "Loading slice summary… (running inference on all slices)";
   try {
     const rows = await loadDiceRows(idx);
@@ -425,6 +589,22 @@ async function renderSummaryTable(idx) {
     }
 
     const currentZ = Number(yel.zSlider.value);
+
+    if (yel.summaryChartWrap) {
+      const diceData = rows
+        .filter((r) => typeof r.dice === "number")
+        .map((r) => ({ x: r.z, y: r.dice }));
+      const diceChart = _lineChartSVG(
+        [{ label: "Dice", color: "#3b82f6", data: diceData }],
+        { height: 240, width: 900, xTickCount: 8, markerX: currentZ },
+      );
+      if (diceChart) {
+        const h4 = document.createElement("h4");
+        h4.textContent = "Dice per slice";
+        yel.summaryChartWrap.appendChild(h4);
+        yel.summaryChartWrap.appendChild(diceChart);
+      }
+    }
 
     const table = document.createElement("table");
     table.className = "yolo-summary-table";
