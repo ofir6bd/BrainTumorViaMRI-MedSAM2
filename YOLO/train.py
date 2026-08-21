@@ -38,7 +38,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from pipeline import PARAMS, build_dataset, evaluate_test_split, save_weights_metadata  # noqa: E402
+from pipeline import (  # noqa: E402
+    PARAMS, build_dataset, evaluate_test_split, save_weights_metadata, split_patients,
+)
 
 _DATASET_DIR = os.path.join(_HERE, "dataset")
 _WEIGHTS_DIR = os.path.join(_HERE, "weights")
@@ -153,6 +155,13 @@ def main():
 
     from ultralytics import YOLO
 
+    # Shared timestamp for the run folder name (`YOLO/runs/<stamp>/`), the saved
+    # weights filename, and the sidecar JSON's `timestamp` field, so all three always
+    # correlate to the exact same training run instead of Ultralytics' default
+    # `train`/`train2`/`train3`... run-folder naming.
+    stamp_dt = datetime.now()
+    stamp = stamp_dt.strftime("%Y%m%d-%H%M%S")
+
     model = YOLO("yolo11n-seg.pt")
     model.train(
         data=data_yaml,
@@ -160,6 +169,7 @@ def main():
         imgsz=p["imgsz"],
         batch=p["batch"],
         project=_RUNS_DIR,
+        name=stamp,
     )
 
     run_dir = model.trainer.save_dir
@@ -175,7 +185,10 @@ def main():
     )
     test_dice = eval_result["overall_mean_dice"]
 
-    stamp_dt = datetime.now()
+    # Same split call `build_dataset`/`evaluate_test_split` used (same params/max_patients/
+    # fraction), just to report patient counts per split in the sidecar metadata.
+    splits = split_patients(p, max_patients=max_patients, fraction=args.data_fraction)
+
     os.makedirs(_WEIGHTS_DIR, exist_ok=True)
     dest = os.path.join(_WEIGHTS_DIR, _weights_filename(stamp_dt, val_loss, test_dice))
     shutil.copy2(best_path, dest)
@@ -184,6 +197,8 @@ def main():
         "timestamp": stamp_dt.isoformat(timespec="seconds"),
         "val_loss": val_loss,
         "test_dice": test_dice,
+        "n_train_patients": len(splits["train"]),
+        "n_val_patients": len(splits["val"]),
         "n_test_patients": eval_result["n_patients"],
         "per_patient_test_dice": eval_result["per_patient"],
         "epochs": p["epochs"],
