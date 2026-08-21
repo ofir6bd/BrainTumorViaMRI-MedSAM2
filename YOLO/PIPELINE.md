@@ -1,113 +1,68 @@
-# YOLO Pipeline — Detailed Walkthrough (Training → UI)
+# YOLO Pipeline — Quick Summary
 
-Here's the full pipeline end-to-end, stage by stage, based on the actual code in [pipeline.py](pipeline.py), [train.py](train.py), [render.py](render.py), and [routes.py](routes.py).
+End-to-end flow implemented in [pipeline.py](pipeline.py), [train.py](train.py), [evaluate.py](evaluate.py), [render.py](render.py), [routes.py](routes.py).
 
-## 1. Patient discovery & split — `split_patients()`
+The goal is to take raw multi-modal brain MRI (4 co-registered NIfTI volumes per patient) and produce a fine-tuned YOLO11 segmentation model that draws a **whole-tumour (WT)** mask on any single axial slice, then serve that model's predictions — side by side with the expert ground truth — through the project's Flask web UI.
 
-[pipeline.py](pipeline.py#L107) reads `config.yaml` → `paths.extract_to` (`data/dataset`) and pools patients from two folders — `training_data1_v2` + `training_data_additional` — that have all 4 modalities (`-t1c`, `-t1n`, `-t2w`, `-t2f`) **and** `-seg` (ground truth). The old `validation_data` (unlabeled BraTS challenge holdout) is no longer read by the pipeline at all.
+1. **Patient split** — [pipeline.py](pipeline.py#L107) pools every patient with all 4 MRI modalities + expert `-seg` mask from `training_data1_v2` (1350) + `training_data_additional` (271) = **1621 patients**. Deterministic shuffle (`seed=42`), split by patient: **train 60% (≈973) / val 20% (≈324) / test 20% (≈324)**. All three splits are labeled; `test` is never trained on — only used for the post-training Dice summary and the web UI's patient list.
+   - Splitting is done **per patient, not per slice** — every slice belonging to a given patient stays in exactly one split, so the model is never evaluated on a slice anatomically adjacent to one it trained on, which would otherwise leak information and inflate the reported Dice.
+   - The seed makes the split fully reproducible: re-running the same code always produces the same three patient lists, so results from different training runs stay directly comparable.
+   - `test` patients are the only ones ever shown in the web UI's Patient dropdown, so every Dice score a user sees in the app is always on data the model has genuinely never seen during training.
 
-The pool is sorted by patient id (deterministic), shuffled with `random.Random(seed=42)`, then split by patient into **train (60%) / val (20%) / test (20%)** (`val_fraction`/`test_fraction`). All three splits are labeled — `test` is simply never trained on; it's held out for the post-training Dice quality summary (`evaluate_test_split`) and is also the patient pool the web UI's Patient dropdown offers (see §8/§9). Optional `fraction`/`max_patients` knobs subsample this without breaking the ratio.
+2. **RGB frame per slice** — R = `clip(T1C − T1, 0, ∞)` (contrast uptake), G = `T2`, B = `FLAIR`; each channel percentile-normalized to 0–255. Slices with < 100 foreground voxels are skipped.
+   - The reasoning behind the channel choice: subtracting the pre-contrast T1 from the post-contrast T1C isolates the *enhancement* pattern (contrast agent leaking into tissue) — one of the strongest visual cues radiologists use to spot active tumour. T2 and FLAIR separately highlight oedema and the broader abnormal region, so stacking all three into one RGB image lets a single-channel-per-modality YOLO model "see" all three signals at once, the same way a normal colour photo lets a model see three colour channels at once.
+   - Percentile normalisation (clipping to the 0.5th–99.5th percentile of non-zero voxels before rescaling to 0–255) stops a handful of extremely bright or dark outlier voxels from washing out the contrast in the rest of the slice.
+   - Slices that are almost entirely background (skull stripped away, essentially no real brain tissue visible) are dropped from the dataset entirely — they'd otherwise just add noise with no useful learning signal.
 
-## 2. RGB frame construction — `build_rgb_slice()` 
+3. **Labels from expert mask** — whole-tumour mask (`seg > 0`) → connected components (drop < 50 px) → polygon contours → YOLO-seg `.txt` lines (`0 x1/W y1/H ...`). Empty file = valid "no tumour" example.
+   - BraTS ground-truth masks contain 4 distinct tumour sub-region labels (necrotic core, oedema, enhancing tumour, resection cavity). This pipeline merges all four into one binary "tumour vs. not tumour" mask, because the immediate goal is whole-tumour localisation, not sub-region classification.
+   - Small stray components under 50 pixels are dropped as likely segmentation noise rather than real tumour tissue.
+   - Tumour commonly appears as more than one disconnected blob on a slice (e.g. the main tumour body plus a separate satellite nodule) — each connected component becomes its own polygon/instance, so YOLO learns to output multiple masks per slice when appropriate.
+   - Slices where the brain is visible but there's genuinely no tumour still get a label file — just an empty one — which teaches the model the equally important skill of correctly predicting "nothing here" instead of always guessing a mask exists.
 
-For each patient, each axial slice `z`, four raw NIfTI volumes (`T1C`, `T1`, `T2`, `FLAIR`) are loaded and one RGB image is built per slice:
-- **R** = `clip(T1C − T1, 0, ∞)` — contrast-uptake subtraction, normalized (`_norm_slice_uint8`: clip to p0.5–p99.5 of nonzero voxels, rescale to 0–255).
-- **G** = `T2`, normalized the same way.
-- **B** = `FLAIR`, normalized the same way.
+4. **Dataset assembly** — writes `dataset/images|labels/{train,val,test}` + `data.yaml` (1 class: `tumour`).
+   - This step just materialises everything from steps 1–3 onto disk in the folder layout Ultralytics' training code expects, and writes the small manifest file telling it where each split lives and what the single class is called.
 
-A slice is **skipped entirely** (no image, no label) if `FLAIR` has fewer than `min_fg_voxels` (100) nonzero voxels — i.e., essentially no brain tissue in view.
+5. **Training** (`train.py`) — fine-tunes pretrained `yolo11n-seg.pt` (Ultralytics) on train/val, `imgsz=512`, `batch=16`. Saves checkpoint as `weights/best_<timestamp>_valloss<v>_testdice<v>.pt` + a sidecar `.json` with per-epoch history, run params, and per-patient test Dice.
+   - Starting from `yolo11n-seg.pt` (already pretrained on the general-purpose COCO dataset) rather than random weights means the model starts out already knowing generic shape/edge/texture features, so it needs far fewer epochs and far less data to specialise on tumour segmentation than training from scratch would.
+   - Every run gets its own uniquely timestamped `.pt` file, so re-running training never silently overwrites a previously good checkpoint — older models stay available for comparison.
+   - The sidecar JSON keeps a full audit trail per run (loss/metric per epoch, which hyperparameters were used, per-patient Dice on the test set), so the web UI's "Show training data" panel can display a run's history at any time, even long after the raw Ultralytics run folder has been cleaned up.
 
-## 3. Label generation — `_polygons_from_mask()` / `_yolo_seg_lines()`
+6. **Evaluation** (`evaluate.py` / `evaluate_test_split`) — runs the checkpoint over every held-out test patient, merges predicted instances per slice into one mask, computes $Dice = \frac{2|pred \cap gt|}{|pred|+|gt|+\epsilon}$, reports per-patient + overall mean Dice.
+   - Dice measures how much the predicted mask and the expert ground-truth mask overlap, on a 0–1 scale (1 = perfect overlap, 0 = no overlap) — the standard metric for segmentation quality in medical imaging because, unlike plain pixel accuracy, it isn't dominated by the (usually huge) background region.
+   - This evaluation can be re-run at any time against any saved checkpoint without retraining, which is useful for double-checking a number or comparing two checkpoints side by side.
 
-For every kept slice, since **all three splits are labeled** now:
-1. `wt = seg[:,:,z] > 0` merges BraTS labels 1–4 into one whole-tumour binary mask.
-2. `scipy.ndimage.label` finds connected components; components smaller than `min_mask_area` (50 px) are dropped.
-3. `skimage.measure.find_contours` extracts a polygon per surviving component.
-4. Each polygon is written as a YOLO-seg line: `0 x1/W y1/H x2/W y2/H ...` (class `0` = tumour, normalized 0–1 coords).
-5. Written to `dataset/labels/<split>/<patient>_z<zzz>.txt` for every split (`train`/`val`/`test`). Slices with brain but no tumour get an **empty** file (valid negative example).
+7. **Inference & rendering** (`YoloPipeline` + `render.py`) — per patient/slice: builds the same RGB frame, runs the model, overlays GT (green) vs prediction (red) vs overlap (yellow), shows the Dice score.
+   - Using the exact same RGB-construction code for live inference as was used to build the training images guarantees the model always sees data in the same format it was trained on.
+   - The three-colour overlay makes it visually obvious, at a glance, where the model agrees with the expert (yellow), where it under-predicts (green only — a miss), and where it over-predicts (red only — a false positive) — far more informative than a single Dice number alone.
+   - Volumes and the loaded model are cached per patient/checkpoint combination so scrubbing through slices in the UI feels responsive instead of reloading the whole MRI volume and the model from disk on every request.
 
-Images go to `dataset/images/<split>/<patient>_z<zzz>.png` (`<zzz>` = 1-based slice number).
+8. **Web UI** (`routes.py` + `Frontend/`) — `/yolo` blueprint serves the test-split patient dropdown, model-checkpoint dropdown, segmentation PNG, per-slice Dice table, and a "Show training data" panel sourced from the checkpoint's sidecar JSON.
+   - Lets a non-technical reviewer pick any held-out test patient, pick any trained checkpoint, scrub through slices, and immediately see the overlay + Dice, plus inspect that checkpoint's full training history — all without touching the command line.
 
-## 4. Dataset assembly — `build_dataset()`
+## Parameters (defaults, see `PARAMS` in pipeline.py)
 
-Loops over all three splits, writes all images (+ labels where applicable), then emits `dataset/data.yaml`:
-```yaml
-path: YOLO/dataset
-train: images/train
-val: images/val
-test: images/test
-names:
-  0: tumour
-```
+| Parameter | Meaning | Default |
+|---|---|---|
+| `min_mask_area` | A connected component of the expert whole-tumour mask must cover at least this many pixels to become a training label. Anything smaller is treated as segmentation noise/artifact rather than real tumour tissue and is silently dropped before polygon extraction — prevents the model from being trained to chase tiny, unreliable specks. | 50 |
+| `min_fg_voxels` | The minimum number of non-zero (brain) voxels a slice's FLAIR image must contain to be kept at all. Slices below this threshold are almost entirely skull-stripped background/air (e.g. the very top/bottom of the volume) and are skipped entirely — no RGB image and no label file are produced for them. | 100 |
+| `val_fraction` / `test_fraction` | The proportion of the total patient pool set aside for validation and for the held-out test set, respectively (the remainder — 1 minus both — becomes the training set). Splitting is done per patient so every slice of a given patient stays in exactly one split, avoiding data leakage between train/val/test. | 0.2 / 0.2 |
+| `seed` | The seed for the random-number generator used to shuffle the patient list before splitting. Fixing this value makes the train/val/test assignment fully deterministic — re-running the pipeline always produces the exact same three patient lists, so results stay reproducible and comparable across runs. | 42 |
+| `imgsz` | The square resolution (pixels) that every RGB slice is resized to before being fed into YOLO, both during training and at inference time. Larger values preserve more fine detail (useful for small tumour regions) at the cost of more GPU memory and slower training/inference. | 512 |
+| `epochs` / `batch` | `epochs` is how many full passes over the training set are performed; `batch` is how many slice images are processed together in one forward/backward pass. More epochs generally improve fit (up to a point of diminishing returns/overfitting); larger batches make gradient estimates more stable but need more GPU memory. | 25 (current run) / 16 |
+| `conf_threshold` | The minimum confidence score (0–1) a predicted tumour instance must have to be kept at inference time; lower-confidence detections are discarded as likely false positives before masks are merged and Dice is computed. | 0.25 |
+| `mask_threshold` | YOLO's raw segmentation output is a per-pixel probability map for each predicted instance. This is the cutoff probability above which a pixel is counted as part of the predicted mask (i.e. binarised to 0/1) before merging instances and computing Dice against the ground truth. | 0.5 |
 
-## 5. Training & quality summary — `train.py` / `evaluate.py`
+## Current best checkpoint
 
-```powershell
-python YOLO\train.py --rebuild-dataset --data-fraction 0.01 --epochs 100
-```
-- Builds the dataset (if missing or `--rebuild-dataset`) via `build_dataset()`.
-- Loads pretrained **`yolo11n-seg.pt`** (Ultralytics COCO segmentation checkpoint) and fine-tunes it: `model.train(data=data.yaml, epochs=..., imgsz=512, batch=16)` — standard Ultralytics training loop (box/seg/cls/dfl losses, AdamW auto-optimizer, augmentation, etc.).
-- Ultralytics writes its own run artifacts to `runs/segment/train-N/weights/best.pt` (checkpoint with best validation performance across epochs) and `runs/segment/train-N/results.csv` (per-epoch metrics).
-- `train.py` then runs `pipeline.evaluate_test_split()`: loads that run's `best.pt`, runs inference over every patient in the held-out **test** split, and computes the overall mean Dice — the "quality of the training" number.
-- The checkpoint is saved to **`YOLO/weights/best_<timestamp>_valloss<v>_testdice<v>.pt`** — a unique filename per run (never overwrites a previous checkpoint) — plus a sidecar **`.json`** with the same stem, containing the full per-epoch `results.csv` history, run params (epochs/imgsz/batch/data_fraction/max_patients), and per-patient test Dice.
-
-To (re-)compute the Dice quality summary for any existing checkpoint without retraining:
-```powershell
-python YOLO\evaluate.py                        # best available checkpoint
-python YOLO\evaluate.py --weights best_....pt   # a specific checkpoint
-```
-Prints per-patient + overall mean Dice on the labeled test split (`pipeline.evaluate_test_split`).
-
-## 6. Per-patient inference — `YoloPipeline` (Stage E)
-
-Used by both `render.py` and `routes.py`. For a given patient directory:
-- Lazily loads the 5 NIfTI volumes (`t1c`, `t1`, `t2w`, `flair`, `seg` properties, cached).
-- `slice_indices` — which `z` values pass the `min_fg_voxels` brain-foreground check.
-- `best_slice_index()` — picks the slice with the largest tumour area (for a sensible default view).
-- `_model_instance()` — lazily loads the selected weights (default: `pipeline.default_weights_path()`, the best-available checkpoint by `test_dice`/`val_loss`) via Ultralytics; if the file doesn't exist yet, it records an error message instead of crashing (falls back to "GT only" display).
-- `process_slice(z)`:
-  1. Builds the same RGB frame as training (`rgb_slice`).
-  2. Computes ground-truth `gt_wt = seg[:,:,z] > 0`.
-  3. If the model loaded, runs `model.predict(rgb, conf=0.25)`, thresholds each predicted mask at `mask_threshold=0.5`, resizes if needed (`ndimage.zoom`) to match the GT mask's resolution, and OR-merges all instances into one `pred_wt` binary mask.
-  4. Computes Dice: $Dice = \frac{2|pred \cap gt|}{|pred| + |gt| + \epsilon}$.
-  5. Caches the result (`rgb`, `gt_wt`, `pred_wt`, `dice`, `model_error`).
-- `dice_table()` — Dice for every valid slice of that patient (used by the summary table in the UI).
-
-## 7. Rendering — `render.py` (Stage F, image generation)
-
-`render(pipeline, z, slice_no)`:
-- If the slice was skipped (too little brain), shows the raw FLAIR with a yellow "skipped" note.
-- Otherwise, shows the RGB frame with a colored overlay: **green** = expert GT only, **red** = predicted only, **yellow** = overlap. Title shows the Dice score, and if no weights are loaded yet, appends "(no model — GT only)".
-- Returns a PNG in-memory buffer via matplotlib's `Agg` backend.
-
-## 8. Flask blueprint — `routes.py` (Stage F, API)
-
-`yolo_bp` (prefix `/yolo`) reads patients from `pipeline.list_test_patients()` — the labeled, held-out **test** split (never train/val), so every Dice score shown is on data the model never saw during training:
-- `GET /yolo/api/patients` — list of `{id, label}` for the dropdown.
-- `GET /yolo/api/patient/<idx>` — depth, valid slice indices, best slice index.
-- `GET /yolo/segment.png?id=<idx>&z=<z>&weights=<file>` — the rendered PNG (calls `render.render`).
-- `GET /yolo/api/dice?id=<idx>&weights=<file>` — per-slice Dice rows for the summary table.
-- `GET /yolo/api/weights` — list of trained checkpoints (`{filename, label, val_loss, test_dice, has_training_info}`), best-first, for the "Model" dropdown.
-- `GET /yolo/api/weights/<filename>/info` — full training metadata (per-epoch history, run params, per-patient test Dice) from that checkpoint's sidecar `.json`, for the "Show training data" button.
-
-Each `(patient, weights)` combination gets one cached `YoloPipeline` instance (`_PIPELINES` dict) so volumes/model aren't reloaded on every request.
-
-## 9. Frontend wiring
-
-- `Frontend/app.py` registers `yolo_bp`.
-- `index.html` has a "YOLO Detection" sidebar entry + `yoloPanel` (patient dropdown, model dropdown, "Show training data" button, slice slider, Best-slice button, Segmentation/Slice-summary tabs).
-- `yolo.js` drives it: `initYolo()` fetches patients + weights, `loadPatient(idx)` fetches depth/slice info, `renderSlice()` sets the `<img>` src to `/yolo/segment.png?...`, `loadDiceRows`/`renderSummaryTable` populate the Dice table, `toggleTrainingInfo`/`loadTrainingInfo`/`renderTrainingInfo` populate the training-data panel from `/yolo/api/weights/<file>/info`.
-
-## End-to-end flow summary
+`best_20260821-013417_valloss2p9192_testdice0p8662.pt` — 25 epochs, imgsz 512, batch 16 → **val loss 2.919**, **mean test Dice 0.866** over 324 test patients.
 
 ```
-data/dataset (NIfTI)
-  → split_patients (train 60% / val 20% / test 20% by patient, all labeled)
-  → build_dataset (RGB PNGs + YOLO-seg polygon .txt labels for all 3 splits + data.yaml)
-  → train.py: yolo11n-seg.pt fine-tuned on train/val → evaluate_test_split on test
-    → weights/best_<timestamp>_valloss<v>_testdice<v>.pt + sidecar .json
-  → YoloPipeline loads the selected checkpoint, runs inference per slice on test-split patients
-  → render.py draws GT vs predicted overlay + Dice
-  → routes.py serves it as PNG/JSON, plus weights list + training metadata
-  → yolo.js/index.html displays it in the "YOLO Detection" tab (Model dropdown, Show training data)
+data/dataset (NIfTI, 1621 patients)
+  → split (train 973 / val 324 / test 324)
+  → RGB slices + YOLO-seg polygon labels
+  → train.py: yolo11n-seg.pt fine-tuned → evaluate_test_split on test
+    → weights/best_*.pt + sidecar .json
+  → YoloPipeline inference per slice → render.py GT vs prediction overlay
+  → routes.py → yolo.js/index.html ("YOLO Detection" tab)
 ```
