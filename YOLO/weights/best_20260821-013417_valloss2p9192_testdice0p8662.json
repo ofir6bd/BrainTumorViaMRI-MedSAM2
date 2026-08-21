@@ -1,0 +1,2386 @@
+{
+  "timestamp": "2026-08-21T01:34:17",
+  "val_loss": 2.91915,
+  "test_dice": 0.8662118210018152,
+  "n_test_patients": 324,
+  "per_patient_test_dice": [
+    {
+      "patient_id": "BraTS-GLI-02285-102",
+      "mean_dice": 0.8876193112942368,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02764-100",
+      "mean_dice": 0.8863100700783112,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02926-100",
+      "mean_dice": 0.8784169208450251,
+      "n_slices": 127
+    },
+    {
+      "patient_id": "BraTS-GLI-02773-101",
+      "mean_dice": 0.8983172378713417,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02621-100",
+      "mean_dice": 0.8948783425293727,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-02242-103",
+      "mean_dice": 0.9266322145282117,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02874-101",
+      "mean_dice": 0.8396493349961756,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02481-104",
+      "mean_dice": 0.8351864136759583,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02925-100",
+      "mean_dice": 0.79916649475974,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02852-101",
+      "mean_dice": 0.5710877020289863,
+      "n_slices": 122
+    },
+    {
+      "patient_id": "BraTS-GLI-02989-101",
+      "mean_dice": 0.7733671594706946,
+      "n_slices": 129
+    },
+    {
+      "patient_id": "BraTS-GLI-02948-100",
+      "mean_dice": 0.8331091931621984,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02093-105",
+      "mean_dice": 0.8971820817985607,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02494-103",
+      "mean_dice": 0.7930275085875523,
+      "n_slices": 124
+    },
+    {
+      "patient_id": "BraTS-GLI-02215-102",
+      "mean_dice": 0.8478971574769514,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-02744-100",
+      "mean_dice": 0.8950311351636492,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02927-100",
+      "mean_dice": 0.8582452835668457,
+      "n_slices": 126
+    },
+    {
+      "patient_id": "BraTS-GLI-02758-101",
+      "mean_dice": 0.8919940935216981,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02513-101",
+      "mean_dice": 0.7052251149678528,
+      "n_slices": 126
+    },
+    {
+      "patient_id": "BraTS-GLI-03005-101",
+      "mean_dice": 0.8895503382382195,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02118-100",
+      "mean_dice": 0.8864597996842154,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02365-100",
+      "mean_dice": 0.941770227991748,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02239-103",
+      "mean_dice": 0.9274360990294486,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02254-100",
+      "mean_dice": 0.9429969388460123,
+      "n_slices": 147
+    },
+    {
+      "patient_id": "BraTS-GLI-02230-100",
+      "mean_dice": 0.9339513167654776,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02877-100",
+      "mean_dice": 0.8761013878299411,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02066-100",
+      "mean_dice": 0.9110745492255229,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02278-100",
+      "mean_dice": 0.927938258285717,
+      "n_slices": 153
+    },
+    {
+      "patient_id": "BraTS-GLI-02793-101",
+      "mean_dice": 0.876619292701314,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02219-101",
+      "mean_dice": 0.9405992293189814,
+      "n_slices": 147
+    },
+    {
+      "patient_id": "BraTS-GLI-02639-101",
+      "mean_dice": 0.8810185764591473,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02879-101",
+      "mean_dice": 0.864177990895817,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02791-101",
+      "mean_dice": 0.6953915067576055,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02490-100",
+      "mean_dice": 0.9002467257120295,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-00518-101",
+      "mean_dice": 0.9031005581146455,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02567-100",
+      "mean_dice": 0.6863244884808007,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-00548-100",
+      "mean_dice": 0.9204712222088699,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02129-105",
+      "mean_dice": 0.8338635384063449,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02081-102",
+      "mean_dice": 0.8855015825551682,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02086-100",
+      "mean_dice": 0.8530969136447585,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02064-101",
+      "mean_dice": 0.8851899695790091,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02943-101",
+      "mean_dice": 0.8670928692085899,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02091-101",
+      "mean_dice": 0.8049442791163279,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-03025-101",
+      "mean_dice": 0.925617831610788,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02838-101",
+      "mean_dice": 0.8486759115105612,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02760-100",
+      "mean_dice": 0.9009273301494668,
+      "n_slices": 121
+    },
+    {
+      "patient_id": "BraTS-GLI-02093-102",
+      "mean_dice": 0.896257229816881,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02799-101",
+      "mean_dice": 0.9129177936298404,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02102-100",
+      "mean_dice": 0.9144838546375476,
+      "n_slices": 152
+    },
+    {
+      "patient_id": "BraTS-GLI-02826-100",
+      "mean_dice": 0.8899887660481736,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02744-101",
+      "mean_dice": 0.9147994673722782,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02281-100",
+      "mean_dice": 0.9192514783148926,
+      "n_slices": 147
+    },
+    {
+      "patient_id": "BraTS-GLI-02195-100",
+      "mean_dice": 0.8704420759873321,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02772-101",
+      "mean_dice": 0.8586019565393734,
+      "n_slices": 126
+    },
+    {
+      "patient_id": "BraTS-GLI-02105-105",
+      "mean_dice": 0.87352693695022,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02927-101",
+      "mean_dice": 0.8547770554749743,
+      "n_slices": 126
+    },
+    {
+      "patient_id": "BraTS-GLI-02748-101",
+      "mean_dice": 0.7702749572854918,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02518-101",
+      "mean_dice": 0.9071570465490635,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02303-103",
+      "mean_dice": 0.9291765053111541,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-00009-101",
+      "mean_dice": 0.8321396906023666,
+      "n_slices": 127
+    },
+    {
+      "patient_id": "BraTS-GLI-02103-104",
+      "mean_dice": 0.8145065679140624,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02417-100",
+      "mean_dice": 0.9091626443949979,
+      "n_slices": 151
+    },
+    {
+      "patient_id": "BraTS-GLI-02514-103",
+      "mean_dice": 0.9220605340032243,
+      "n_slices": 129
+    },
+    {
+      "patient_id": "BraTS-GLI-02574-100",
+      "mean_dice": 0.9096708954441189,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02910-101",
+      "mean_dice": 0.9036705061565574,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02258-101",
+      "mean_dice": 0.8880635821904973,
+      "n_slices": 149
+    },
+    {
+      "patient_id": "BraTS-GLI-02378-102",
+      "mean_dice": 0.8651745801302364,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02630-103",
+      "mean_dice": 0.888502684452937,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02848-101",
+      "mean_dice": 0.8934184105982715,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-00472-100",
+      "mean_dice": 0.9185496986780689,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02105-103",
+      "mean_dice": 0.813863396493552,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02565-105",
+      "mean_dice": 0.813655971882722,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02813-101",
+      "mean_dice": 0.8870236953422833,
+      "n_slices": 146
+    },
+    {
+      "patient_id": "BraTS-GLI-02520-100",
+      "mean_dice": 0.935715043230858,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02608-100",
+      "mean_dice": 0.8477227614505374,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02565-101",
+      "mean_dice": 0.8437427342519492,
+      "n_slices": 128
+    },
+    {
+      "patient_id": "BraTS-GLI-02337-100",
+      "mean_dice": 0.8518414597316658,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02244-100",
+      "mean_dice": 0.8915884963642158,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02128-103",
+      "mean_dice": 0.9164002758061965,
+      "n_slices": 123
+    },
+    {
+      "patient_id": "BraTS-GLI-03031-101",
+      "mean_dice": 0.8476495387594432,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02514-105",
+      "mean_dice": 0.8209300701273514,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02597-102",
+      "mean_dice": 0.870414491323412,
+      "n_slices": 127
+    },
+    {
+      "patient_id": "BraTS-GLI-02221-103",
+      "mean_dice": 0.8829950009033508,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02616-101",
+      "mean_dice": 0.8568826650219988,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02843-100",
+      "mean_dice": 0.9191484773152392,
+      "n_slices": 124
+    },
+    {
+      "patient_id": "BraTS-GLI-03015-100",
+      "mean_dice": 0.9039903191234967,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02828-101",
+      "mean_dice": 0.8449205251995167,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02883-101",
+      "mean_dice": 0.8829706992704127,
+      "n_slices": 128
+    },
+    {
+      "patient_id": "BraTS-GLI-02520-103",
+      "mean_dice": 0.8288834878493636,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-02141-101",
+      "mean_dice": 0.8665620219359601,
+      "n_slices": 117
+    },
+    {
+      "patient_id": "BraTS-GLI-02064-102",
+      "mean_dice": 0.8144179366200001,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02931-100",
+      "mean_dice": 0.8311518979835841,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02987-101",
+      "mean_dice": 0.8437280305110203,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-00483-100",
+      "mean_dice": 0.7903955528544759,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02878-101",
+      "mean_dice": 0.8925008868923409,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02093-103",
+      "mean_dice": 0.9061561130744996,
+      "n_slices": 148
+    },
+    {
+      "patient_id": "BraTS-GLI-02847-101",
+      "mean_dice": 0.8272167247253727,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02962-100",
+      "mean_dice": 0.8689864788845464,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02091-103",
+      "mean_dice": 0.8112632087008367,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-00505-101",
+      "mean_dice": 0.830089487979276,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02623-102",
+      "mean_dice": 0.8132581270678824,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02139-100",
+      "mean_dice": 0.915900215406371,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02594-101",
+      "mean_dice": 0.8600907571644499,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02563-100",
+      "mean_dice": 0.9332370259897514,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02081-101",
+      "mean_dice": 0.8768217923267748,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02646-101",
+      "mean_dice": 0.810433004784629,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02188-100",
+      "mean_dice": 0.9293259122691698,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02194-103",
+      "mean_dice": 0.8466777261528724,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02577-100",
+      "mean_dice": 0.9153299904358898,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02191-101",
+      "mean_dice": 0.864714081105058,
+      "n_slices": 146
+    },
+    {
+      "patient_id": "BraTS-GLI-02878-100",
+      "mean_dice": 0.9054026615424958,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02076-101",
+      "mean_dice": 0.8763281617221393,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-02484-100",
+      "mean_dice": 0.8752968060782668,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02249-100",
+      "mean_dice": 0.9338376522459133,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02836-100",
+      "mean_dice": 0.9179148302933692,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02746-100",
+      "mean_dice": 0.9209422492990066,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02748-100",
+      "mean_dice": 0.8696725912020633,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02914-101",
+      "mean_dice": 0.8958968387287864,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02078-103",
+      "mean_dice": 0.8379106465796874,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02092-101",
+      "mean_dice": 0.9030726476277968,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-00009-100",
+      "mean_dice": 0.830092750370339,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02176-103",
+      "mean_dice": 0.9051686446538283,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02193-101",
+      "mean_dice": 0.8395985997831905,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02290-102",
+      "mean_dice": 0.8895747645861408,
+      "n_slices": 146
+    },
+    {
+      "patient_id": "BraTS-GLI-02345-100",
+      "mean_dice": 0.9289315697036259,
+      "n_slices": 151
+    },
+    {
+      "patient_id": "BraTS-GLI-02198-102",
+      "mean_dice": 0.8854860223681673,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-00506-101",
+      "mean_dice": 0.9035552006143346,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02985-100",
+      "mean_dice": 0.8605687306571439,
+      "n_slices": 128
+    },
+    {
+      "patient_id": "BraTS-GLI-02192-100",
+      "mean_dice": 0.8438108229493537,
+      "n_slices": 146
+    },
+    {
+      "patient_id": "BraTS-GLI-02643-101",
+      "mean_dice": 0.8438782273870188,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-02570-104",
+      "mean_dice": 0.8743594068067726,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-00080-100",
+      "mean_dice": 0.8986556367417313,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02068-100",
+      "mean_dice": 0.8977512020096862,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02567-102",
+      "mean_dice": 0.7671911363812765,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02209-103",
+      "mean_dice": 0.8723136767983843,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02062-102",
+      "mean_dice": 0.878619230757774,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02504-101",
+      "mean_dice": 0.9280577319625096,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02347-100",
+      "mean_dice": 0.8644255868210482,
+      "n_slices": 149
+    },
+    {
+      "patient_id": "BraTS-GLI-03055-100",
+      "mean_dice": 0.8496586524126167,
+      "n_slices": 128
+    },
+    {
+      "patient_id": "BraTS-GLI-02226-100",
+      "mean_dice": 0.9031089269137998,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02139-102",
+      "mean_dice": 0.9018598764885736,
+      "n_slices": 146
+    },
+    {
+      "patient_id": "BraTS-GLI-02894-101",
+      "mean_dice": 0.8848079771541216,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02160-100",
+      "mean_dice": 0.9011927785821143,
+      "n_slices": 148
+    },
+    {
+      "patient_id": "BraTS-GLI-02216-101",
+      "mean_dice": 0.9346699060326004,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02571-104",
+      "mean_dice": 0.8701546568155627,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02483-100",
+      "mean_dice": 0.9241967405038776,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02243-101",
+      "mean_dice": 0.9148100085991109,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02431-100",
+      "mean_dice": 0.802001949145323,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-03015-101",
+      "mean_dice": 0.8320589374428922,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02524-100",
+      "mean_dice": 0.9518791899551514,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02405-101",
+      "mean_dice": 0.8762426438023724,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02170-102",
+      "mean_dice": 0.9262664934553806,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02737-101",
+      "mean_dice": 0.8929232667218605,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02407-100",
+      "mean_dice": 0.8577021364924434,
+      "n_slices": 149
+    },
+    {
+      "patient_id": "BraTS-GLI-02756-101",
+      "mean_dice": 0.9120624988572152,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02760-101",
+      "mean_dice": 0.9238500498766676,
+      "n_slices": 121
+    },
+    {
+      "patient_id": "BraTS-GLI-02103-106",
+      "mean_dice": 0.7715872253536817,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02909-100",
+      "mean_dice": 0.8181200192619813,
+      "n_slices": 126
+    },
+    {
+      "patient_id": "BraTS-GLI-02642-100",
+      "mean_dice": 0.5485516850537316,
+      "n_slices": 129
+    },
+    {
+      "patient_id": "BraTS-GLI-02548-100",
+      "mean_dice": 0.8692156991238935,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02206-103",
+      "mean_dice": 0.7949958093137544,
+      "n_slices": 146
+    },
+    {
+      "patient_id": "BraTS-GLI-02517-101",
+      "mean_dice": 0.8963667068536542,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-03007-101",
+      "mean_dice": 0.8239141719627011,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02537-101",
+      "mean_dice": 0.751059136814215,
+      "n_slices": 123
+    },
+    {
+      "patient_id": "BraTS-GLI-02069-101",
+      "mean_dice": 0.8296948715915236,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-03026-101",
+      "mean_dice": 0.8363793148799964,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02631-100",
+      "mean_dice": 0.8066588350643661,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02584-101",
+      "mean_dice": 0.8845171434587529,
+      "n_slices": 125
+    },
+    {
+      "patient_id": "BraTS-GLI-02509-101",
+      "mean_dice": 0.9317870447720421,
+      "n_slices": 146
+    },
+    {
+      "patient_id": "BraTS-GLI-02543-100",
+      "mean_dice": 0.802093063670775,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02194-100",
+      "mean_dice": 0.7784793884586403,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02225-101",
+      "mean_dice": 0.8168294733061126,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02079-100",
+      "mean_dice": 0.841736428560505,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02284-100",
+      "mean_dice": 0.9208044560757705,
+      "n_slices": 148
+    },
+    {
+      "patient_id": "BraTS-GLI-02643-100",
+      "mean_dice": 0.8862567007741243,
+      "n_slices": 127
+    },
+    {
+      "patient_id": "BraTS-GLI-02755-101",
+      "mean_dice": 0.8994076010279882,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02796-101",
+      "mean_dice": 0.8605034150292676,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-02164-101",
+      "mean_dice": 0.8151596459311384,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02147-100",
+      "mean_dice": 0.8672445257682156,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02614-100",
+      "mean_dice": 0.8985402219004808,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02503-101",
+      "mean_dice": 0.90695365625851,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02151-101",
+      "mean_dice": 0.8545044982569387,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02787-100",
+      "mean_dice": 0.924199266599116,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02987-100",
+      "mean_dice": 0.8505378753860735,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02176-100",
+      "mean_dice": 0.9072388566994971,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02801-101",
+      "mean_dice": 0.8703690702105166,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02656-100",
+      "mean_dice": 0.7790682021902573,
+      "n_slices": 150
+    },
+    {
+      "patient_id": "BraTS-GLI-02290-100",
+      "mean_dice": 0.854302030913186,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02300-101",
+      "mean_dice": 0.9123604832726195,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02510-102",
+      "mean_dice": 0.8242153668229895,
+      "n_slices": 123
+    },
+    {
+      "patient_id": "BraTS-GLI-03030-101",
+      "mean_dice": 0.8146679991697089,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02287-100",
+      "mean_dice": 0.9078173445748651,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02146-103",
+      "mean_dice": 0.8124752977230852,
+      "n_slices": 153
+    },
+    {
+      "patient_id": "BraTS-GLI-02508-100",
+      "mean_dice": 0.878350904742217,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02575-101",
+      "mean_dice": 0.8947065402871169,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02723-100",
+      "mean_dice": 0.8275680710993865,
+      "n_slices": 152
+    },
+    {
+      "patient_id": "BraTS-GLI-00529-100",
+      "mean_dice": 0.8102851628363836,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02664-100",
+      "mean_dice": 0.9096411905966257,
+      "n_slices": 156
+    },
+    {
+      "patient_id": "BraTS-GLI-02766-100",
+      "mean_dice": 0.8707574115167271,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-03008-100",
+      "mean_dice": 0.8958883321899913,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02637-100",
+      "mean_dice": 0.9364133689369467,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02416-100",
+      "mean_dice": 0.8593370486834235,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02928-100",
+      "mean_dice": 0.8482327561730351,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-00505-100",
+      "mean_dice": 0.8285215271853332,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02637-101",
+      "mean_dice": 0.8862230307441534,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-02609-104",
+      "mean_dice": 0.8483984800181438,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02385-100",
+      "mean_dice": 0.8111805863060729,
+      "n_slices": 150
+    },
+    {
+      "patient_id": "BraTS-GLI-02204-104",
+      "mean_dice": 0.9069075336595491,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-03006-100",
+      "mean_dice": 0.8372974578999871,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02898-100",
+      "mean_dice": 0.8213819287582234,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02178-102",
+      "mean_dice": 0.8389702805148272,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02781-101",
+      "mean_dice": 0.9036790752394424,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02186-100",
+      "mean_dice": 0.8006891746850484,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02216-102",
+      "mean_dice": 0.9017650143049212,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02736-101",
+      "mean_dice": 0.8804817178092095,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02358-101",
+      "mean_dice": 0.822286854240883,
+      "n_slices": 149
+    },
+    {
+      "patient_id": "BraTS-GLI-02129-103",
+      "mean_dice": 0.8092211628544046,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02175-102",
+      "mean_dice": 0.9032685394980619,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-02197-101",
+      "mean_dice": 0.8744792465843431,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02946-100",
+      "mean_dice": 0.8414670043082624,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02925-101",
+      "mean_dice": 0.8153344280458008,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02175-100",
+      "mean_dice": 0.8349522061090184,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02608-105",
+      "mean_dice": 0.8632478502070262,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02742-100",
+      "mean_dice": 0.8708991573295708,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02267-101",
+      "mean_dice": 0.8488544174569842,
+      "n_slices": 149
+    },
+    {
+      "patient_id": "BraTS-GLI-02082-106",
+      "mean_dice": 0.8424355799743304,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02220-102",
+      "mean_dice": 0.870031143727113,
+      "n_slices": 129
+    },
+    {
+      "patient_id": "BraTS-GLI-02242-101",
+      "mean_dice": 0.9263317727294158,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-00533-100",
+      "mean_dice": 0.8647890719942745,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02199-102",
+      "mean_dice": 0.908525274199726,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02888-100",
+      "mean_dice": 0.7312700534150459,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02422-100",
+      "mean_dice": 0.8400328127029617,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-00008-101",
+      "mean_dice": 0.8855237621112654,
+      "n_slices": 125
+    },
+    {
+      "patient_id": "BraTS-GLI-02244-104",
+      "mean_dice": 0.9362846446185892,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-03009-100",
+      "mean_dice": 0.8995385653105545,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02950-100",
+      "mean_dice": 0.8445366464319424,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02218-103",
+      "mean_dice": 0.8947307189091575,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02221-102",
+      "mean_dice": 0.9273286874747695,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02186-102",
+      "mean_dice": 0.8791906154455144,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02747-101",
+      "mean_dice": 0.8546808306529569,
+      "n_slices": 130
+    },
+    {
+      "patient_id": "BraTS-GLI-02346-100",
+      "mean_dice": 0.9393365028538191,
+      "n_slices": 148
+    },
+    {
+      "patient_id": "BraTS-GLI-02675-100",
+      "mean_dice": 0.9099592045776773,
+      "n_slices": 157
+    },
+    {
+      "patient_id": "BraTS-GLI-02591-101",
+      "mean_dice": 0.8731499048450855,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02781-100",
+      "mean_dice": 0.8910875673019815,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02240-100",
+      "mean_dice": 0.8971190901251856,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02178-100",
+      "mean_dice": 0.8688128788007732,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-00033-101",
+      "mean_dice": 0.8822017511152411,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02063-101",
+      "mean_dice": 0.8840817403293416,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-03052-101",
+      "mean_dice": 0.9234901992865144,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02248-104",
+      "mean_dice": 0.7671365336541801,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02164-102",
+      "mean_dice": 0.8318430300362609,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02921-100",
+      "mean_dice": 0.8515691987556142,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02926-101",
+      "mean_dice": 0.8701839747462825,
+      "n_slices": 126
+    },
+    {
+      "patient_id": "BraTS-GLI-02536-101",
+      "mean_dice": 0.8882102602202125,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02181-101",
+      "mean_dice": 0.8731207851491465,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02492-104",
+      "mean_dice": 0.8506604656578258,
+      "n_slices": 153
+    },
+    {
+      "patient_id": "BraTS-GLI-02816-100",
+      "mean_dice": 0.7968272683574212,
+      "n_slices": 124
+    },
+    {
+      "patient_id": "BraTS-GLI-03028-101",
+      "mean_dice": 0.846271577228558,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02199-103",
+      "mean_dice": 0.8993670857061045,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02069-103",
+      "mean_dice": 0.8005537765037332,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02617-102",
+      "mean_dice": 0.852113119984746,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02829-101",
+      "mean_dice": 0.9137847835675027,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02763-100",
+      "mean_dice": 0.9190619495722452,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-03061-102",
+      "mean_dice": 0.8309026106470943,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02123-100",
+      "mean_dice": 0.7627944419192189,
+      "n_slices": 123
+    },
+    {
+      "patient_id": "BraTS-GLI-02919-101",
+      "mean_dice": 0.8242117713661002,
+      "n_slices": 124
+    },
+    {
+      "patient_id": "BraTS-GLI-02787-101",
+      "mean_dice": 0.9284933180506046,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02985-101",
+      "mean_dice": 0.8707923156106375,
+      "n_slices": 125
+    },
+    {
+      "patient_id": "BraTS-GLI-02105-104",
+      "mean_dice": 0.8897551507110923,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02494-102",
+      "mean_dice": 0.8863552772126346,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02143-103",
+      "mean_dice": 0.8720594339729185,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02501-100",
+      "mean_dice": 0.8992665314532956,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-00548-101",
+      "mean_dice": 0.9262467502987579,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02206-100",
+      "mean_dice": 0.8873729056752563,
+      "n_slices": 151
+    },
+    {
+      "patient_id": "BraTS-GLI-02916-100",
+      "mean_dice": 0.8246660293385881,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02136-103",
+      "mean_dice": 0.8979434681501983,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02123-102",
+      "mean_dice": 0.8448168196296241,
+      "n_slices": 128
+    },
+    {
+      "patient_id": "BraTS-GLI-02428-100",
+      "mean_dice": 0.6205952921796956,
+      "n_slices": 146
+    },
+    {
+      "patient_id": "BraTS-GLI-02737-100",
+      "mean_dice": 0.9034148736423988,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02911-100",
+      "mean_dice": 0.8487162404120419,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02633-100",
+      "mean_dice": 0.844699212044937,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-00528-101",
+      "mean_dice": 0.8818074657891865,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02248-102",
+      "mean_dice": 0.8476689442708042,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02178-101",
+      "mean_dice": 0.9015512126406067,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02384-100",
+      "mean_dice": 0.7144030352988204,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-00469-100",
+      "mean_dice": 0.8156790644345577,
+      "n_slices": 148
+    },
+    {
+      "patient_id": "BraTS-GLI-02070-101",
+      "mean_dice": 0.8411281328454993,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02192-103",
+      "mean_dice": 0.8337130670282735,
+      "n_slices": 147
+    },
+    {
+      "patient_id": "BraTS-GLI-02889-100",
+      "mean_dice": 0.8343121560538059,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02515-101",
+      "mean_dice": 0.8212430337873503,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02116-100",
+      "mean_dice": 0.9306641450645498,
+      "n_slices": 149
+    },
+    {
+      "patient_id": "BraTS-GLI-02791-100",
+      "mean_dice": 0.7918530186850002,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02779-100",
+      "mean_dice": 0.8787612574122625,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02096-101",
+      "mean_dice": 0.8604427581044162,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02800-101",
+      "mean_dice": 0.9357604045876923,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-02261-100",
+      "mean_dice": 0.9154144843249784,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02479-101",
+      "mean_dice": 0.7931842053578841,
+      "n_slices": 136
+    },
+    {
+      "patient_id": "BraTS-GLI-02491-101",
+      "mean_dice": 0.9025567497471142,
+      "n_slices": 129
+    },
+    {
+      "patient_id": "BraTS-GLI-02643-102",
+      "mean_dice": 0.8574448103758509,
+      "n_slices": 129
+    },
+    {
+      "patient_id": "BraTS-GLI-02540-101",
+      "mean_dice": 0.8705533653167143,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02420-100",
+      "mean_dice": 0.796206450826846,
+      "n_slices": 145
+    },
+    {
+      "patient_id": "BraTS-GLI-02630-102",
+      "mean_dice": 0.945031680098966,
+      "n_slices": 131
+    },
+    {
+      "patient_id": "BraTS-GLI-02794-100",
+      "mean_dice": 0.9223700964874062,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02947-100",
+      "mean_dice": 0.9099315991621972,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02208-102",
+      "mean_dice": 0.840151250892244,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02535-101",
+      "mean_dice": 0.8756054480921728,
+      "n_slices": 138
+    },
+    {
+      "patient_id": "BraTS-GLI-02388-101",
+      "mean_dice": 0.8429544124296856,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02071-100",
+      "mean_dice": 0.9159406341077014,
+      "n_slices": 147
+    },
+    {
+      "patient_id": "BraTS-GLI-02380-100",
+      "mean_dice": 0.8395749758093186,
+      "n_slices": 143
+    },
+    {
+      "patient_id": "BraTS-GLI-02903-101",
+      "mean_dice": 0.8796343370001717,
+      "n_slices": 132
+    },
+    {
+      "patient_id": "BraTS-GLI-02548-101",
+      "mean_dice": 0.905669766563882,
+      "n_slices": 133
+    },
+    {
+      "patient_id": "BraTS-GLI-00528-100",
+      "mean_dice": 0.8551247855862878,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02381-100",
+      "mean_dice": 0.9110439718199864,
+      "n_slices": 144
+    },
+    {
+      "patient_id": "BraTS-GLI-02184-100",
+      "mean_dice": 0.8035129970643163,
+      "n_slices": 141
+    },
+    {
+      "patient_id": "BraTS-GLI-02511-100",
+      "mean_dice": 0.9112051328196574,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02646-102",
+      "mean_dice": 0.9008842953923425,
+      "n_slices": 137
+    },
+    {
+      "patient_id": "BraTS-GLI-02062-100",
+      "mean_dice": 0.8762779389193993,
+      "n_slices": 139
+    },
+    {
+      "patient_id": "BraTS-GLI-02317-100",
+      "mean_dice": 0.8905508408210733,
+      "n_slices": 149
+    },
+    {
+      "patient_id": "BraTS-GLI-02754-100",
+      "mean_dice": 0.7567034800722311,
+      "n_slices": 140
+    },
+    {
+      "patient_id": "BraTS-GLI-02427-100",
+      "mean_dice": 0.9210356685969477,
+      "n_slices": 142
+    },
+    {
+      "patient_id": "BraTS-GLI-02093-108",
+      "mean_dice": 0.8980658905997575,
+      "n_slices": 149
+    },
+    {
+      "patient_id": "BraTS-GLI-02542-100",
+      "mean_dice": 0.835844216076289,
+      "n_slices": 134
+    },
+    {
+      "patient_id": "BraTS-GLI-02239-101",
+      "mean_dice": 0.9286929687256887,
+      "n_slices": 135
+    },
+    {
+      "patient_id": "BraTS-GLI-02491-104",
+      "mean_dice": 0.8914984721199896,
+      "n_slices": 135
+    }
+  ],
+  "epochs": 25,
+  "imgsz": 512,
+  "batch": 16,
+  "max_patients": null,
+  "data_fraction": 1.0,
+  "run_dir": "runs\\train-2",
+  "metrics_history": [
+    {
+      "epoch": 1.0,
+      "time": 1384.71,
+      "train/box_loss": 1.24865,
+      "train/seg_loss": 2.05151,
+      "train/cls_loss": 1.47031,
+      "train/dfl_loss": 1.12822,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.80494,
+      "metrics/recall(B)": 0.70767,
+      "metrics/mAP50(B)": 0.81387,
+      "metrics/mAP50-95(B)": 0.57729,
+      "metrics/precision(M)": 0.8127,
+      "metrics/recall(M)": 0.7145,
+      "metrics/mAP50(M)": 0.81975,
+      "metrics/mAP50-95(M)": 0.53408,
+      "val/box_loss": 0.79979,
+      "val/seg_loss": 1.15994,
+      "val/cls_loss": 2.34231,
+      "val/dfl_loss": 0.7269,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.00999911,
+      "lr/pg1": 0.00333304,
+      "lr/pg2": 0.00999911,
+      "lr/pg3": 0.00333304,
+      "lr/pg4": 0.00999911,
+      "lr/pg5": 0.00333304,
+      "lr/pg6": 0.00999911,
+      "lr/pg7": 0.00333304
+    },
+    {
+      "epoch": 2.0,
+      "time": 2546.88,
+      "train/box_loss": 1.18075,
+      "train/seg_loss": 1.80276,
+      "train/cls_loss": 1.01644,
+      "train/dfl_loss": 1.09706,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.82563,
+      "metrics/recall(B)": 0.73868,
+      "metrics/mAP50(B)": 0.8433,
+      "metrics/mAP50-95(B)": 0.61704,
+      "metrics/precision(M)": 0.8345,
+      "metrics/recall(M)": 0.7476,
+      "metrics/mAP50(M)": 0.8501,
+      "metrics/mAP50-95(M)": 0.57398,
+      "val/box_loss": 0.7506,
+      "val/seg_loss": 1.0874,
+      "val/cls_loss": 1.90276,
+      "val/dfl_loss": 0.7127,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.0192071,
+      "lr/pg1": 0.00640238,
+      "lr/pg2": 0.0192071,
+      "lr/pg3": 0.00640238,
+      "lr/pg4": 0.0192071,
+      "lr/pg5": 0.00640238,
+      "lr/pg6": 0.0192071,
+      "lr/pg7": 0.00640238
+    },
+    {
+      "epoch": 3.0,
+      "time": 3661.71,
+      "train/box_loss": 1.17054,
+      "train/seg_loss": 1.77221,
+      "train/cls_loss": 0.99434,
+      "train/dfl_loss": 1.09893,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.82621,
+      "metrics/recall(B)": 0.70818,
+      "metrics/mAP50(B)": 0.82426,
+      "metrics/mAP50-95(B)": 0.60491,
+      "metrics/precision(M)": 0.833,
+      "metrics/recall(M)": 0.71399,
+      "metrics/mAP50(M)": 0.82919,
+      "metrics/mAP50-95(M)": 0.56008,
+      "val/box_loss": 0.75384,
+      "val/seg_loss": 1.14038,
+      "val/cls_loss": 1.25358,
+      "val/dfl_loss": 0.71994,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.0276232,
+      "lr/pg1": 0.00920773,
+      "lr/pg2": 0.0276232,
+      "lr/pg3": 0.00920773,
+      "lr/pg4": 0.0276232,
+      "lr/pg5": 0.00920773,
+      "lr/pg6": 0.0276232,
+      "lr/pg7": 0.00920773
+    },
+    {
+      "epoch": 4.0,
+      "time": 4756.96,
+      "train/box_loss": 1.12453,
+      "train/seg_loss": 1.71133,
+      "train/cls_loss": 0.93843,
+      "train/dfl_loss": 1.08126,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.77577,
+      "metrics/recall(B)": 0.45805,
+      "metrics/mAP50(B)": 0.61056,
+      "metrics/mAP50-95(B)": 0.39787,
+      "metrics/precision(M)": 0.7865,
+      "metrics/recall(M)": 0.46439,
+      "metrics/mAP50(M)": 0.62,
+      "metrics/mAP50-95(M)": 0.36416,
+      "val/box_loss": 0.93138,
+      "val/seg_loss": 1.59752,
+      "val/cls_loss": 1.50284,
+      "val/dfl_loss": 0.80127,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.026436,
+      "lr/pg1": 0.008812,
+      "lr/pg2": 0.026436,
+      "lr/pg3": 0.008812,
+      "lr/pg4": 0.026436,
+      "lr/pg5": 0.008812,
+      "lr/pg6": 0.026436,
+      "lr/pg7": 0.008812
+    },
+    {
+      "epoch": 5.0,
+      "time": 5840.67,
+      "train/box_loss": 1.07597,
+      "train/seg_loss": 1.63647,
+      "train/cls_loss": 0.88305,
+      "train/dfl_loss": 1.05973,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.74222,
+      "metrics/recall(B)": 0.21565,
+      "metrics/mAP50(B)": 0.3739,
+      "metrics/mAP50-95(B)": 0.2106,
+      "metrics/precision(M)": 0.75244,
+      "metrics/recall(M)": 0.21862,
+      "metrics/mAP50(M)": 0.3825,
+      "metrics/mAP50-95(M)": 0.1884,
+      "val/box_loss": 1.08993,
+      "val/seg_loss": 1.84719,
+      "val/cls_loss": 2.0567,
+      "val/dfl_loss": 0.8734,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.025248,
+      "lr/pg1": 0.008416,
+      "lr/pg2": 0.025248,
+      "lr/pg3": 0.008416,
+      "lr/pg4": 0.025248,
+      "lr/pg5": 0.008416,
+      "lr/pg6": 0.025248,
+      "lr/pg7": 0.008416
+    },
+    {
+      "epoch": 6.0,
+      "time": 6927.02,
+      "train/box_loss": 1.04258,
+      "train/seg_loss": 1.58461,
+      "train/cls_loss": 0.84477,
+      "train/dfl_loss": 1.0456,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.69215,
+      "metrics/recall(B)": 0.18964,
+      "metrics/mAP50(B)": 0.32538,
+      "metrics/mAP50-95(B)": 0.17653,
+      "metrics/precision(M)": 0.7007,
+      "metrics/recall(M)": 0.19198,
+      "metrics/mAP50(M)": 0.33213,
+      "metrics/mAP50-95(M)": 0.15464,
+      "val/box_loss": 1.11972,
+      "val/seg_loss": 1.86733,
+      "val/cls_loss": 2.1637,
+      "val/dfl_loss": 0.89011,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.02406,
+      "lr/pg1": 0.00802,
+      "lr/pg2": 0.02406,
+      "lr/pg3": 0.00802,
+      "lr/pg4": 0.02406,
+      "lr/pg5": 0.00802,
+      "lr/pg6": 0.02406,
+      "lr/pg7": 0.00802
+    },
+    {
+      "epoch": 7.0,
+      "time": 8020.32,
+      "train/box_loss": 1.0176,
+      "train/seg_loss": 1.55863,
+      "train/cls_loss": 0.82018,
+      "train/dfl_loss": 1.03689,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.68432,
+      "metrics/recall(B)": 0.28965,
+      "metrics/mAP50(B)": 0.41541,
+      "metrics/mAP50-95(B)": 0.24009,
+      "metrics/precision(M)": 0.69138,
+      "metrics/recall(M)": 0.29263,
+      "metrics/mAP50(M)": 0.42166,
+      "metrics/mAP50-95(M)": 0.21029,
+      "val/box_loss": 1.04066,
+      "val/seg_loss": 1.73492,
+      "val/cls_loss": 1.90656,
+      "val/dfl_loss": 0.85056,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.022872,
+      "lr/pg1": 0.007624,
+      "lr/pg2": 0.022872,
+      "lr/pg3": 0.007624,
+      "lr/pg4": 0.022872,
+      "lr/pg5": 0.007624,
+      "lr/pg6": 0.022872,
+      "lr/pg7": 0.007624
+    },
+    {
+      "epoch": 8.0,
+      "time": 9123.31,
+      "train/box_loss": 1.00377,
+      "train/seg_loss": 1.53171,
+      "train/cls_loss": 0.80465,
+      "train/dfl_loss": 1.02999,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.71953,
+      "metrics/recall(B)": 0.44725,
+      "metrics/mAP50(B)": 0.56951,
+      "metrics/mAP50-95(B)": 0.35814,
+      "metrics/precision(M)": 0.73223,
+      "metrics/recall(M)": 0.4509,
+      "metrics/mAP50(M)": 0.57821,
+      "metrics/mAP50-95(M)": 0.31948,
+      "val/box_loss": 0.93747,
+      "val/seg_loss": 1.53511,
+      "val/cls_loss": 1.5234,
+      "val/dfl_loss": 0.80012,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.021684,
+      "lr/pg1": 0.007228,
+      "lr/pg2": 0.021684,
+      "lr/pg3": 0.007228,
+      "lr/pg4": 0.021684,
+      "lr/pg5": 0.007228,
+      "lr/pg6": 0.021684,
+      "lr/pg7": 0.007228
+    },
+    {
+      "epoch": 9.0,
+      "time": 10219.4,
+      "train/box_loss": 0.98658,
+      "train/seg_loss": 1.50531,
+      "train/cls_loss": 0.78174,
+      "train/dfl_loss": 1.02279,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.77065,
+      "metrics/recall(B)": 0.57198,
+      "metrics/mAP50(B)": 0.69893,
+      "metrics/mAP50-95(B)": 0.47124,
+      "metrics/precision(M)": 0.78269,
+      "metrics/recall(M)": 0.57807,
+      "metrics/mAP50(M)": 0.70725,
+      "metrics/mAP50-95(M)": 0.42241,
+      "val/box_loss": 0.84717,
+      "val/seg_loss": 1.35462,
+      "val/cls_loss": 1.20362,
+      "val/dfl_loss": 0.75717,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.020496,
+      "lr/pg1": 0.006832,
+      "lr/pg2": 0.020496,
+      "lr/pg3": 0.006832,
+      "lr/pg4": 0.020496,
+      "lr/pg5": 0.006832,
+      "lr/pg6": 0.020496,
+      "lr/pg7": 0.006832
+    },
+    {
+      "epoch": 10.0,
+      "time": 11318.6,
+      "train/box_loss": 0.9725,
+      "train/seg_loss": 1.48799,
+      "train/cls_loss": 0.7702,
+      "train/dfl_loss": 1.01623,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.80469,
+      "metrics/recall(B)": 0.65199,
+      "metrics/mAP50(B)": 0.77573,
+      "metrics/mAP50-95(B)": 0.54863,
+      "metrics/precision(M)": 0.8177,
+      "metrics/recall(M)": 0.65629,
+      "metrics/mAP50(M)": 0.78366,
+      "metrics/mAP50-95(M)": 0.4958,
+      "val/box_loss": 0.78233,
+      "val/seg_loss": 1.21647,
+      "val/cls_loss": 1.03629,
+      "val/dfl_loss": 0.72689,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.019308,
+      "lr/pg1": 0.006436,
+      "lr/pg2": 0.019308,
+      "lr/pg3": 0.006436,
+      "lr/pg4": 0.019308,
+      "lr/pg5": 0.006436,
+      "lr/pg6": 0.019308,
+      "lr/pg7": 0.006436
+    },
+    {
+      "epoch": 11.0,
+      "time": 12417.9,
+      "train/box_loss": 0.96495,
+      "train/seg_loss": 1.47508,
+      "train/cls_loss": 0.7618,
+      "train/dfl_loss": 1.01239,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.8279,
+      "metrics/recall(B)": 0.70061,
+      "metrics/mAP50(B)": 0.82072,
+      "metrics/mAP50-95(B)": 0.59889,
+      "metrics/precision(M)": 0.83841,
+      "metrics/recall(M)": 0.70649,
+      "metrics/mAP50(M)": 0.82748,
+      "metrics/mAP50-95(M)": 0.54522,
+      "val/box_loss": 0.73824,
+      "val/seg_loss": 1.11962,
+      "val/cls_loss": 0.96801,
+      "val/dfl_loss": 0.70722,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.01812,
+      "lr/pg1": 0.00604,
+      "lr/pg2": 0.01812,
+      "lr/pg3": 0.00604,
+      "lr/pg4": 0.01812,
+      "lr/pg5": 0.00604,
+      "lr/pg6": 0.01812,
+      "lr/pg7": 0.00604
+    },
+    {
+      "epoch": 12.0,
+      "time": 13519.7,
+      "train/box_loss": 0.95493,
+      "train/seg_loss": 1.4548,
+      "train/cls_loss": 0.74871,
+      "train/dfl_loss": 1.00883,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.84151,
+      "metrics/recall(B)": 0.73062,
+      "metrics/mAP50(B)": 0.84781,
+      "metrics/mAP50-95(B)": 0.63222,
+      "metrics/precision(M)": 0.85257,
+      "metrics/recall(M)": 0.73715,
+      "metrics/mAP50(M)": 0.85415,
+      "metrics/mAP50-95(M)": 0.57937,
+      "val/box_loss": 0.7091,
+      "val/seg_loss": 1.05368,
+      "val/cls_loss": 0.96935,
+      "val/dfl_loss": 0.6945,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.016932,
+      "lr/pg1": 0.005644,
+      "lr/pg2": 0.016932,
+      "lr/pg3": 0.005644,
+      "lr/pg4": 0.016932,
+      "lr/pg5": 0.005644,
+      "lr/pg6": 0.016932,
+      "lr/pg7": 0.005644
+    },
+    {
+      "epoch": 13.0,
+      "time": 14754.7,
+      "train/box_loss": 0.94413,
+      "train/seg_loss": 1.44107,
+      "train/cls_loss": 0.7391,
+      "train/dfl_loss": 1.00348,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.84941,
+      "metrics/recall(B)": 0.75222,
+      "metrics/mAP50(B)": 0.86612,
+      "metrics/mAP50-95(B)": 0.6535,
+      "metrics/precision(M)": 0.86046,
+      "metrics/recall(M)": 0.75956,
+      "metrics/mAP50(M)": 0.87235,
+      "metrics/mAP50-95(M)": 0.60265,
+      "val/box_loss": 0.69155,
+      "val/seg_loss": 1.01091,
+      "val/cls_loss": 1.01792,
+      "val/dfl_loss": 0.68644,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.015744,
+      "lr/pg1": 0.005248,
+      "lr/pg2": 0.015744,
+      "lr/pg3": 0.005248,
+      "lr/pg4": 0.015744,
+      "lr/pg5": 0.005248,
+      "lr/pg6": 0.015744,
+      "lr/pg7": 0.005248
+    },
+    {
+      "epoch": 14.0,
+      "time": 16193.4,
+      "train/box_loss": 0.93477,
+      "train/seg_loss": 1.42724,
+      "train/cls_loss": 0.72589,
+      "train/dfl_loss": 0.99888,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.85821,
+      "metrics/recall(B)": 0.76676,
+      "metrics/mAP50(B)": 0.87679,
+      "metrics/mAP50-95(B)": 0.667,
+      "metrics/precision(M)": 0.86883,
+      "metrics/recall(M)": 0.77396,
+      "metrics/mAP50(M)": 0.88272,
+      "metrics/mAP50-95(M)": 0.6176,
+      "val/box_loss": 0.67986,
+      "val/seg_loss": 0.98376,
+      "val/cls_loss": 1.05569,
+      "val/dfl_loss": 0.68127,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.014556,
+      "lr/pg1": 0.004852,
+      "lr/pg2": 0.014556,
+      "lr/pg3": 0.004852,
+      "lr/pg4": 0.014556,
+      "lr/pg5": 0.004852,
+      "lr/pg6": 0.014556,
+      "lr/pg7": 0.004852
+    },
+    {
+      "epoch": 15.0,
+      "time": 17648.1,
+      "train/box_loss": 0.92398,
+      "train/seg_loss": 1.40989,
+      "train/cls_loss": 0.71369,
+      "train/dfl_loss": 0.996,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.86591,
+      "metrics/recall(B)": 0.77392,
+      "metrics/mAP50(B)": 0.88442,
+      "metrics/mAP50-95(B)": 0.67734,
+      "metrics/precision(M)": 0.87635,
+      "metrics/recall(M)": 0.78221,
+      "metrics/mAP50(M)": 0.8905,
+      "metrics/mAP50-95(M)": 0.62881,
+      "val/box_loss": 0.67176,
+      "val/seg_loss": 0.96572,
+      "val/cls_loss": 1.0901,
+      "val/dfl_loss": 0.67762,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.013368,
+      "lr/pg1": 0.004456,
+      "lr/pg2": 0.013368,
+      "lr/pg3": 0.004456,
+      "lr/pg4": 0.013368,
+      "lr/pg5": 0.004456,
+      "lr/pg6": 0.013368,
+      "lr/pg7": 0.004456
+    },
+    {
+      "epoch": 16.0,
+      "time": 19079.9,
+      "train/box_loss": 0.91168,
+      "train/seg_loss": 1.34724,
+      "train/cls_loss": 0.69828,
+      "train/dfl_loss": 0.98568,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.86757,
+      "metrics/recall(B)": 0.78138,
+      "metrics/mAP50(B)": 0.88951,
+      "metrics/mAP50-95(B)": 0.68377,
+      "metrics/precision(M)": 0.87806,
+      "metrics/recall(M)": 0.78983,
+      "metrics/mAP50(M)": 0.89531,
+      "metrics/mAP50-95(M)": 0.63605,
+      "val/box_loss": 0.66595,
+      "val/seg_loss": 0.95274,
+      "val/cls_loss": 1.05225,
+      "val/dfl_loss": 0.67522,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.01218,
+      "lr/pg1": 0.00406,
+      "lr/pg2": 0.01218,
+      "lr/pg3": 0.00406,
+      "lr/pg4": 0.01218,
+      "lr/pg5": 0.00406,
+      "lr/pg6": 0.01218,
+      "lr/pg7": 0.00406
+    },
+    {
+      "epoch": 17.0,
+      "time": 20463.4,
+      "train/box_loss": 0.89358,
+      "train/seg_loss": 1.31828,
+      "train/cls_loss": 0.67484,
+      "train/dfl_loss": 0.97708,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.87217,
+      "metrics/recall(B)": 0.78833,
+      "metrics/mAP50(B)": 0.89473,
+      "metrics/mAP50-95(B)": 0.69051,
+      "metrics/precision(M)": 0.8844,
+      "metrics/recall(M)": 0.79492,
+      "metrics/mAP50(M)": 0.90035,
+      "metrics/mAP50-95(M)": 0.64286,
+      "val/box_loss": 0.65978,
+      "val/seg_loss": 0.94072,
+      "val/cls_loss": 1.00945,
+      "val/dfl_loss": 0.67283,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.010992,
+      "lr/pg1": 0.003664,
+      "lr/pg2": 0.010992,
+      "lr/pg3": 0.003664,
+      "lr/pg4": 0.010992,
+      "lr/pg5": 0.003664,
+      "lr/pg6": 0.010992,
+      "lr/pg7": 0.003664
+    },
+    {
+      "epoch": 18.0,
+      "time": 21840.7,
+      "train/box_loss": 0.87793,
+      "train/seg_loss": 1.29849,
+      "train/cls_loss": 0.65632,
+      "train/dfl_loss": 0.96973,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.87586,
+      "metrics/recall(B)": 0.79374,
+      "metrics/mAP50(B)": 0.89881,
+      "metrics/mAP50-95(B)": 0.69598,
+      "metrics/precision(M)": 0.88753,
+      "metrics/recall(M)": 0.80056,
+      "metrics/mAP50(M)": 0.90435,
+      "metrics/mAP50-95(M)": 0.64919,
+      "val/box_loss": 0.65438,
+      "val/seg_loss": 0.93051,
+      "val/cls_loss": 0.96183,
+      "val/dfl_loss": 0.6705,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.009804,
+      "lr/pg1": 0.003268,
+      "lr/pg2": 0.009804,
+      "lr/pg3": 0.003268,
+      "lr/pg4": 0.009804,
+      "lr/pg5": 0.003268,
+      "lr/pg6": 0.009804,
+      "lr/pg7": 0.003268
+    },
+    {
+      "epoch": 19.0,
+      "time": 23220.8,
+      "train/box_loss": 0.8622,
+      "train/seg_loss": 1.27251,
+      "train/cls_loss": 0.63533,
+      "train/dfl_loss": 0.96442,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.87853,
+      "metrics/recall(B)": 0.79927,
+      "metrics/mAP50(B)": 0.90236,
+      "metrics/mAP50-95(B)": 0.70115,
+      "metrics/precision(M)": 0.88898,
+      "metrics/recall(M)": 0.80679,
+      "metrics/mAP50(M)": 0.90765,
+      "metrics/mAP50-95(M)": 0.65415,
+      "val/box_loss": 0.64954,
+      "val/seg_loss": 0.92205,
+      "val/cls_loss": 0.92013,
+      "val/dfl_loss": 0.66855,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.008616,
+      "lr/pg1": 0.002872,
+      "lr/pg2": 0.008616,
+      "lr/pg3": 0.002872,
+      "lr/pg4": 0.008616,
+      "lr/pg5": 0.002872,
+      "lr/pg6": 0.008616,
+      "lr/pg7": 0.002872
+    },
+    {
+      "epoch": 20.0,
+      "time": 24475.3,
+      "train/box_loss": 0.84302,
+      "train/seg_loss": 1.25064,
+      "train/cls_loss": 0.60934,
+      "train/dfl_loss": 0.95433,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.88113,
+      "metrics/recall(B)": 0.80379,
+      "metrics/mAP50(B)": 0.90565,
+      "metrics/mAP50-95(B)": 0.70535,
+      "metrics/precision(M)": 0.89114,
+      "metrics/recall(M)": 0.811,
+      "metrics/mAP50(M)": 0.91095,
+      "metrics/mAP50-95(M)": 0.65878,
+      "val/box_loss": 0.64512,
+      "val/seg_loss": 0.91458,
+      "val/cls_loss": 0.88506,
+      "val/dfl_loss": 0.66657,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.007428,
+      "lr/pg1": 0.002476,
+      "lr/pg2": 0.007428,
+      "lr/pg3": 0.002476,
+      "lr/pg4": 0.007428,
+      "lr/pg5": 0.002476,
+      "lr/pg6": 0.007428,
+      "lr/pg7": 0.002476
+    },
+    {
+      "epoch": 21.0,
+      "time": 25528.6,
+      "train/box_loss": 0.82475,
+      "train/seg_loss": 1.22331,
+      "train/cls_loss": 0.59008,
+      "train/dfl_loss": 0.94547,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.88363,
+      "metrics/recall(B)": 0.80768,
+      "metrics/mAP50(B)": 0.90844,
+      "metrics/mAP50-95(B)": 0.70967,
+      "metrics/precision(M)": 0.89284,
+      "metrics/recall(M)": 0.8161,
+      "metrics/mAP50(M)": 0.91382,
+      "metrics/mAP50-95(M)": 0.66287,
+      "val/box_loss": 0.64126,
+      "val/seg_loss": 0.90769,
+      "val/cls_loss": 0.848,
+      "val/dfl_loss": 0.66484,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.00624,
+      "lr/pg1": 0.00208,
+      "lr/pg2": 0.00624,
+      "lr/pg3": 0.00208,
+      "lr/pg4": 0.00624,
+      "lr/pg5": 0.00208,
+      "lr/pg6": 0.00624,
+      "lr/pg7": 0.00208
+    },
+    {
+      "epoch": 22.0,
+      "time": 26582.6,
+      "train/box_loss": 0.80401,
+      "train/seg_loss": 1.19579,
+      "train/cls_loss": 0.56543,
+      "train/dfl_loss": 0.9367,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.88667,
+      "metrics/recall(B)": 0.81132,
+      "metrics/mAP50(B)": 0.91094,
+      "metrics/mAP50-95(B)": 0.71343,
+      "metrics/precision(M)": 0.89568,
+      "metrics/recall(M)": 0.81957,
+      "metrics/mAP50(M)": 0.9162,
+      "metrics/mAP50-95(M)": 0.66621,
+      "val/box_loss": 0.63773,
+      "val/seg_loss": 0.90118,
+      "val/cls_loss": 0.81174,
+      "val/dfl_loss": 0.66312,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.005052,
+      "lr/pg1": 0.001684,
+      "lr/pg2": 0.005052,
+      "lr/pg3": 0.001684,
+      "lr/pg4": 0.005052,
+      "lr/pg5": 0.001684,
+      "lr/pg6": 0.005052,
+      "lr/pg7": 0.001684
+    },
+    {
+      "epoch": 23.0,
+      "time": 27633.4,
+      "train/box_loss": 0.78193,
+      "train/seg_loss": 1.16449,
+      "train/cls_loss": 0.54005,
+      "train/dfl_loss": 0.92682,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.88956,
+      "metrics/recall(B)": 0.8146,
+      "metrics/mAP50(B)": 0.91334,
+      "metrics/mAP50-95(B)": 0.71672,
+      "metrics/precision(M)": 0.89971,
+      "metrics/recall(M)": 0.82224,
+      "metrics/mAP50(M)": 0.91858,
+      "metrics/mAP50-95(M)": 0.66929,
+      "val/box_loss": 0.63369,
+      "val/seg_loss": 0.89537,
+      "val/cls_loss": 0.78463,
+      "val/dfl_loss": 0.66121,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.003864,
+      "lr/pg1": 0.001288,
+      "lr/pg2": 0.003864,
+      "lr/pg3": 0.001288,
+      "lr/pg4": 0.003864,
+      "lr/pg5": 0.001288,
+      "lr/pg6": 0.003864,
+      "lr/pg7": 0.001288
+    },
+    {
+      "epoch": 24.0,
+      "time": 28655.4,
+      "train/box_loss": 0.7637,
+      "train/seg_loss": 1.14352,
+      "train/cls_loss": 0.51692,
+      "train/dfl_loss": 0.9184,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.89192,
+      "metrics/recall(B)": 0.81712,
+      "metrics/mAP50(B)": 0.91539,
+      "metrics/mAP50-95(B)": 0.72021,
+      "metrics/precision(M)": 0.9021,
+      "metrics/recall(M)": 0.82457,
+      "metrics/mAP50(M)": 0.92055,
+      "metrics/mAP50-95(M)": 0.67196,
+      "val/box_loss": 0.63035,
+      "val/seg_loss": 0.89038,
+      "val/cls_loss": 0.76148,
+      "val/dfl_loss": 0.65954,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.002676,
+      "lr/pg1": 0.000892,
+      "lr/pg2": 0.002676,
+      "lr/pg3": 0.000892,
+      "lr/pg4": 0.002676,
+      "lr/pg5": 0.000892,
+      "lr/pg6": 0.002676,
+      "lr/pg7": 0.000892
+    },
+    {
+      "epoch": 25.0,
+      "time": 29677.3,
+      "train/box_loss": 0.74012,
+      "train/seg_loss": 1.11441,
+      "train/cls_loss": 0.48966,
+      "train/dfl_loss": 0.91,
+      "train/sem_loss": 0.0,
+      "metrics/precision(B)": 0.89667,
+      "metrics/recall(B)": 0.81952,
+      "metrics/mAP50(B)": 0.91768,
+      "metrics/mAP50-95(B)": 0.72298,
+      "metrics/precision(M)": 0.90789,
+      "metrics/recall(M)": 0.82692,
+      "metrics/mAP50(M)": 0.92282,
+      "metrics/mAP50-95(M)": 0.67421,
+      "val/box_loss": 0.62769,
+      "val/seg_loss": 0.88613,
+      "val/cls_loss": 0.74706,
+      "val/dfl_loss": 0.65827,
+      "val/sem_loss": 0.0,
+      "lr/pg0": 0.001488,
+      "lr/pg1": 0.000496,
+      "lr/pg2": 0.001488,
+      "lr/pg3": 0.000496,
+      "lr/pg4": 0.001488,
+      "lr/pg5": 0.000496,
+      "lr/pg6": 0.001488,
+      "lr/pg7": 0.000496
+    }
+  ]
+}
