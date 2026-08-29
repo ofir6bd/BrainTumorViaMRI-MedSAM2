@@ -176,31 +176,50 @@ function _trainingTable(columns, rows, formatters) {
 }
 
 // Minimal dependency-free SVG line chart (no external chart library / CDN needed).
-// seriesList: [{ label, color, data: [{x, y}, ...] }, ...]. Returns null if there is
-// no plottable data at all.
+// seriesList: [{ label, color, data: [{x, y}, ...], axis }, ...]. `axis` is optional and
+// defaults to "left"; series with `axis: "right"` are scaled against their own min/max
+// and plotted against a secondary y-axis drawn on the right edge of the chart (e.g. a
+// tumour voxel count overlaid on a 0-1 Dice score). Returns null if there is no
+// plottable data at all.
 function _lineChartSVG(seriesList, opts = {}) {
   const width = opts.width || 580;
   const height = opts.height || 200;
   const padLeft = 54;
-  const padRight = 12;
+  const plottable = seriesList.filter((s) => s.data && s.data.length);
+  if (!plottable.length) return null;
+  const rightSeries = plottable.filter((s) => s.axis === "right");
+  const leftSeries = plottable.filter((s) => s.axis !== "right");
+  const hasRightAxis = rightSeries.length > 0;
+  const padRight = hasRightAxis ? 60 : 12;
   const padTop = 12;
   const padBottom = 30;
 
-  const plottable = seriesList.filter((s) => s.data && s.data.length);
   const allPoints = plottable.flatMap((s) => s.data);
-  if (!allPoints.length) return null;
-
   const xs = allPoints.map((p) => p.x);
-  const ys = allPoints.map((p) => p.y);
   let xMin = Math.min(...xs), xMax = Math.max(...xs);
-  let yMin = Math.min(...ys), yMax = Math.max(...ys);
   if (xMax === xMin) xMax = xMin + 1;
-  if (yMax === yMin) { yMax += 1; yMin -= 1; }
+
+  const leftPoints = leftSeries.flatMap((s) => s.data);
+  let yMin = 0, yMax = 1;
+  if (leftPoints.length) {
+    const ys = leftPoints.map((p) => p.y);
+    yMin = Math.min(...ys); yMax = Math.max(...ys);
+    if (yMax === yMin) { yMax += 1; yMin -= 1; }
+  }
+
+  const rightPoints = rightSeries.flatMap((s) => s.data);
+  let yMinR = 0, yMaxR = 1;
+  if (rightPoints.length) {
+    const ysR = rightPoints.map((p) => p.y);
+    yMinR = Math.min(...ysR); yMaxR = Math.max(...ysR);
+    if (yMaxR === yMinR) { yMaxR += 1; yMinR -= 1; }
+  }
 
   const plotW = width - padLeft - padRight;
   const plotH = height - padTop - padBottom;
   const sx = (x) => padLeft + ((x - xMin) / (xMax - xMin)) * plotW;
   const sy = (y) => padTop + plotH - ((y - yMin) / (yMax - yMin)) * plotH;
+  const syR = (y) => padTop + plotH - ((y - yMinR) / (yMaxR - yMinR)) * plotH;
 
   let svg = `<svg viewBox="0 0 ${width} ${height}" class="yolo-chart-svg" `
     + `style="height:${height}px" preserveAspectRatio="xMidYMid meet">`;
@@ -213,6 +232,16 @@ function _lineChartSVG(seriesList, opts = {}) {
     svg += `<text x="${padLeft - 6}" y="${(y + 3).toFixed(1)}" `
       + `class="yolo-chart-ticklabel yolo-chart-ylabel" text-anchor="end">${t.toFixed(2)}</text>`;
   });
+  if (hasRightAxis) {
+    const rColor = rightSeries[0].color;
+    const rTicks = [yMinR, (yMinR + yMaxR) / 2, yMaxR];
+    rTicks.forEach((t) => {
+      const y = syR(t);
+      svg += `<text x="${padLeft + plotW + 8}" y="${(y + 3).toFixed(1)}" `
+        + `class="yolo-chart-ticklabel yolo-chart-ylabel" text-anchor="start" `
+        + `style="fill:${rColor}">${Math.round(t).toLocaleString()}</text>`;
+    });
+  }
   const xTickCount = opts.xTickCount || 2;
   for (let i = 0; i <= xTickCount; i++) {
     const t = xMin + (i / xTickCount) * (xMax - xMin);
@@ -224,6 +253,10 @@ function _lineChartSVG(seriesList, opts = {}) {
     + `class="yolo-chart-axis" />`;
   svg += `<line x1="${padLeft}" y1="${padTop + plotH}" x2="${padLeft + plotW}" `
     + `y2="${padTop + plotH}" class="yolo-chart-axis" />`;
+  if (hasRightAxis) {
+    svg += `<line x1="${padLeft + plotW}" y1="${padTop}" x2="${padLeft + plotW}" `
+      + `y2="${padTop + plotH}" class="yolo-chart-axis" />`;
+  }
 
   if (typeof opts.markerX === "number" && opts.markerX >= xMin && opts.markerX <= xMax) {
     const mx = sx(opts.markerX);
@@ -232,8 +265,9 @@ function _lineChartSVG(seriesList, opts = {}) {
   }
 
   plottable.forEach((s, i) => {
+    const scaleY = s.axis === "right" ? syR : sy;
     const d = s.data
-      .map((p, j) => `${j === 0 ? "M" : "L"} ${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`)
+      .map((p, j) => `${j === 0 ? "M" : "L"} ${sx(p.x).toFixed(1)} ${scaleY(p.y).toFixed(1)}`)
       .join(" ");
     svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" `
       + `class="yolo-series-line" data-series-idx="${i}" />`;
@@ -253,7 +287,7 @@ function _lineChartSVG(seriesList, opts = {}) {
     const swatch = document.createElement("i");
     swatch.style.background = s.color;
     item.appendChild(swatch);
-    item.appendChild(document.createTextNode(s.label));
+    item.appendChild(document.createTextNode(s.axis === "right" ? `${s.label} (right axis)` : s.label));
     item.addEventListener("click", () => {
       const path = wrap.querySelector(`path[data-series-idx="${i}"]`);
       const nowOff = item.classList.toggle("off");
@@ -594,8 +628,18 @@ async function renderSummaryTable(idx) {
       const diceData = rows
         .filter((r) => typeof r.dice === "number")
         .map((r) => ({ x: r.z, y: r.dice }));
+      const voxelData = rows
+        .filter((r) => typeof r.tumor_voxels === "number")
+        .map((r) => ({ x: r.z, y: r.tumor_voxels }));
+      const predVoxelData = rows
+        .filter((r) => typeof r.pred_tumor_voxels === "number")
+        .map((r) => ({ x: r.z, y: r.pred_tumor_voxels }));
       const diceChart = _lineChartSVG(
-        [{ label: "Dice", color: "#3b82f6", data: diceData }],
+        [
+          { label: "Dice", color: "#3b82f6", data: diceData },
+          { label: "GT tumor voxels", color: "#f59e0b", data: voxelData, axis: "right" },
+          { label: "Predicted tumor voxels", color: "#22c55e", data: predVoxelData, axis: "right" },
+        ],
         { height: 240, width: 900, xTickCount: 8, markerX: currentZ },
       );
       if (diceChart) {
@@ -611,7 +655,7 @@ async function renderSummaryTable(idx) {
 
     const thead = document.createElement("thead");
     const hr = document.createElement("tr");
-    ["z", "dice"].forEach((c) => {
+    ["z", "dice", "GT voxels", "pred voxels"].forEach((c) => {
       const th = document.createElement("th");
       th.textContent = c;
       hr.appendChild(th);
@@ -633,6 +677,12 @@ async function renderSummaryTable(idx) {
       const tdDice = document.createElement("td");
       tdDice.textContent = (typeof row.dice === "number") ? row.dice.toFixed(3) : "";
       tr.appendChild(tdDice);
+      const tdVox = document.createElement("td");
+      tdVox.textContent = (typeof row.tumor_voxels === "number") ? row.tumor_voxels.toLocaleString() : "";
+      tr.appendChild(tdVox);
+      const tdPredVox = document.createElement("td");
+      tdPredVox.textContent = (typeof row.pred_tumor_voxels === "number") ? row.pred_tumor_voxels.toLocaleString() : "";
+      tr.appendChild(tdPredVox);
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);

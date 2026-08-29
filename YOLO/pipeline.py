@@ -616,8 +616,18 @@ class YoloPipeline:
         return out
 
     def dice_table(self):
-        """Per-slice Dice for all valid (processed) slices."""
-        return [{"z": z, "dice": self.process_slice(z)["dice"]} for z in self.slice_indices]
+        """Per-slice Dice + ground-truth/predicted tumour voxel counts for all valid
+        (processed) slices."""
+        rows = []
+        for z in self.slice_indices:
+            info = self.process_slice(z)
+            rows.append({
+                "z": z,
+                "dice": info["dice"],
+                "tumor_voxels": int(np.count_nonzero(info["gt_wt"])),
+                "pred_tumor_voxels": int(np.count_nonzero(info["pred_wt"])),
+            })
+        return rows
 
 
 # ---------------------------------------------------------------------------
