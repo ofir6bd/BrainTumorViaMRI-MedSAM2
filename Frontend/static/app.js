@@ -153,12 +153,13 @@ if (copyPageBtn) {
   copyPageBtn.addEventListener("click", copyPageAsImage);
 }
 
-// ---- sidebar mode switching (Explore / FCM Segmentation / YOLO Detection) ----
+// ---- sidebar mode switching (Explore / FCM / YOLO / GT vs YOLO) ----
 const sidenav = document.getElementById("sidenav");
 const panels = {
   explore: document.getElementById("explorePanel"),
   "fcm-segmentation": document.getElementById("fcmPanel"),
   "yolo-detection": document.getElementById("yoloPanel"),
+  "gt-vs-yolo": document.getElementById("gtvsyoloPanel"),
 };
 sidenav.addEventListener("click", (e) => {
   const btn = e.target.closest(".navbtn");

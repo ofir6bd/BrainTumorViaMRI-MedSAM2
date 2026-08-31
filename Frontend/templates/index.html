@@ -21,6 +21,9 @@
         <button class="navbtn" data-mode="yolo-detection" type="button">
           <span class="ic">&#9678;</span> YOLO Detection
         </button>
+        <button class="navbtn" data-mode="gt-vs-yolo" type="button">
+          <span class="ic">&#9707;</span> GT vs YOLO
+        </button>
       </nav>
       <button id="copyPageBtn" type="button" class="copy-page-btn">Copy page image</button>
       <p id="copyPageStatus" class="copy-page-status" aria-live="polite"></p>
@@ -189,11 +192,72 @@
           <div id="yoloSummaryTableWrap" class="yolo-summary-table-wrap"></div>
         </section>
       </section>
+
+      <!-- ============ GT vs YOLO (MedSAM2 prompt comparison) ============ -->
+      <section class="mode-panel hidden" id="gtvsyoloPanel">
+        <header>
+          <h2>GT vs YOLO &mdash; MedSAM2 prompt comparison</h2>
+          <p class="sub">Same model (MedSAM2_latest), same slices-as-video propagation, same anchor slices &mdash; only the prompt mask differs: expert <code>seg&nbsp;&gt;&nbsp;0</code> vs YOLO prediction</p>
+        </header>
+
+        <section class="controls yolo-subnav-wrap">
+          <div class="field">
+            <span>View</span>
+            <div class="tabs" id="gvViews">
+              <button class="tab active" data-gview="segment" type="button">Segmentation</button>
+              <button class="tab" data-gview="summary" type="button">Slice summary</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="controls">
+          <label class="field">
+            <span>Patient <span class="yolo-test-badge" title="Held-out test split only — never trained on. A tick means a cached run exists and will load instantly.">test set only</span></span>
+            <select id="gvPatient"></select>
+          </label>
+
+          <label class="field">
+            <span>Model <span class="yolo-test-badge" title="YOLO checkpoint that supplies the prompt masks for the YOLO arm. MedSAM2 itself is always MedSAM2_latest.pt.">YOLO arm</span></span>
+            <select id="gvModel"></select>
+          </label>
+
+          <div class="field">
+            <span>&nbsp;</span>
+            <button id="gvRerun" type="button" title="Discard the cached result and run both arms again">Re-run</button>
+          </div>
+
+          <div class="field slice-field" id="gvSliceField">
+            <span>Slice</span>
+            <button id="gvBest" type="button">Best</button>
+            <input type="range" id="gvZ" min="0" max="0" value="0">
+            <span id="gvZLabel" class="zlabel">z = 0</span>
+          </div>
+        </section>
+
+        <main>
+          <p id="gvStatus" class="status">Loading&hellip;</p>
+          <div id="gvSlicePanel">
+            <img id="gvViewer" alt="" />
+          </div>
+        </main>
+
+        <section id="gvSummaryPanel" class="yolo-summary hidden">
+          <div class="yolo-summary-head">
+            <h3>Run summary</h3>
+          </div>
+          <div id="gvArms" class="gv-arms"></div>
+          <div id="gvAnchors" class="gv-anchors"></div>
+          <div id="gvRoundChart" class="yolo-slice-dice-chart"></div>
+          <div id="gvSliceChart" class="yolo-slice-dice-chart"></div>
+          <div id="gvTableWrap" class="yolo-summary-table-wrap"></div>
+        </section>
+      </section>
     </div>
   </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   <script src="{{ url_for('static', filename='fcm_segmentation.js') }}"></script>
   <script src="{{ url_for('static', filename='yolo.js') }}"></script>
+  <script src="{{ url_for('static', filename='gtvsyolo.js') }}"></script>
 </body>
 </html>
