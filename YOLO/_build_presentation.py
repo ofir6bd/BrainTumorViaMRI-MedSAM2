@@ -221,11 +221,11 @@ stat_card(s2, Inches(6.8), Inches(1.6), Inches(2.9), Inches(1.5), "324", "Valida
 stat_card(s2, Inches(9.9), Inches(1.6), Inches(2.85), Inches(1.5), "324", "Test (20%, held out)", RED)
 
 add_bullets(s2, Inches(0.6), Inches(3.4), Inches(12.1), Inches(3.2), [
-    ("Source pools (config.yaml -> paths.extract_to):", {"bold": True, "size": 17, "color": NAVY, "space_after": 10}),
-    ("  • training_data1_v2 — 1,350 patients", {"size": 15}),
-    ("  • training_data_additional — 271 patients", {"size": 15, "space_after": 18}),
+    ("Source pool (config.yaml -> paths.extract_to):", {"bold": True, "size": 17, "color": NAVY, "space_after": 10}),
+    ("  • training_data_additional — 1,621 labeled patients", {"size": 15}),
+    ("  • pre-split on disk into train/ , val/ and test/ subfolders", {"size": 15, "space_after": 18}),
     ("Split logic (pipeline.split_patients):", {"bold": True, "size": 17, "color": NAVY, "space_after": 10}),
-    ("  • Deterministic shuffle, seed = 42 — reproducible across runs", {"size": 15}),
+    ("  • Read straight from the folders — no reshuffling, stable by construction", {"size": 15}),
     ("  • Split by patient (all slices of one patient stay in one split) — avoids data leakage", {"size": 15}),
     ("  • Train + val used for fine-tuning yolo11n-seg; test is never trained on", {"size": 15}),
     ("  • Test split = the web UI's patient list; every Dice shown there is on unseen patients", {"size": 15}),

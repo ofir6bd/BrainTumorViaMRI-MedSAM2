@@ -23,11 +23,13 @@
 - **Ground truth is the expert `-seg.nii.gz` mask** (labels 1–4 merged to WT). Training labels
   are segmentation polygons derived from this mask. No synthetic labels.
 - Data source follows `config.yaml` (`paths.extract_to`, `data/dataset`):
-  - **Patient pool**: `data/dataset/training_data1_v2` + `data/dataset/training_data_additional`
-    (1350 + 271 patients, all **labeled** — each has an expert `-seg.nii.gz` mask).
-  - Split by patient into **train (60%) / val (20%) / test (20%)** (`val_fraction`/
-    `test_fraction`, deterministic by `seed`). All three splits are **labeled**, so Dice
-    can be computed on any of them. `test` is simply never trained on — it's held out
+  - **Patient pool**: `data/dataset/training_data_additional/` (1621 patients, all
+    **labeled** — each has an expert `-seg.nii.gz` mask).
+  - The split is **physical**: that folder contains `train/`, `val/` and `test/`
+    subfolders of patient dirs, at **60% / 20% / 20%** (973 / 324 / 324). The code just
+    reads whichever folder a patient sits in (`split_dirs`, `split_patients`) — it does
+    not reshuffle. To move a patient between splits, move its folder. All three splits
+    are **labeled**, so Dice can be computed on any of them. `test` is simply never trained on — it's held out
     for the post-training Dice quality summary (`evaluate_test_split` / `evaluate.py`)
     and is also the patient pool the web UI's Patient dropdown offers.
   - The old BraTS challenge `validation_data` folder (unlabeled, no `-seg`) is **not**
@@ -112,8 +114,8 @@ For every kept slice `z` (1-based; array index `z − 1`):
 
 ### Stage C — Dataset assembly & split
 - Split **by patient** (all slices of a patient go to the same split) to avoid leakage.
-- All three splits come from the same labeled pool (`training_data1_v2` +
-  `training_data_additional`), deterministic 60/20/20 by `seed`:
+- The split is read off disk from `training_data_additional/{train,val,test}/`
+  (60/20/20, all labeled):
   - `train` (60%): writes `images/train/` + `labels/train/`.
   - `val` (20%): writes `images/val/` + `labels/val/`.
   - `test` (20%, never trained on): writes `images/test/` + `labels/test/` — it has
@@ -194,9 +196,7 @@ shows that checkpoint's metrics.
 |-------------------|------------------------------------------------------|---------|
 | `min_mask_area`   | drop tumour components smaller than this (px)        | `50`    |
 | `min_fg_voxels`   | min foreground voxels for a slice to be kept         | `100`   |
-| `val_fraction`    | fraction of **patients** held out for validation     | `0.2`   |
-| `test_fraction`   | fraction of **patients** held out for the test split | `0.2`   |
-| `seed`            | RNG seed for the deterministic patient split         | `42`    |
+| `seed`            | RNG seed for the `fraction=` random subset of each split | `42`    |
 | `imgsz`           | YOLO training/inference image size                   | `512`   |
 | `epochs`          | fine-tuning epochs                                   | `100`   |
 | `batch`           | training batch size                                  | `16`    |

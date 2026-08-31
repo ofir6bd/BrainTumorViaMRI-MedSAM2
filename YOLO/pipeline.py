@@ -7,12 +7,13 @@ Implements README.md:
   `routes.py` (Stage F, web UI).
 
 Data source (config.yaml -> paths.extract_to, default `data/dataset`):
-- Patient pool: `training_data1_v2` + `training_data_additional`, split by patient
-  (deterministic via `seed`) into train (60%) / val (20%) / test (20%) — all three
-  **labeled** (have expert `-seg` masks). `test` is held out from training entirely;
-  it's used only for the post-training Dice quality summary (`evaluate_test_split`,
-  `YOLO/evaluate.py`) and as the web UI's patient list (`list_test_patients`), never
-  for gradient updates or hyperparameter selection.
+- Patient pool: `training_data_additional/`, already split **physically** into
+  `train/` (60%) / `val/` (20%) / `test/` (20%) subfolders of patient dirs — the
+  folders are the split, the code just reads them (`split_dirs`, `split_patients`).
+  All three are **labeled** (have expert `-seg` masks). `test` is held out from
+  training entirely; it's used only for the post-training Dice quality summary
+  (`evaluate_test_split`, `YOLO/evaluate.py`) and as the web UI's patient list
+  (`list_test_patients`), never for gradient updates or hyperparameter selection.
 """
 import glob
 import json
@@ -33,8 +34,9 @@ from skimage import measure
 PARAMS = {
     "min_mask_area": 50,
     "min_fg_voxels": 100,
-    "val_fraction": 0.2,
-    "test_fraction": 0.2,
+    # The train/val/test split itself is physical (folders on disk, see `split_dirs`),
+    # so there are no split-fraction params. `seed` only makes the `fraction=` subset
+    # of each split a reproducible random sample.
     "seed": 42,
     "imgsz": 512,
     "epochs": 100,
@@ -191,19 +193,36 @@ def _config():
     return {}
 
 
+POOL_DIR_NAME = "training_data_additional"
+SPLIT_NAMES = ("train", "val", "test")
+
+
 def _data_root():
-    """`data/dataset/` — parent of the three split source folders."""
+    """`data/dataset/` — `config.yaml -> paths.extract_to`."""
     cfg = _config()
     return cfg.get("paths", {}).get("extract_to", "data/dataset")
 
 
+def pool_root():
+    """`data/dataset/training_data_additional/` — holds the `train/`, `val/`, `test/`
+    subfolders that ARE the split (see `split_dirs`)."""
+    return os.path.join(_data_root(), POOL_DIR_NAME)
+
+
+def split_dirs():
+    """{"train": dir, "val": dir, "test": dir} — the physical split folders.
+
+    The split is on disk, not computed: each patient folder lives under exactly one of
+    these. `split_manifest.json` next to them records how they were assigned.
+    """
+    root = pool_root()
+    return {s: os.path.join(root, s) for s in SPLIT_NAMES}
+
+
 def train_pool_dirs():
-    """Folders that make up the combined train/val/test patient pool (all labeled)."""
-    root = _data_root()
-    return [
-        os.path.join(root, "training_data1_v2"),
-        os.path.join(root, "training_data_additional"),
-    ]
+    """All three split folders as a flat list — for locating a patient dir by id when
+    you don't care which split it's in."""
+    return list(split_dirs().values())
 
 
 def _find_modalities(patient_dir):
@@ -237,19 +256,18 @@ def _list_patients(root, require_seg=True):
 
 
 def split_patients(params=None, max_patients=None, fraction=None):
-    """Deterministic patient-level split: train / val / test — all three **labeled**
-    (have `-seg`), from the combined pool `training_data1_v2` + `training_data_additional`.
+    """Read the train / val / test split straight off disk — the three folders under
+    `pool_root()` (see `split_dirs`). All patients are **labeled** (have `-seg`).
 
-    Ratios: train 60% / val 20% / test 20% (`PARAMS["val_fraction"]`/`["test_fraction"]`).
-    `test` is fully held out from training — used only for the post-training Dice
-    quality summary (`evaluate_test_split`) and as the web UI's patient list, never for
-    gradient updates or hyperparameter selection.
+    The split is physical: moving a patient folder between `train/`, `val/` and `test/`
+    is what changes the split. Nothing here reshuffles it. Ratios on disk are the
+    intended train 60% / val 20% / test 20%. `test` is never trained on — it feeds only
+    the post-training Dice summary (`evaluate_test_split`) and the web UI's patient list.
 
     `fraction` (0 < fraction <= 1, default `None` = all): keeps this fraction of each
-    split's patients (train, val, test independently), preserving the 60/20/20 ratio
-    -- e.g. `fraction=0.5` trains on half the data while keeping the same proportions.
-    Applied on the already-shuffled deterministic order, so it's still a reproducible
-    subset.
+    split's patients, so the 60/20/20 ratio is preserved -- e.g. `fraction=0.5` trains
+    on half the data. The subset is drawn from a `seed`-shuffled order, so it's a
+    reproducible *random* subset, not an alphabetical prefix.
 
     `max_patients` caps each split's **absolute** patient count on top of `fraction`.
     It's a smoke-test-only knob (small n) — leave it `None` for a real run; unlike
@@ -263,34 +281,21 @@ def split_patients(params=None, max_patients=None, fraction=None):
     if params:
         p.update(params)
 
-    pool = []
-    for root in train_pool_dirs():
-        pool.extend(_list_patients(root, require_seg=True))
-    pool.sort(key=lambda r: r["patient_id"])
+    if fraction is not None and not (0 < fraction <= 1):
+        raise ValueError("fraction must be in (0, 1]")
 
-    rng = random.Random(p["seed"])
-    shuffled = list(pool)
-    rng.shuffle(shuffled)
-
-    n = len(shuffled)
-    n_test = int(round(n * p["test_fraction"]))
-    n_val = int(round(n * p["val_fraction"]))
-    test = shuffled[:n_test]
-    val = shuffled[n_test:n_test + n_val]
-    train = shuffled[n_test + n_val:]
-
-    if fraction is not None:
-        if not (0 < fraction <= 1):
-            raise ValueError("fraction must be in (0, 1]")
-        train = train[:max(1, round(len(train) * fraction))]
-        val = val[:max(1, round(len(val) * fraction))]
-        test = test[:max(1, round(len(test) * fraction))]
-
-    if max_patients is not None:
-        train = train[:max_patients]
-        val = val[:max_patients]
-        test = test[:max_patients]
-    return {"train": train, "val": val, "test": test}
+    out = {}
+    for split_name, d in split_dirs().items():
+        patients = _list_patients(d, require_seg=True)
+        # Shuffle before subsetting so `fraction`/`max_patients` take a reproducible
+        # random sample rather than an alphabetical prefix. Full runs are unaffected.
+        random.Random(p["seed"]).shuffle(patients)
+        if fraction is not None:
+            patients = patients[:max(1, round(len(patients) * fraction))]
+        if max_patients is not None:
+            patients = patients[:max_patients]
+        out[split_name] = patients
+    return out
 
 
 def list_test_patients(params=None):
@@ -384,7 +389,7 @@ def build_dataset(output_dir=None, params=None, log=print, max_patients=None, fr
     is written just like `train`/`val` — `test` just isn't trained on.
 
     `fraction` (0 < fraction <= 1, default `None` = all): train on this fraction of
-    each split's patients while preserving the 60/20/20 ratio — see `split_patients`.
+    each split's patients while preserving the on-disk ratio — see `split_patients`.
 
     `max_patients` (smoke-test only, default `None`): cap each split to this many
     patients — see `split_patients`.
