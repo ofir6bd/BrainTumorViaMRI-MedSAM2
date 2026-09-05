@@ -49,6 +49,10 @@ app.register_blueprint(fcm_bp)
 from YOLO.routes import yolo_bp  # noqa: E402
 app.register_blueprint(yolo_bp)
 
+# GT-prompted vs YOLO-prompted MedSAM2 comparison (served under /gtvsyolo).
+from GTvsYOLO.routes import gtvsyolo_bp  # noqa: E402
+app.register_blueprint(gtvsyolo_bp)
+
 
 def find_patients():
     patients = []

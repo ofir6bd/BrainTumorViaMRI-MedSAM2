@@ -40,6 +40,8 @@ async function initYolo() {
   yel.trainingPanel = document.getElementById("yoloTrainingPanel");
   yel.trainingWrap = document.getElementById("yoloTrainingWrap");
   yel.maskLegend = document.getElementById("yoloMaskLegend");
+  yel.search = document.getElementById("yoloPatientSearch");
+  yel.count = document.getElementById("yoloPatientCount");
 
   Y.patients = await (await fetch("/yolo/api/patients")).json();
   yel.sel.innerHTML = "";
@@ -48,15 +50,14 @@ async function initYolo() {
     yel.viewer.removeAttribute("src");
     return;
   }
-  for (const p of Y.patients) {
-    const opt = document.createElement("option");
-    opt.value = p.id;
-    opt.textContent = p.label;
-    yel.sel.appendChild(opt);
-  }
+  // Sorted by patient id, not by the split's shuffled order, so the dropdown is
+  // scannable; `value` stays the server-side index so ids are unaffected.
+  Y.patients.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+  renderPatientOptions();
 
   await loadWeightsList();
 
+  yel.search.addEventListener("input", () => renderPatientOptions());
   yel.sel.addEventListener("change", (e) => loadPatient(Number(e.target.value)));
   yel.modelSel.addEventListener("change", (e) => {
     Y.weightsFile = e.target.value;
@@ -554,6 +555,32 @@ function bestZ() {
   if (!idxList.length) return 0;
   const pos = Math.min(Y.patient.best_slice_index, idxList.length - 1);
   return idxList[pos];
+}
+
+/* Rebuild the patient dropdown: sorted by id, narrowed to the search box. The currently
+   loaded patient is always kept in the list even when it does not match, so filtering
+   never blanks the selection (and never fires `change`, so it never triggers a load). */
+function renderPatientOptions() {
+  const q = (yel.search.value || "").trim().toLowerCase();
+  const current = Y.patientIdx === undefined || Y.patientIdx === null
+    ? null : String(Y.patientIdx);
+  const matches = Y.patients.filter((p) => !q || p.label.toLowerCase().includes(q));
+  const shown = matches.slice();
+  if (current !== null && !shown.some((p) => String(p.id) === current)) {
+    const kept = Y.patients.find((p) => String(p.id) === current);
+    if (kept) shown.unshift(kept);
+  }
+  yel.sel.innerHTML = "";
+  for (const p of shown) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.label;
+    yel.sel.appendChild(opt);
+  }
+  if (current !== null) yel.sel.value = current;
+  yel.count.textContent = q
+    ? `${matches.length} / ${Y.patients.length}`
+    : `${Y.patients.length} patients`;
 }
 
 async function loadPatient(idx) {
