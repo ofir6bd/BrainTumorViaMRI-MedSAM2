@@ -9,6 +9,8 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     patient: $("gvPatient"),
+    search: $("gvPatientSearch"),
+    count: $("gvPatientCount"),
     model: $("gvModel"),
     z: $("gvZ"),
     zLabel: $("gvZLabel"),
@@ -27,66 +29,134 @@
   };
   if (!els.patient) return;
 
-  const COLORS = { gt: "#40a6ff", yolo: "#ff5a26", truth: "#26ff26" };
-  const state = { id: null, weights: "", result: null, view: "segment" };
+  const COLORS = {
+    gt: "#40a6ff", yolo: "#ff5a26", truth: "#26ff26",
+    gtVox: "#8fd0ff", yoloVox: "#ffb08a",   // voxel curves: paler arm colours
+  };
+  const state = { id: null, weights: "", result: null, view: "segment", patients: [] };
 
   // ---------------------------------------------------------------- chart
-  function lineChart(series, opts = {}) {
+  /* Two-axis line chart. Series carry `axis: "right"` to hang off the right-hand scale
+     (voxel counts, which share no units with Dice) and `dash` for a dashed stroke.
+     Hidden series are excluded from the axis ranges, so hiding the big voxel curves
+     rescales what is left instead of leaving it squashed. */
+  function chartSVG(series, opts) {
     const width = opts.width || 620, height = opts.height || 210;
-    const padL = 54, padR = 14, padT = 12, padB = 30;
-    const pts = series.flatMap((s) => s.data);
+    const visible = series.filter((s) => !s.hidden && s.data && s.data.length);
+    const right = visible.filter((s) => s.axis === "right");
+    const padL = 54, padR = right.length ? 62 : 14, padT = 12, padB = 30;
+    const pts = visible.flatMap((s) => s.data);
     if (!pts.length) return "";
+
     const xs = pts.map((p) => p.x);
     let xMin = Math.min(...xs), xMax = Math.max(...xs);
     if (xMax === xMin) xMax = xMin + 1;
-    const yMin = 0, yMax = 1;
     const plotW = width - padL - padR, plotH = height - padT - padB;
-    const sx = (x) => padL + ((x - xMin) / (xMax - xMin)) * plotW;
-    const sy = (y) => padT + plotH - ((y - yMin) / (yMax - yMin)) * plotH;
 
-    let svg = `<svg viewBox="0 0 ${width} ${height}" class="yolo-chart-svg" `
-      + `style="height:${height}px" preserveAspectRatio="xMidYMid meet">`;
+    // Left axis is Dice, pinned to 0-1 so runs stay visually comparable.
+    const sx = (x) => padL + ((x - xMin) / (xMax - xMin)) * plotW;
+    const sy = (y) => padT + plotH - y * plotH;
+    let rMax = 1;
+    if (right.length) {
+      rMax = Math.max(...right.flatMap((s) => s.data.map((p) => p.y)), 1);
+    }
+    const syR = (y) => padT + plotH - (y / rMax) * plotH;
+
+    let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" class="yolo-chart-svg" '
+      + 'style="height:' + height + 'px" preserveAspectRatio="xMidYMid meet">';
     [0, 0.25, 0.5, 0.75, 1].forEach((t) => {
       const y = sy(t);
-      svg += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${padL + plotW}" y2="${y.toFixed(1)}" class="yolo-chart-grid" />`
-        + `<text x="${padL - 6}" y="${(y + 3).toFixed(1)}" class="yolo-chart-ticklabel yolo-chart-ylabel" text-anchor="end">${t.toFixed(2)}</text>`;
+      svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (padL + plotW)
+        + '" y2="' + y.toFixed(1) + '" class="yolo-chart-grid" />'
+        + '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1)
+        + '" class="yolo-chart-ticklabel yolo-chart-ylabel" text-anchor="end">'
+        + t.toFixed(2) + '</text>';
     });
-    const ticks = opts.xTickCount || 4;
-    for (let i = 0; i <= ticks; i++) {
-      const t = xMin + (i / ticks) * (xMax - xMin);
-      svg += `<text x="${sx(t).toFixed(1)}" y="${(padT + plotH + 18).toFixed(1)}" class="yolo-chart-ticklabel yolo-chart-xlabel" text-anchor="middle">${Math.round(t)}</text>`;
+    if (right.length) {
+      const rColor = right[0].color;
+      [0, 0.5, 1].forEach((f) => {
+        svg += '<text x="' + (padL + plotW + 8) + '" y="' + (syR(rMax * f) + 3).toFixed(1)
+          + '" class="yolo-chart-ticklabel yolo-chart-ylabel" text-anchor="start" style="fill:'
+          + rColor + '">' + Math.round(rMax * f).toLocaleString() + '</text>';
+      });
+      svg += '<line x1="' + (padL + plotW) + '" y1="' + padT + '" x2="' + (padL + plotW)
+        + '" y2="' + (padT + plotH) + '" class="yolo-chart-axis" />';
     }
-    svg += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" class="yolo-chart-axis" />`
-      + `<line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" class="yolo-chart-axis" />`;
+    /* Either a fixed step along x (opts.xTickStep, e.g. every 5 slices) or a count of
+       evenly spaced ticks across the range. */
+    const xTicks = [];
+    if (opts.xTickStep) {
+      const step = opts.xTickStep;
+      for (let t = Math.ceil(xMin / step) * step; t <= xMax; t += step) xTicks.push(t);
+    } else {
+      const ticks = opts.xTickCount || 4;
+      for (let i = 0; i <= ticks; i++) xTicks.push(xMin + (i / ticks) * (xMax - xMin));
+    }
+    // A dense tick row needs a smaller label or the numbers run into each other.
+    const xLabelStyle = opts.xLabelSize ? ' style="font-size:' + opts.xLabelSize + 'px"' : "";
+    xTicks.forEach((t) => {
+      svg += '<text x="' + sx(t).toFixed(1) + '" y="' + (padT + plotH + 18).toFixed(1)
+        + '" class="yolo-chart-ticklabel yolo-chart-xlabel" text-anchor="middle"'
+        + xLabelStyle + '>' + Math.round(t) + '</text>';
+    });
+    svg += '<line x1="' + padL + '" y1="' + padT + '" x2="' + padL + '" y2="' + (padT + plotH)
+      + '" class="yolo-chart-axis" />'
+      + '<line x1="' + padL + '" y1="' + (padT + plotH) + '" x2="' + (padL + plotW)
+      + '" y2="' + (padT + plotH) + '" class="yolo-chart-axis" />';
 
     (opts.markers || []).forEach((m) => {
       if (m.x < xMin || m.x > xMax) return;
-      const x = sx(m.x);
-      svg += `<line x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${padT + plotH}" `
-        + `stroke="${m.color || "#8a8aa0"}" stroke-width="1" stroke-dasharray="3 3" opacity="0.85" />`;
+      const x = sx(m.x), color = m.color || "#8a8aa0";
+      svg += '<line x1="' + x.toFixed(1) + '" y1="' + padT + '" x2="' + x.toFixed(1)
+        + '" y2="' + (padT + plotH) + '" stroke="' + color
+        + '" stroke-width="1" stroke-dasharray="3 3" opacity="0.85" />';
       if (m.label) {
-        svg += `<text x="${x.toFixed(1)}" y="${(padT + 10).toFixed(1)}" class="yolo-chart-ticklabel" `
-          + `text-anchor="middle" style="fill:${m.color || "#8a8aa0"}">${m.label}</text>`;
+        svg += '<text x="' + x.toFixed(1) + '" y="' + (padT + 10).toFixed(1)
+          + '" class="yolo-chart-ticklabel" text-anchor="middle" style="fill:' + color + '">'
+          + m.label + '</text>';
       }
     });
 
-    series.forEach((s) => {
-      if (!s.data.length) return;
-      const d = s.data.map((p, j) => `${j === 0 ? "M" : "L"} ${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)}`).join(" ");
-      svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" class="yolo-series-line" />`;
+    visible.forEach((s) => {
+      const scale = s.axis === "right" ? syR : sy;
+      const d = s.data.map((p, j) => (j === 0 ? "M" : "L") + " " + sx(p.x).toFixed(1)
+        + " " + scale(p.y).toFixed(1)).join(" ");
+      svg += '<path d="' + d + '" fill="none" stroke="' + s.color + '" stroke-width="'
+        + (s.dash ? 1.5 : 2) + '" '
+        + (s.dash ? 'stroke-dasharray="' + s.dash + '" ' : "")
+        + 'class="yolo-series-line" />';
       if (s.dots) {
         s.data.forEach((p) => {
-          svg += `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="3.5" fill="${s.color}" />`;
+          svg += '<circle cx="' + sx(p.x).toFixed(1) + '" cy="' + scale(p.y).toFixed(1)
+            + '" r="3.5" fill="' + s.color + '" />';
         });
       }
     });
-    svg += `</svg>`;
+    return svg + "</svg>";
+  }
 
-    const legend = series.map((s) =>
-      `<span class="yolo-chart-legend-item"><i style="background:${s.color}"></i>${s.label}</span>`).join("");
-    return `<div class="yolo-chart-wrap">${svg}</div>`
-      + `<div class="yolo-chart-legend">${legend}</div>`
-      + (opts.caption ? `<p class="gv-caption">${opts.caption}</p>` : "");
+  /* Draw into `container` and keep the series list live: clicking a legend entry toggles
+     that series and redraws (which also rescales the axes). */
+  function renderChart(container, title, series, opts = {}) {
+    const live = series.map((s) => Object.assign({ hidden: false }, s));
+    function draw() {
+      const legend = live.map((s, i) =>
+        '<span class="yolo-chart-legend-item' + (s.hidden ? " gv-legend-off" : "")
+        + '" data-idx="' + i + '" title="Click to show/hide this series">'
+        + '<i style="background:' + s.color + '"></i>' + s.label + "</span>").join("");
+      container.innerHTML = "<h4>" + title + "</h4>"
+        + '<div class="yolo-chart-wrap">' + chartSVG(live, opts) + "</div>"
+        + '<div class="yolo-chart-legend">' + legend + "</div>"
+        + (opts.caption ? '<p class="gv-caption">' + opts.caption + "</p>" : "");
+      container.querySelectorAll(".yolo-chart-legend-item").forEach((el) => {
+        el.addEventListener("click", () => {
+          const i = Number(el.dataset.idx);
+          live[i].hidden = !live[i].hidden;
+          draw();
+        });
+      });
+    }
+    draw();
   }
 
   // ---------------------------------------------------------------- render
@@ -128,35 +198,65 @@
       + `<p class="gv-caption">Filled dot = that arm actually used the slice. `
       + `${r.yolo_empty_anchors.length ? `YOLO had no mask on z = ${r.yolo_empty_anchors.join(", ")} — that arm got no prompt there.` : "YOLO produced a mask on every anchor it reached."}</p>`;
 
-    els.sliceChart.innerHTML = `<h4>Per-slice Dice</h4>` + lineChart([
-      { label: "MedSAM2 ← GT mask", color: COLORS.gt, data: r.slices.map((s) => ({ x: s.z, y: s.dice_gt })) },
-      { label: "MedSAM2 ← YOLO mask", color: COLORS.yolo, data: r.slices.map((s) => ({ x: s.z, y: s.dice_yolo })) },
+    renderChart(els.sliceChart, "Per-slice Dice and tumour voxels", [
+      // Dice is null on slices with neither ground truth nor prediction — nothing to
+      // score there, so those points are dropped rather than drawn as a perfect 1.0.
+      { label: "Dice \u2014 MedSAM2 \u2190 GT mask", color: COLORS.gt,
+        data: r.slices.filter((s) => s.dice_gt !== null).map((s) => ({ x: s.z, y: s.dice_gt })) },
+      { label: "Dice \u2014 MedSAM2 \u2190 YOLO mask", color: COLORS.yolo,
+        data: r.slices.filter((s) => s.dice_yolo !== null).map((s) => ({ x: s.z, y: s.dice_yolo })) },
+      { label: "GT tumour voxels (right)", color: COLORS.truth, axis: "right", dash: "5 3",
+        data: r.slices.map((s) => ({ x: s.z, y: s.gt_voxels })) },
+      { label: "Segmented voxels, GT arm (right)", color: COLORS.gtVox, axis: "right", dash: "2 3",
+        data: r.slices.map((s) => ({ x: s.z, y: s.voxels_gt_arm })) },
+      { label: "Segmented voxels, YOLO arm (right)", color: COLORS.yoloVox, axis: "right", dash: "2 3",
+        data: r.slices.map((s) => ({ x: s.z, y: s.voxels_yolo_arm })) },
     ], {
-      markers: r.schedule.map((z, i) => ({ x: z, label: `a${i + 1}`, color: "#8a8aa0" })),
-      caption: "x = slice (z), y = Dice against the expert whole-tumour mask. Dashed lines are the anchor slices.",
+      width: 1240, xTickStep: 5, xLabelSize: 10,
+      markers: r.schedule.map((z, i) => ({ x: z, label: "a" + (i + 1), color: "#8a8aa0" })),
+      caption: "x = every slice in the volume. Left axis: Dice against the expert "
+        + "whole-tumour mask (slices with neither tumour nor prediction are unscored "
+        + "and left blank). "
+        + "Right axis: tumour voxels on that slice \u2014 expert, and as segmented by each "
+        + "arm, so over- and under-segmentation is visible where Dice alone is ambiguous. "
+        + "Dotted verticals are the anchor slices. Click a legend entry to hide a series.",
     });
 
-    els.roundChart.innerHTML = `<h4>Convergence</h4>` + lineChart([
-      { label: "MedSAM2 ← GT mask", color: COLORS.gt, dots: true, data: gt.rounds.map((x) => ({ x: x.anchors_used, y: x.dice })) },
-      { label: "MedSAM2 ← YOLO mask", color: COLORS.yolo, dots: true, data: yolo.rounds.map((x) => ({ x: x.anchors_used, y: x.dice })) },
+    renderChart(els.roundChart, "Convergence", [
+      { label: "MedSAM2 \u2190 GT mask", color: COLORS.gt, dots: true,
+        data: gt.rounds.map((x) => ({ x: x.anchors_used, y: x.dice })) },
+      { label: "MedSAM2 \u2190 YOLO mask", color: COLORS.yolo, dots: true,
+        data: yolo.rounds.map((x) => ({ x: x.anchors_used, y: x.dice })) },
     ], {
       xTickCount: Math.max(1, Math.max(gt.anchors_used, yolo.anchors_used) - 1),
-      caption: `x = number of anchor slices given, y = whole-volume Dice. Equal-anchor comparison is valid up to ${r.comparable_rounds}.`,
+      caption: "x = number of anchor slices given, y = whole-volume Dice. "
+        + "Equal-anchor comparison is valid up to " + r.comparable_rounds + ".",
     });
 
+    const fmt = (v) => (v === null ? "&mdash;" : v.toFixed(4));
     const rows = r.slices.map((s) => {
-      const d = s.dice_yolo - s.dice_gt;
-      const cls = d > 0.001 ? "gv-pos" : d < -0.001 ? "gv-neg" : "";
+      const scored = s.dice_gt !== null && s.dice_yolo !== null;
+      const d = scored ? s.dice_yolo - s.dice_gt : null;
+      const cls = d === null ? "" : d > 0.001 ? "gv-pos" : d < -0.001 ? "gv-neg" : "";
       const anchor = r.schedule.includes(s.z) ? ` <span class="gv-anchor-tag">anchor</span>` : "";
-      return `<tr><td>${s.z}${anchor}</td><td>${s.gt_voxels.toLocaleString()}</td>`
-        + `<td>${s.dice_gt.toFixed(4)}</td><td>${s.dice_yolo.toFixed(4)}</td>`
-        + `<td class="${cls}">${d >= 0 ? "+" : ""}${d.toFixed(4)}</td></tr>`;
+      const blank = s.gt_voxels === 0 && !s.voxels_gt_arm && !s.voxels_yolo_arm
+        ? " gv-row-empty" : "";
+      return `<tr class="${blank.trim()}"><td>${s.z}${anchor}</td>`
+        + `<td>${s.gt_voxels.toLocaleString()}</td>`
+        + `<td>${fmt(s.dice_gt)}</td><td>${fmt(s.dice_yolo)}</td>`
+        + `<td class="${cls}">${d === null ? "&mdash;" : (d >= 0 ? "+" : "") + d.toFixed(4)}</td></tr>`;
     }).join("");
-    const mean = (k) => r.slices.length ? r.slices.reduce((a, s) => a + s[k], 0) / r.slices.length : 0;
+    // Means are over scored slices only; averaging in the empty background would
+    // silently drag both arms towards each other.
+    const scoredRows = r.slices.filter((s) => s.dice_gt !== null || s.dice_yolo !== null);
+    const mean = (k) => {
+      const vals = scoredRows.map((s) => s[k]).filter((v) => v !== null);
+      return vals.length ? vals.reduce((a, v) => a + v, 0) / vals.length : 0;
+    };
     els.table.innerHTML = `<table class="yolo-summary-table">
       <thead><tr><th>Slice z</th><th>GT voxels</th><th>Dice (GT mask)</th><th>Dice (YOLO mask)</th><th>Δ</th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td>mean over ${r.slices.length} slices</td><td></td>
+      <tfoot><tr><td>mean over ${scoredRows.length} scored of ${r.slices.length} slices</td><td></td>
         <td>${mean("dice_gt").toFixed(4)}</td><td>${mean("dice_yolo").toFixed(4)}</td>
         <td>${(mean("dice_yolo") - mean("dice_gt")).toFixed(4)}</td></tr></tfoot></table>`;
   }
@@ -204,16 +304,40 @@
     }
   }
 
-  async function loadPatients(keep) {
-    const list = await (await fetch(`/gtvsyolo/api/patients?weights=${encodeURIComponent(state.weights)}`)).json();
+  /* Rebuild the dropdown: sorted by patient id (not the split's shuffled order) and
+     narrowed to the search box. The selected patient is always kept in the list even if
+     it does not match the filter, so filtering never blanks the selection — and options
+     are only rewritten, never selected, so this can never fire `change` and kick off a
+     run. */
+  function renderPatientOptions(keep) {
+    const q = (els.search.value || "").trim().toLowerCase();
+    const current = keep !== undefined && keep !== null
+      ? String(keep)
+      : (state.id === null ? null : String(state.id));
+    const matches = state.patients.filter((p) => !q || p.label.toLowerCase().includes(q));
+    const shown = matches.slice();
+    if (current !== null && !shown.some((p) => String(p.id) === current)) {
+      const kept = state.patients.find((p) => String(p.id) === current);
+      if (kept) shown.unshift(kept);
+    }
     els.patient.innerHTML = "";
-    for (const p of list) {
+    for (const p of shown) {
       const opt = document.createElement("option");
       opt.value = p.id;
       opt.textContent = p.cached ? `${p.label} ✓` : p.label;
       els.patient.appendChild(opt);
     }
-    if (keep !== undefined) els.patient.value = keep;
+    if (current !== null) els.patient.value = current;
+    els.count.textContent = q
+      ? `${matches.length} / ${state.patients.length}`
+      : `${state.patients.length} patients`;
+  }
+
+  async function loadPatients(keep) {
+    const list = await (await fetch(`/gtvsyolo/api/patients?weights=${encodeURIComponent(state.weights)}`)).json();
+    list.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+    state.patients = list;
+    renderPatientOptions(keep);
   }
 
   async function loadWeights() {
@@ -239,6 +363,7 @@
     state.id = Number(els.patient.value);
     run(false);
   });
+  els.search.addEventListener("input", () => renderPatientOptions());
   els.z.addEventListener("input", refreshImage);
   els.best.addEventListener("click", () => {
     if (!state.result) return;

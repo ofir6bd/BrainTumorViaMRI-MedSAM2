@@ -140,7 +140,10 @@
         <section class="controls">
           <label class="field">
             <span>Patient <span class="yolo-test-badge" title="Only patients from the held-out test split are listed here — never trained on, so Dice scores reflect genuine model performance.">test set only</span></span>
-            <select id="yoloPatient"></select>
+            <input type="search" id="yoloPatientSearch" class="patient-search"
+                   placeholder="Search test set&hellip;" autocomplete="off">
+            <select id="yoloPatient" size="1"></select>
+            <span id="yoloPatientCount" class="patient-count"></span>
           </label>
 
           <label class="field">
@@ -213,7 +216,10 @@
         <section class="controls">
           <label class="field">
             <span>Patient <span class="yolo-test-badge" title="Held-out test split only — never trained on. A tick means a cached run exists and will load instantly.">test set only</span></span>
-            <select id="gvPatient"></select>
+            <input type="search" id="gvPatientSearch" class="patient-search"
+                   placeholder="Search test set&hellip;" autocomplete="off">
+            <select id="gvPatient" size="1"></select>
+            <span id="gvPatientCount" class="patient-count"></span>
           </label>
 
           <label class="field">

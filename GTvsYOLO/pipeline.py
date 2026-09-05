@@ -277,6 +277,9 @@ class Comparison:
         self._masks = {
             arm: np.unpackbits(npz[arm])[:n].astype(bool).reshape(shape) for arm in ARMS
         }
+        # Derived from the cached masks, not read from the cached JSON, so the row format
+        # can change without invalidating an expensive run.
+        self._result["slices"] = self._slice_rows(self._masks, self.gt_wt)
         return self._result
 
     def _save_cache(self):
@@ -371,20 +374,26 @@ class Comparison:
         return self._result
 
     def _slice_rows(self, masks, gt_wt):
-        """Per-slice Dice for both arms, over every slice where GT or either arm has
-        tumour — the rows behind the summary table and the two-line chart."""
+        """Per-slice Dice and voxel counts for both arms, over **every** slice in the
+        volume — the rows behind the summary table and the chart.
+
+        Dice is `None` on slices where the GT and that arm's prediction are both empty:
+        there is nothing to score, and the usual "both empty = 1.0" convention would
+        paint a flat line of perfect scores across the whole background. A slice where
+        the arm predicts tumour that is not there still scores (0.0), because that is a
+        real error worth seeing.
+        """
         rows = []
         for z in range(gt_wt.shape[2]):
             g = gt_wt[:, :, z]
             a = masks["gt"][:, :, z]
             b = masks["yolo"][:, :, z]
-            if not (g.any() or a.any() or b.any()):
-                continue
+            g_any = bool(g.any())
             rows.append({
                 "z": z,
                 "gt_voxels": int(np.count_nonzero(g)),
-                "dice_gt": _dice(a, g),
-                "dice_yolo": _dice(b, g),
+                "dice_gt": _dice(a, g) if (g_any or a.any()) else None,
+                "dice_yolo": _dice(b, g) if (g_any or b.any()) else None,
                 "voxels_gt_arm": int(np.count_nonzero(a)),
                 "voxels_yolo_arm": int(np.count_nonzero(b)),
             })
@@ -392,7 +401,8 @@ class Comparison:
 
     def best_slice_index(self):
         """Slice with the most ground-truth tumour — the UI's "Best" button."""
-        rows = (self._result or {}).get("slices") or []
+        rows = [r for r in ((self._result or {}).get("slices") or [])
+                if r["gt_voxels"] > 0]
         if not rows:
             return self.depth // 2
         return max(rows, key=lambda r: r["gt_voxels"])["z"]

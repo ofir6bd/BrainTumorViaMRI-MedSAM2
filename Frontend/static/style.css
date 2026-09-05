@@ -596,3 +596,19 @@ main {
 .gv-pos { color: #4ade80; }
 .gv-neg { color: #f87171; }
 #gvViewer { max-width: 100%; }
+
+/* ---- patient search (YOLO + GT vs YOLO tabs) --------------------------- */
+.patient-search {
+  width: 100%; margin-bottom: 4px; padding: 5px 8px;
+  border: 1px solid #2a2a45; border-radius: 5px;
+  background: #10101f; color: #e6e6f0; font-size: 12px;
+}
+.patient-search:focus { outline: none; border-color: #4a4a75; }
+.patient-search::placeholder { color: #6a6a85; }
+.patient-count { display: block; margin-top: 3px; font-size: 11px; color: #9a9ab5; }
+
+.yolo-chart-legend-item { cursor: pointer; user-select: none; }
+.gv-legend-off { opacity: 0.4; text-decoration: line-through; }
+
+/* slices with no tumour and no prediction — present for context, dimmed */
+.yolo-summary-table tr.gv-row-empty { opacity: 0.45; }
