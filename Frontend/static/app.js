@@ -160,6 +160,7 @@ const panels = {
   "fcm-segmentation": document.getElementById("fcmPanel"),
   "yolo-detection": document.getElementById("yoloPanel"),
   "gt-vs-yolo": document.getElementById("gtvsyoloPanel"),
+  "inference-tests": document.getElementById("inftestPanel"),
 };
 sidenav.addEventListener("click", (e) => {
   const btn = e.target.closest(".navbtn");
@@ -173,4 +174,5 @@ sidenav.addEventListener("click", (e) => {
   }
   if (mode === "fcm-segmentation" && window.initFcmSegmentation) window.initFcmSegmentation();
   if (mode === "yolo-detection" && window.initYolo) window.initYolo();
+  if (mode === "inference-tests" && window.initInferenceTest) window.initInferenceTest();
 });

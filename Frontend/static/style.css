@@ -612,3 +612,66 @@ main {
 
 /* slices with no tumour and no prediction — present for context, dimmed */
 .yolo-summary-table tr.gv-row-empty { opacity: 0.45; }
+
+/* ---- Inference tests tab ----------------------------------------------- */
+#itStatus.gv-running { color: #ffcc00; }
+#itViewer { max-width: 100%; }
+#itStop { border-color: #7a3b3b; color: #ffb4b4; }
+
+/* Charts stretch to the panel width: the SVG carries a wide viewBox and `height:auto`,
+   so it fills the container instead of letterboxing inside a fixed pixel height. */
+.it-chart-svg { width: 100%; height: auto; display: block; }
+.it-tick { fill: var(--muted); font-size: 15px; }
+.it-axis-title { fill: #c8c8dc; font-size: 17px; font-weight: 600; }
+.it-zeroline { stroke: #6a6a90; stroke-width: 1.5; }
+
+/* Eleven variants side by side: a bar per variant reads better than a line chart,
+   which would imply an ordering between them that does not exist. */
+.it-bars { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
+.it-bar-row {
+  display: grid; grid-template-columns: 240px 1fr 78px; align-items: center;
+  gap: 12px; font-size: 12px;
+}
+.it-bar-label { color: #c8c8dc; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.it-bar-track {
+  height: 16px; background: #16162b; border: 1px solid #2a2a45; border-radius: 3px;
+  overflow: hidden;
+}
+.it-bar-fill { display: block; height: 100%; border-radius: 2px; }
+.it-bar-value { text-align: right; font-variant-numeric: tabular-nums; color: #e6e6f0; }
+.it-bar-axis {
+  margin: 8px 0 0; font-size: 11px; color: #9a9ab5; text-align: center;
+  border-top: 1px solid #2a2a45; padding-top: 6px;
+}
+
+/* Diverging bars: zero sits in the middle, so a loss grows leftwards and a gain
+   rightwards — direction carries the sign, not just the label. */
+.it-bar-diverging { display: flex; overflow: visible; background: none; border: none; }
+.it-bar-half {
+  flex: 1 1 50%; height: 16px; background: #16162b; border: 1px solid #2a2a45;
+  display: flex; overflow: hidden;
+}
+.it-bar-neg { justify-content: flex-end; border-radius: 3px 0 0 3px; border-right: none; }
+.it-bar-pos { justify-content: flex-start; border-radius: 0 3px 3px 0;
+  border-left: 1px solid #6a6a90; }
+
+/* The "what is different" column is prose, not a number: let it wrap rather than push
+   the numeric columns off the right edge, and give the second line (what the variant is
+   testing) a quieter voice than the first. */
+.yolo-summary-table td.it-name {
+  white-space: normal; line-height: 1.3; padding-top: 8px; padding-bottom: 8px;
+}
+.yolo-summary-table td.it-name b { font-size: 13px; }
+.yolo-summary-table td.it-name span {
+  display: block; font-size: 11px; color: #9a9ab5; margin-top: 1px;
+}
+.yolo-summary-table td.it-what {
+  white-space: normal; min-width: 340px; max-width: 430px; padding-top: 8px;
+  padding-bottom: 8px;
+}
+.it-change { display: block; color: #d4d4e4; line-height: 1.45; }
+.it-why {
+  display: block; margin-top: 4px; padding-left: 9px; font-size: 11px; line-height: 1.4;
+  color: #8f8fae; font-style: italic; border-left: 2px solid #3a3a5c;
+}

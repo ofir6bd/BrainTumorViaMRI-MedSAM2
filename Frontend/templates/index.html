@@ -24,6 +24,9 @@
         <button class="navbtn" data-mode="gt-vs-yolo" type="button">
           <span class="ic">&#9707;</span> GT vs YOLO
         </button>
+        <button class="navbtn" data-mode="inference-tests" type="button">
+          <span class="ic">&#9878;</span> Inference tests
+        </button>
       </nav>
       <button id="copyPageBtn" type="button" class="copy-page-btn">Copy page image</button>
       <p id="copyPageStatus" class="copy-page-status" aria-live="polite"></p>
@@ -258,6 +261,110 @@
           <div id="gvTableWrap" class="yolo-summary-table-wrap"></div>
         </section>
       </section>
+
+      <!-- ============ INFERENCE TESTS (YOLO confidence as a MedSAM2 prompt) ======= -->
+      <section class="mode-panel hidden" id="inftestPanel">
+        <header>
+          <h2>Inference tests &mdash; YOLO confidence as a MedSAM2 prompt</h2>
+          <p class="sub">Same patient, same anchor slices, same MedSAM2, same scoring &mdash; the only thing that changes between variants is the mask handed to the model on an anchor. <code>O</code> reproduces the GT&nbsp;vs&nbsp;YOLO arm exactly and is the baseline every &Delta; is measured against.</p>
+        </header>
+
+        <section class="controls yolo-subnav-wrap">
+          <div class="field">
+            <span>View</span>
+            <div class="tabs" id="itViews">
+              <button class="tab active" data-iview="variants" type="button">Variants</button>
+              <button class="tab" data-iview="slice" type="button">Slice</button>
+              <button class="tab" data-iview="probe" type="button">Confidence probe</button>
+              <button class="tab" data-iview="aggregate" type="button">All patients</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="controls">
+          <label class="field">
+            <span>Patient <span class="yolo-test-badge" title="Held-out test split only. A tick means every variant is cached and will load instantly.">test set only</span></span>
+            <input type="search" id="itPatientSearch" class="patient-search"
+                   placeholder="Search test set&hellip;" autocomplete="off">
+            <select id="itPatient" size="1"></select>
+            <span id="itPatientCount" class="patient-count"></span>
+          </label>
+
+          <label class="field">
+            <span>Model <span class="yolo-test-badge" title="YOLO checkpoint supplying the prompt masks. MedSAM2 itself is always MedSAM2_latest.pt.">prompt source</span></span>
+            <select id="itModel"></select>
+          </label>
+
+          <div class="field">
+            <span>&nbsp;</span>
+            <button id="itRunAll" type="button" title="Run every variant that is not already cached">Run all variants</button>
+          </div>
+          <div class="field">
+            <span>&nbsp;</span>
+            <button id="itRunAllPatients" type="button" title="Sweep every test patient, running only the variants each one is still missing">Run all patients</button>
+          </div>
+          <div class="field">
+            <span>&nbsp;</span>
+            <button id="itStop" type="button" class="hidden" title="Finish the variant in flight, then stop">Stop</button>
+          </div>
+          <div class="field">
+            <span>&nbsp;</span>
+            <button id="itRerun" type="button" title="Discard every cached result for this patient and recompute">Re-run all</button>
+          </div>
+
+          <label class="field">
+            <span>Variant shown</span>
+            <select id="itVariant"></select>
+          </label>
+
+          <div class="field slice-field hidden" id="itSliceField">
+            <span>Slice</span>
+            <button id="itBest" type="button">Best</button>
+            <input type="range" id="itZ" min="0" max="0" value="0">
+            <span id="itZLabel" class="zlabel">z = 0</span>
+          </div>
+        </section>
+
+        <main>
+          <p id="itStatus" class="status">Loading&hellip;</p>
+
+          <section id="itVariantsPanel" class="yolo-summary">
+            <div id="itVarTable" class="yolo-summary-table-wrap"></div>
+            <div id="itRoundChart" class="yolo-slice-dice-chart"></div>
+            <div id="itSliceChart" class="yolo-slice-dice-chart"></div>
+            <div id="itDeltaChart" class="yolo-slice-dice-chart"></div>
+            <div id="itVolumeChart" class="yolo-slice-dice-chart"></div>
+          </section>
+
+          <section id="itSlicePanel" class="hidden">
+            <img id="itViewer" alt="" />
+          </section>
+
+          <section id="itProbePanel" class="yolo-summary hidden">
+            <div class="yolo-summary-head">
+              <h3>Does confidence predict quality?</h3>
+            </div>
+            <p class="gv-caption">YOLO alone, no MedSAM2 &mdash; seconds rather than minutes. If confidence does not track YOLO&rsquo;s own Dice here, the confidence-driven variants (B, Bg, C1, C2) have nothing to work with.</p>
+            <div id="itProbeStats"></div>
+            <div id="itProbeChart" class="yolo-slice-dice-chart"></div>
+            <div id="itProbeScatter" class="yolo-slice-dice-chart"></div>
+            <div id="itProbeHist" class="yolo-slice-dice-chart"></div>
+            <div id="itProbeBins" class="yolo-slice-dice-chart"></div>
+          </section>
+
+          <section id="itAggPanel" class="yolo-summary hidden">
+            <div class="yolo-summary-head">
+              <h3>Every cached patient</h3>
+              <button id="itAggRefresh" type="button">Refresh</button>
+            </div>
+            <div id="itAggTable" class="yolo-summary-table-wrap"></div>
+            <div id="itAggChart" class="yolo-slice-dice-chart"></div>
+            <div id="itAggDelta" class="yolo-slice-dice-chart"></div>
+            <div id="itAggSpread" class="yolo-slice-dice-chart"></div>
+            <div id="itAggAnchors" class="yolo-slice-dice-chart"></div>
+          </section>
+        </main>
+      </section>
     </div>
   </div>
 
@@ -265,5 +372,6 @@
   <script src="{{ url_for('static', filename='fcm_segmentation.js') }}"></script>
   <script src="{{ url_for('static', filename='yolo.js') }}"></script>
   <script src="{{ url_for('static', filename='gtvsyolo.js') }}"></script>
+  <script src="{{ url_for('static', filename='inferencetest.js') }}"></script>
 </body>
 </html>

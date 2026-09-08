@@ -53,6 +53,10 @@ app.register_blueprint(yolo_bp)
 from GTvsYOLO.routes import gtvsyolo_bp  # noqa: E402
 app.register_blueprint(gtvsyolo_bp)
 
+# YOLO-confidence prompt variants for MedSAM2 (served under /inftest).
+from YoloMedSAM2InferencesTest.routes import inftest_bp  # noqa: E402
+app.register_blueprint(inftest_bp)
+
 
 def find_patients():
     patients = []
