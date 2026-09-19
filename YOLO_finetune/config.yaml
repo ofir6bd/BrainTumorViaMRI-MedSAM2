@@ -1,0 +1,37 @@
+# YOLO_finetune — fine-tune YOLO11m-seg to outline the whole tumour on single MRI slices.
+# The UI shows this file as-is; a run can override epochs / batch / imgsz / patience / model
+# for itself (the run keeps its own copy in runs/<run>/run_config.yaml).
+
+model: yolo11m-seg.pt          # pretrained on COCO; downloaded once to YOLO_finetune/pretrained/
+
+data:
+  train_pool: yolo_train       # pools are keys of the project config.yaml -> paths
+  val_pool: yolo_val           #   (YOLO never sees the medsam2_* pools)
+  test_pool: test
+  min_fg_voxels: 100           # a slice needs this many non-zero FLAIR voxels (brain) to be used
+  min_mask_area: 50            # tumour pieces smaller than this (pixels) are left out of the labels
+  # Each frame is one axial slice, 3 channels: R = T1C - T1 (enhancement, negatives -> 0),
+  # G = T2, B = FLAIR, each scaled to its own p0.5-p99.5. Label = whole tumour (seg > 0).
+  # Slices with brain but no tumour are kept with an empty label (they teach "no tumour here").
+
+train:
+  epochs: 60                   # upper bound; early stopping (patience) usually ends it sooner
+  patience: 15                 # stop after this many epochs without a better val fitness
+  imgsz: 512                   # slices are 182 x 218 px, upscaled to fit 512
+  batch: 16
+  optimizer: auto              # Ultralytics picks optimizer + learning rate from the run length
+  close_mosaic: 10             # last N epochs without mosaic augmentation
+  mosaic: 1.0
+  fliplr: 0.5                  # left-right flip: tumours occur on both sides
+  hsv_h: 0.0                   # no hue / saturation jitter: the channels are MRI sequences,
+  hsv_s: 0.0                   #   not colours — shifting hue would mix T1C-T1, T2 and FLAIR
+  hsv_v: 0.2                   # mild brightness jitter only
+  seed: 42
+  workers: 4
+  device: 0                    # the RTX 5090
+  amp: true                    # mixed precision
+
+evaluate:
+  conf: 0.25                   # confidence threshold for the reported test scores
+  sweep: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.7]  # thresholds tried on val and test
+  batch: 32                    # slices per predict call

@@ -9,7 +9,7 @@ function route() {
 }
 
 document.getElementById("sidenav").addEventListener("click", (e) => {
-  const btn = e.target.closest(".navbtn");
+  const btn = e.target.closest("button.navbtn"); // links (e.g. YOLO_finetune) just navigate
   if (btn && window.Dashboard) location.hash = window.Dashboard.hash();
 });
 window.addEventListener("hashchange", route);

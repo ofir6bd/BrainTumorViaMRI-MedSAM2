@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YOLO_finetune</title>
+  <link rel="stylesheet" href="{{ url_for('finetune.static', filename='style.css') }}">
+</head>
+<body data-base="{{ url_for('finetune.index') }}">
+  <nav class="apps" aria-label="Pages">
+    <span class="apps-brand">BraTS 2024</span>
+    <a href="/">Analytics</a>
+    <a href="{{ url_for('finetune.index') }}" aria-current="page">YOLO_finetune</a>
+  </nav>
+  <header class="top">
+    <div>
+      <h1>YOLO_finetune</h1>
+      <p class="sub" id="topSub">Loading&hellip;</p>
+    </div>
+    <div class="gpu" id="gpu" title="Live GPU readout from nvidia-smi (every 3 s)"></div>
+  </header>
+
+  <nav class="jump" aria-label="Sections">
+    <a href="#secStart">Start</a><a href="#secLive">Live run</a><a href="#secRuns">Runs</a>
+    <a href="#secCurves">Training curves</a><a href="#secData">Dataset</a><a href="#secEval">Evaluation</a>
+    <a href="#secViewer">Prediction viewer</a><a href="#secPlots">Plots</a>
+    <span class="jump-keys"><kbd>/</kbd> search &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> slice &middot; <kbd>[</kbd><kbd>]</kbd> patient</span>
+  </nav>
+
+  <main class="wrap">
+    <!-- ================= START ================= -->
+    <section class="card" id="secStart">
+      <div class="card-head">
+        <h2>Start a fine-tune</h2>
+        <p class="card-sub">Dataset (built once, then reused) &rarr; training &rarr; evaluation on val and test. The run is its own process: closing this page does not stop it.</p>
+      </div>
+      <div class="start-grid">
+        <form id="startForm" class="start-form" autocomplete="off">
+          <label class="fld"><span>Model</span><select id="fModel"></select></label>
+          <label class="fld"><span>Epochs <em>upper bound</em></span><input type="number" id="fEpochs" required></label>
+          <label class="fld"><span>Patience <em>early stop</em></span><input type="number" id="fPatience" required></label>
+          <label class="fld"><span>Image size <em>multiple of 32</em></span><input type="number" id="fImgsz" step="32" required></label>
+          <label class="fld"><span>Batch</span><input type="number" id="fBatch" required></label>
+          <label class="fld chk"><input type="checkbox" id="fSmoke"> <span>Smoke test <em>2 patients per pool, 2 epochs — checks everything works in about a minute</em></span></label>
+          <p class="estimate" id="estimate"></p>
+          <p class="form-err" id="formErr" role="alert"></p>
+          <div class="start-btns">
+            <button type="submit" class="primary big" id="startBtn">&#9654; Run fine-tune</button>
+            <button type="button" id="resetForm">Reset to config</button>
+          </div>
+          <p class="card-sub">First run of a model downloads its COCO weights (<code>yolo11m-seg.pt</code> &asymp; 45&nbsp;MB) from Ultralytics into <code>YOLO_finetune/pretrained/</code>.</p>
+        </form>
+        <div class="config">
+          <div class="config-head">
+            <h3>Fine-tune configuration <span class="dim">YOLO_finetune/config.yaml</span></h3>
+            <button type="button" id="copyCfg">Copy</button>
+          </div>
+          <pre id="configText" class="yaml" tabindex="0"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= LIVE ================= -->
+    <section class="card" id="secLive">
+      <div class="card-head row">
+        <div>
+          <h2>Live run <span id="liveId" class="mono dim"></span></h2>
+          <p class="card-sub" id="liveSub">No run is going.</p>
+        </div>
+        <div class="btns">
+          <button type="button" id="stopBtn" class="danger" disabled>&#9632; Stop</button>
+        </div>
+      </div>
+      <ol class="stepper" id="stepper">
+        <li data-stage="dataset"><b>Dataset</b><span class="step-bar"><i></i></span><em></em></li>
+        <li data-stage="train"><b>Training</b><span class="step-bar"><i></i></span><em></em></li>
+        <li data-stage="evaluate"><b>Evaluation</b><span class="step-bar"><i></i></span><em></em></li>
+        <li data-stage="done"><b>Done</b><span class="step-bar"><i></i></span><em></em></li>
+      </ol>
+      <div class="live-kpis" id="liveKpis"></div>
+      <div class="log-head">
+        <h3>Log</h3>
+        <input type="search" id="logFilter" placeholder="Filter lines&hellip;" aria-label="Filter log lines">
+        <label class="tog"><input type="checkbox" id="logFollow" checked> follow</label>
+        <label class="tog"><input type="checkbox" id="logBars"> show progress bars</label>
+      </div>
+      <pre class="log" id="log" tabindex="0" aria-live="off"></pre>
+    </section>
+
+    <!-- ================= RUNS ================= -->
+    <section class="card" id="secRuns">
+      <div class="card-head row">
+        <div>
+          <h2>Runs</h2>
+          <p class="card-sub">Click a run to analyse it below. Tick up to 3 to overlay their training curves.</p>
+        </div>
+        <div class="btns">
+          <button type="button" id="copyLink">Copy link</button>
+        </div>
+      </div>
+      <div class="table-wrap" id="runsTable"></div>
+    </section>
+
+    <div id="analysis">
+      <section class="card" id="secSummary">
+        <div class="card-head row">
+          <div>
+            <h2>Run <span id="selId" class="mono"></span></h2>
+            <p class="card-sub" id="selSub"></p>
+          </div>
+          <div class="btns">
+            <button type="button" id="resumeBtn" title="Continue training from last.pt">Resume</button>
+            <button type="button" id="reevalBtn" title="Evaluate best.pt again on val and test">Re-evaluate</button>
+            <button type="button" id="dlResults">results.csv</button>
+            <button type="button" id="dlEval">Per-patient CSV</button>
+            <button type="button" id="showRunCfg">Run config</button>
+          </div>
+        </div>
+        <div class="kpis" id="kpis"></div>
+        <pre id="runCfg" class="yaml hidden"></pre>
+      </section>
+
+      <!-- ================= CURVES ================= -->
+      <section class="card" id="secCurves">
+        <div class="card-head row">
+          <div>
+            <h2>Training curves</h2>
+            <p class="card-sub" id="curvesSub">Per epoch, from Ultralytics' results.csv. Hover to read every chart at the same epoch.</p>
+          </div>
+          <div class="chips" id="curveGroups" role="group" aria-label="Curve group"></div>
+        </div>
+        <div class="curve-grid" id="curves"></div>
+        <p class="note" id="curveNote"></p>
+      </section>
+
+      <!-- ================= DATASET ================= -->
+      <section class="card" id="secData">
+        <div class="card-head">
+          <h2>Dataset</h2>
+          <p class="card-sub" id="dataSub"></p>
+        </div>
+        <div class="two">
+          <div><h3>Slices per split</h3><div id="dataBars"></div><div id="dataTable"></div></div>
+          <div><h3>Tumour size per labelled slice <span class="dim">(pixels)</span></h3><div id="areaBars"></div></div>
+        </div>
+      </section>
+
+      <!-- ================= EVALUATION ================= -->
+      <section class="card" id="secEval">
+        <div class="card-head row">
+          <div>
+            <h2>Evaluation</h2>
+            <p class="card-sub">Scored from the NIfTI files, straight from best.pt. <b>val</b> is for choosing; <b>test</b> is the result.</p>
+          </div>
+          <div class="chips" role="group" aria-label="Split" id="splitChips">
+            <button type="button" class="chip" data-split="test">test</button>
+            <button type="button" class="chip" data-split="val">val</button>
+          </div>
+        </div>
+        <div class="kpis" id="evalKpis"></div>
+        <div class="two">
+          <div>
+            <h3>Confidence threshold sweep <span class="dim">mean 3D Dice</span></h3>
+            <div id="sweepChart"></div>
+            <p class="note" id="sweepNote"></p>
+          </div>
+          <div>
+            <h3>3D Dice per patient</h3>
+            <div id="diceHist"></div>
+            <p class="note">Click a bar to list those patients in the table.</p>
+          </div>
+          <div>
+            <h3>Dice vs tumour size</h3>
+            <div id="diceScatter"></div>
+            <p class="note">Click a dot to open that patient in the viewer.</p>
+          </div>
+          <div>
+            <h3>Dice by tumour size</h3>
+            <div id="sizeBars"></div>
+            <h3>Slice-level detection <span class="dim">at the configured threshold</span></h3>
+            <div id="confusion"></div>
+          </div>
+        </div>
+        <div class="table-head">
+          <h3>Patients</h3>
+          <input type="search" id="patSearch" placeholder="Search patient&hellip;" aria-label="Search patients">
+          <span class="chip on hidden" id="patRange"></span>
+          <span class="dim" id="patCount"></span>
+        </div>
+        <div class="table-wrap tall" id="patTable"></div>
+      </section>
+
+      <!-- ================= VIEWER ================= -->
+      <section class="card" id="secViewer">
+        <div class="card-head row">
+          <div>
+            <h2>Prediction viewer</h2>
+            <p class="card-sub">Runs best.pt on one slice now. Left: the RGB frame the model sees (R = T1C&minus;T1, G = T2, B = FLAIR). Right: FLAIR with <span class="lg tp">found</span> <span class="lg fn">missed</span> <span class="lg fp">false</span> tumour pixels. Radiological view (patient's right on the left).</p>
+          </div>
+        </div>
+        <div class="viewer-ctrls">
+          <label class="fld"><span>Patient</span><select id="vPatient"></select></label>
+          <label class="fld grow"><span>Slice <b id="vZl"></b></span><input type="range" id="vZ" min="0" max="0" value="0"></label>
+          <label class="fld"><span>Confidence <b id="vConfL"></b></span><input type="range" id="vConf" min="0.05" max="0.9" step="0.05" value="0.25"></label>
+          <button type="button" id="vPeak">Largest tumour slice</button>
+        </div>
+        <div class="viewer">
+          <div class="viewer-img"><img id="vImg" alt=""><p class="note" id="vStatus"></p></div>
+          <div class="viewer-side">
+            <div class="kpis small" id="vStats"></div>
+            <h3>This patient, slice by slice <span class="dim">Dice at the configured threshold</span></h3>
+            <div id="vProfile"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= PLOTS ================= -->
+      <section class="card" id="secPlots">
+        <div class="card-head">
+          <h2>Ultralytics plots</h2>
+          <p class="card-sub">Saved by Ultralytics during training. Click to enlarge.</p>
+        </div>
+        <div class="plots" id="plots"></div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="lightbox"><img id="lightImg" alt=""><form method="dialog"><button>Close</button></form></dialog>
+
+  <script src="{{ url_for('finetune.static', filename='charts.js') }}"></script>
+  <script src="{{ url_for('finetune.static', filename='finetune.js') }}"></script>
+</body>
+</html>

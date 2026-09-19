@@ -67,6 +67,10 @@ body {
   gap: 10px;
 }
 .navbtn .ic { font-size: 1.05rem; opacity: 0.85; }
+a.navbtn { /* page links look like the tab buttons */
+  background: #23233c; color: var(--fg); border: 1px solid var(--border); text-decoration: none;
+}
+a.navbtn:hover { border-color: var(--accent); }
 .navbtn.active {
   background: var(--accent);
   border-color: var(--accent);

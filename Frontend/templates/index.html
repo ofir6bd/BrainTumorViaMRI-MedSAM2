@@ -15,6 +15,9 @@
         <button class="navbtn active" data-mode="analytics" type="button">
           <span class="ic">&#9636;</span> Analytics
         </button>
+        <a class="navbtn" href="{{ url_for('finetune.index') }}">
+          <span class="ic">&#9881;</span> YOLO_finetune
+        </a>
       </nav>
       <button id="copyPageBtn" type="button" class="copy-page-btn">Copy page image</button>
       <p id="copyPageStatus" class="copy-page-status" aria-live="polite"></p>

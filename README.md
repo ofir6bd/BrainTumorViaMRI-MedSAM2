@@ -41,6 +41,7 @@ BrainTumorViaMRI-MedSAM2/
 │   ├── serve.py            #   dev server with browser live-reload
 │   ├── templates/index.html
 │   └── static/             #   app.js (shell), dashboard.js, style.css
+├── YOLO_finetune/          # YOLO11m-seg fine-tuning + its page at /finetune/ (see its README.md)
 ├── data/                   # all INPUTS (git-ignored)
 │   ├── raw/                # downloaded BraTS archives
 │   ├── dataset/            # patient folders in yolo_train/ yolo_val/ medsam2_train/ medsam2_val/ test/
@@ -100,9 +101,14 @@ For the interactive viewer, use `Frontend\run_web.bat` (see below) instead of a 
 
 Double-click **`Frontend\run_web.bat`** (or run it from a terminal). It starts a local server and
 opens `http://localhost:5000` in your browser. It reads patients from `config.yaml` →
-`paths.dataset`, and knows each patient's pool from the folder it sits in.
+`paths.dataset`, and knows each patient's pool from the folder it sits in. All pages are on this
+one server; switch between them in the sidebar:
 
-The viewer is one page, **Analytics** — a dashboard over every patient's real tumour statistics (WT/TC and
+- **Analytics** (`/`) — below.
+- **YOLO_finetune** (`/finetune/`) — start, follow and analyse YOLO11m-seg fine-tune runs; see
+  `YOLO_finetune/README.md`.
+
+**Analytics** is a dashboard over every patient's real tumour statistics (WT/TC and
 per-label volumes, % of brain, tumour slices, connected parts, extent, location, side). They are
 computed from the `-seg` and FLAIR volumes on first open (a few minutes, with a progress bar)
 and cached in `outputs/dashboard/dataset_stats.json`; later only new or changed patients are
@@ -126,9 +132,8 @@ T1C − T1, All), `L` labels on/off, `R` reset filters.
 Label colours are the same everywhere: NETC red, SNFH green, ET violet, RC yellow.
 
 The site is served with **live-reload**: while it's running, editing any file under `Frontend/`
-(`templates/index.html`, `static/*.js`, `static/style.css`) makes the browser refresh
-automatically. (Backend changes in `Frontend/app.py` or `dataset_stats.py` take effect after
-re-running the bat.)
+or `YOLO_finetune/templates|static/` makes the browser refresh automatically. (Backend changes
+in `Frontend/*.py` or `YOLO_finetune/*.py` take effect after re-running the bat.)
 
 ## Prerequisites the code expects
 

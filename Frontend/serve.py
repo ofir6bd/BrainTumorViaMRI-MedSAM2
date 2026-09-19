@@ -12,6 +12,8 @@ if __name__ == "__main__":
     server = Server(app.wsgi_app)
     server.watch("Frontend/templates/")
     server.watch("Frontend/static/")
+    server.watch("YOLO_finetune/templates/")
+    server.watch("YOLO_finetune/static/")
     print(f"Serving BraTS Slice Viewer at http://localhost:{PORT}")
     print("Watching Frontend/ for changes (edit and the browser reloads).")
     server.serve(port=PORT, host="localhost", root=".")
