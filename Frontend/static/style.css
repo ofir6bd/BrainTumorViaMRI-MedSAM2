@@ -106,49 +106,10 @@ header .sub {
   font-size: 0.85rem;
 }
 
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-  align-items: flex-end;
-  padding: 16px 24px;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-
-.slice-field {
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  max-width: 100%;
-}
-
 .hidden { display: none !important; }
-
-.tabs {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.tab.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
 
 select, button {
   background: #23233c;
@@ -163,10 +124,7 @@ select, button {
 button:hover { border-color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-input[type="range"] {
-  width: min(48vw, 420px);
-  accent-color: var(--accent);
-}
+input[type="range"] { accent-color: var(--accent); }
 
 .zlabel {
   font-variant-numeric: tabular-nums;
@@ -174,43 +132,13 @@ input[type="range"] {
   color: var(--fg);
 }
 
-main {
-  padding: 24px;
-  text-align: center;
-}
-
-.status {
-  color: var(--muted);
-  min-height: 1.2em;
-}
-
-#viewer {
-  max-width: 100%;
-  height: auto;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
-}
-
-/* ---- Explore: patient search + pool badge ---- */
-.patient-search, #dbSearch {
+#dbSearch {
   width: 100%; padding: 6px 9px;
   border: 1px solid var(--border); border-radius: 6px;
   background: #10101f; color: var(--fg); font-size: 0.85rem;
 }
-.patient-search { margin-bottom: 4px; }
-.patient-search:focus, #dbSearch:focus { outline: none; border-color: var(--accent); }
-.patient-search::placeholder, #dbSearch::placeholder { color: #6a6a85; }
-.patient-count { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }
-#patient { min-width: 260px; }
-.pool-badge {
-  display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px;
-  font-size: 0.7rem; color: var(--fg); background: #23233c; border: 1px solid var(--border);
-}
-.pool-badge:empty { display: none; }
-.pool-badge[data-pool^="yolo"] { border-color: #3987e5; }
-.pool-badge[data-pool^="medsam2"] { border-color: #d95926; }
-.pool-badge[data-pool="test"] { border-color: #199e70; }
+#dbSearch:focus { outline: none; border-color: var(--accent); }
+#dbSearch::placeholder { color: #6a6a85; }
 
 /* ====================================================================== */
 /* Analytics dashboard                                                     */
@@ -335,6 +263,7 @@ main {
 @media (max-width: 900px) { .db-dist { grid-template-columns: minmax(0, 1fr); } }
 
 /* label presence */
+#dbLabelPresence { overflow-x: auto; }
 .db-presence { width: 100%; border-collapse: collapse; font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 .db-presence th { color: var(--muted); font-weight: 500; text-align: left; padding: 6px 6px; white-space: nowrap; }
 .db-presence thead th { font-size: 0.75rem; }
@@ -390,7 +319,6 @@ main {
 .db-drawer-nav button { padding: 4px 10px; }
 .db-drawer-body { padding: 12px 18px 40px; overflow-y: auto; }
 .db-drawer-body h4 { margin: 18px 0 8px; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.dr-thumb img { display: block; width: 100%; max-width: 300px; margin: 0 auto; border-radius: 8px; background: #12122a; aspect-ratio: 3.2 / 3.8; }
 .dr-thumb-ctrl { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; }
 .dr-thumb-ctrl input { flex: 1; width: auto; }
 .dr-btns { display: flex; gap: 8px; margin-bottom: 6px; }
@@ -408,3 +336,15 @@ main {
 .dr-others { display: flex; flex-direction: column; gap: 6px; }
 .dr-other { display: grid; grid-template-columns: 14px 1fr auto auto; align-items: center; gap: 8px; text-align: left; font-size: 0.8rem; }
 .dr-other b { font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* drawer: image picker (T1C / T1 / T2 / FLAIR / T1C − T1 / All) */
+.dr-mods { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.dr-mod { flex: 1 1 auto; padding: 5px 8px; font-size: 0.78rem; }
+.dr-mod.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dr-images figure { margin: 0; }
+.dr-images img { display: block; width: 100%; max-width: 300px; margin: 0 auto; border-radius: 8px;
+  background: #12122a; aspect-ratio: 3.2 / 3.8; }
+.dr-images.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.dr-images.grid img { max-width: none; border-radius: 6px; }
+.dr-images figcaption { margin-top: 3px; text-align: center; font-size: 0.72rem; color: var(--muted); }
+.dr-ov { flex: 0 0 auto; font-size: 0.82rem; color: var(--fg); padding: 0 6px; }

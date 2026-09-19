@@ -15,9 +15,6 @@
         <button class="navbtn active" data-mode="analytics" type="button">
           <span class="ic">&#9636;</span> Analytics
         </button>
-        <button class="navbtn" data-mode="explore" type="button">
-          <span class="ic">&#9635;</span> Explore
-        </button>
       </nav>
       <button id="copyPageBtn" type="button" class="copy-page-btn">Copy page image</button>
       <p id="copyPageStatus" class="copy-page-status" aria-live="polite"></p>
@@ -26,6 +23,8 @@
         <p><kbd>/</kbd> search</p>
         <p><kbd>Esc</kbd> close / clear</p>
         <p><kbd>&larr;</kbd> <kbd>&rarr;</kbd> prev / next patient</p>
+        <p><kbd>1</kbd>&ndash;<kbd>6</kbd> image (T1C &hellip; All)</p>
+        <p><kbd>L</kbd> labels on / off</p>
         <p><kbd>R</kbd> reset filters</p>
       </div>
       <p class="sidefoot" id="sidefoot"></p>
@@ -232,47 +231,6 @@
           <div class="db-drawer-body" id="dbDrawerBody"></div>
         </aside>
         <div class="db-tooltip hidden" id="dbTooltip" role="tooltip"></div>
-      </section>
-
-      <!-- ============ EXPLORE ============ -->
-      <section class="mode-panel hidden" id="explorePanel">
-        <header>
-          <h2>Explore</h2>
-          <p class="sub">Panels &middot; Modalities + Segmentation &middot; BBox per label &middot; 3D scatter &middot; RGB</p>
-        </header>
-
-        <section class="controls">
-          <label class="field">
-            <span>Patient <span class="pool-badge" id="poolBadge"></span></span>
-            <input type="search" id="patientSearch" class="patient-search"
-                   placeholder="Search patients&hellip;" autocomplete="off">
-            <select id="patient"></select>
-            <span id="patientCount" class="patient-count"></span>
-          </label>
-
-          <div class="field">
-            <span>View</span>
-            <div class="tabs" id="views">
-              <button class="tab" data-view="panels" type="button">Panels</button>
-              <button class="tab" data-view="modalities" type="button">Modalities + Seg</button>
-              <button class="tab" data-view="bbox" type="button">BBox per label</button>
-              <button class="tab" data-view="scatter" type="button">3D scatter</button>
-              <button class="tab" data-view="rgb" type="button">RGB</button>
-            </div>
-          </div>
-
-          <div class="field slice-field" id="sliceField">
-            <span>Slice</span>
-            <button id="best" type="button">Best</button>
-            <input type="range" id="z" min="0" max="0" value="0">
-            <span id="zlabel" class="zlabel">z = 0</span>
-          </div>
-        </section>
-
-        <main>
-          <p id="status" class="status">Loading&hellip;</p>
-          <img id="viewer" alt="" />
-        </main>
       </section>
     </div>
   </div>

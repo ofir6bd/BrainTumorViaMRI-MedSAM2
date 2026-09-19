@@ -16,7 +16,7 @@
 A BraTS 2024 brain-tumour segmentation project built on Meta's **MedSAM2** (medical Segment
 Anything 2). MRI modalities are stacked into RGB "video" frames, ground-truth masks at a few
 anchor slices are used as prompts, and SAM2 propagates the segmentation through the volume.
-Pipeline stages: acquire data (**`01`**) → analyse and explore it in the web viewer (**`Frontend/`**, via `Frontend\run_web.bat`) → run inference (**`05`**).
+Pipeline stages: acquire data (**`01`**) → analyse it in the web viewer (**`Frontend/`**, via `Frontend\run_web.bat`) → run inference (**`05`**).
 
 BraTS 2024 labels: `1 = NETC`, `2 = SNFH`, `3 = ET`, `4 = RC`.
 Composites: `WT` (whole tumour = 1+2+3+4), `TC` (tumour core = 1+3+4).
@@ -34,13 +34,13 @@ BrainTumorViaMRI-MedSAM2/
 ├── maunal_code/            # pipeline scripts
 │   ├── 01_acquire_data.py
 │   └── 05_infer_multibbox_hitl.py
-├── Frontend/               # web viewer: Analytics dashboard + Explore
+├── Frontend/               # web viewer: the Analytics dashboard
 │   ├── run_web.bat         #   launches it (localhost, live-reload)
-│   ├── app.py              #   Flask backend: patient list, rendered views, dashboard API
+│   ├── app.py              #   Flask backend: dashboard API + slice images
 │   ├── dataset_stats.py    #   per-patient tumour statistics + cache (also runnable)
 │   ├── serve.py            #   dev server with browser live-reload
 │   ├── templates/index.html
-│   └── static/             #   app.js (shell + Explore), dashboard.js, style.css
+│   └── static/             #   app.js (shell), dashboard.js, style.css
 ├── data/                   # all INPUTS (git-ignored)
 │   ├── raw/                # downloaded BraTS archives
 │   ├── dataset/            # patient folders in yolo_train/ yolo_val/ medsam2_train/ medsam2_val/ test/
@@ -102,23 +102,26 @@ Double-click **`Frontend\run_web.bat`** (or run it from a terminal). It starts a
 opens `http://localhost:5000` in your browser. It reads patients from `config.yaml` →
 `paths.dataset`, and knows each patient's pool from the folder it sits in.
 
-- **Analytics** (landing page) — dashboard over every patient's real tumour statistics (WT/TC and
-  per-label volumes, % of brain, tumour slices, connected parts, extent, location, side). They are
-  computed from the `-seg` and FLAIR volumes on first open (a few minutes, with a progress bar)
-  and cached in `outputs/dashboard/dataset_stats.json`; later only new or changed patients are
-  recomputed, and moving a folder between pools needs no recompute
-  (`python Frontend\dataset_stats.py` builds the cache from a terminal). It shows split integrity
-  (subjects shared between pools — YOLO↔MedSAM2 must be 0 — and manifest vs disk), pool sizes,
-  scans per subject, per-pool box plots with a KS test against `test`, a brushable histogram,
-  label make-up and presence, a scatter explorer with box selection, a tumour-location heatmap,
-  the mean tumour profile along the head, and a sortable patient table. Every chart filters the
-  others; clicking a patient opens a drawer (slice viewer, measurements, other scans of the same
-  subject, *Open in Explore*). The URL holds the whole view (*Copy link*), and *Export CSV* saves
-  the filtered patients. Keys: `/` search, `Esc` close, `←`/`→` previous/next patient, `R` reset.
-- **Explore** — pick a patient (searchable, grouped by pool), then switch between five views —
-  **Panels**, **Modalities + Seg**, **BBox per label**, **3D scatter**, and **RGB** (the YOLO
-  input frame `T1C−T1 / T2 / FLAIR` next to the raw-T1C version). The slice slider applies to
-  Panels, Modalities and RGB. `#explore/<patient_id>/<z>` links straight to a patient and slice.
+The viewer is one page, **Analytics** — a dashboard over every patient's real tumour statistics (WT/TC and
+per-label volumes, % of brain, tumour slices, connected parts, extent, location, side). They are
+computed from the `-seg` and FLAIR volumes on first open (a few minutes, with a progress bar)
+and cached in `outputs/dashboard/dataset_stats.json`; later only new or changed patients are
+recomputed, and moving a folder between pools needs no recompute
+(`python Frontend\dataset_stats.py` builds the cache from a terminal). It shows split integrity
+(subjects shared between pools — YOLO↔MedSAM2 must be 0 — and manifest vs disk), pool sizes,
+scans per subject, per-pool box plots with a KS test against `test`, a brushable histogram,
+label make-up and presence, a scatter explorer with box selection, a tumour-location heatmap,
+the mean tumour profile along the head, and a sortable patient table. Every chart filters the
+others. The URL holds the whole view (*Copy link*), and *Export CSV* saves the filtered patients.
+
+Clicking a patient opens a **drawer**: a slice viewer, measurements, the tumour profile (click it
+to jump to a slice), and the person's other scans. The slice viewer shows **T1C, T1, T2, FLAIR,
+T1C − T1** (contrast enhancement; negative values set to 0), or **All** five side by side at the
+same slice, with the labels on or off. Images are axial slices in radiological view (patient's
+right on the left).
+
+Keys: `/` search, `Esc` close, `←`/`→` previous/next patient, `1`–`6` image (T1C, T1, T2, FLAIR,
+T1C − T1, All), `L` labels on/off, `R` reset filters.
 
 Label colours are the same everywhere: NETC red, SNFH green, ET violet, RC yellow.
 

@@ -60,6 +60,7 @@
     scX: "wt", scY: "et", scXLog: true, scYLog: true, plane: "axial",
     sort: { key: "wt", dir: -1 }, page: 0, pageSize: 50,
     open: null, drawerZ: null, tableRows: [],
+    imageKinds: [], mod: "flair", overlay: true,
   };
 
   // ------------------------------------------------------------------ utilities
@@ -234,6 +235,8 @@
     if (S.page) q.set("page", S.page);
     if (S.open) q.set("p", S.open);
     if (S.open && S.drawerZ != null) q.set("z", S.drawerZ);
+    if (S.mod !== "flair") q.set("img", S.mod);
+    if (!S.overlay) q.set("ov", "0");
     return `#analytics?${q.toString()}`;
   }
   function fromHash() {
@@ -271,6 +274,8 @@
     S.page = +q.get("page") || 0;
     S.open = q.get("p") || null;
     S.drawerZ = q.get("z") != null ? +q.get("z") : null;
+    S.mod = ["t1c", "t1", "t2", "flair", "sub", "all"].includes(q.get("img")) ? q.get("img") : "flair";
+    S.overlay = q.get("ov") !== "0";
   }
   function syncHash() {
     if (!location.hash.startsWith("#analytics") && location.hash) return;
@@ -302,6 +307,7 @@
     S.pools = d.pools;
     S.poolMeta = Object.fromEntries(d.pools.map((p) => [p.key, p]));
     S.labels = d.labels;
+    S.imageKinds = d.image_kinds;
     S.manifest = d.manifest;
     S.subjectScans = {};
     for (const r of S.records) (S.subjectScans[r.subject] ||= []).push(r);
@@ -1311,18 +1317,23 @@
       ["Volume", `${r.shape.join(" × ")}`, `${r.spacing_mm.join(" × ")} mm voxels · ${r.axcodes}`],
     ].map(([k, v, s]) => `<div class="dr-kv"><span>${k}</span><b>${esc(v)}</b>${s ? `<em>${esc(s)}</em>` : ""}</div>`).join("");
 
+    const mods = [...S.imageKinds, { key: "all", label: "All" }];
     $("dbDrawerBody").innerHTML = `
       <div class="dr-thumb">
-        <img id="dbThumb" alt="FLAIR slice ${z} of ${esc(r.id)} with label overlay" src="/thumb.png?id=${r.idx}&z=${z}">
+        <div class="dr-mods" role="group" aria-label="Image">${mods.map((k, i) => {
+          const ok = k.key === "all" || r.images.includes(k.key);
+          return `<button type="button" class="dr-mod" data-mod="${k.key}" ${ok ? "" : "disabled"} title="${esc(k.label)} (key ${i + 1})">${esc(k.label)}</button>`;
+        }).join("")}</div>
+        <div id="dbImages"></div>
         <div class="dr-thumb-ctrl">
           <input type="range" id="dbThumbZ" min="0" max="${depth - 1}" value="${z}" aria-label="Slice">
           <span class="zlabel" id="dbThumbZL">z = ${z}</span>
         </div>
         <div class="dr-btns">
           <button type="button" id="dbThumbPeak">Largest slice</button>
-          <button type="button" id="dbOpenExplore" class="primary">Open in Explore</button>
+          <label class="db-toggle dr-ov" title="Show the segmentation labels on the image (key L)"><input type="checkbox" id="dbOverlay"> Labels</label>
         </div>
-        <p class="db-card-sub">FLAIR, radiological view (patient's right on the left).</p>
+        <p class="db-card-sub" id="dbImagesCap"></p>
       </div>
       <h4>Tumour along the head</h4>
       <div id="dbDrawerProfile"></div>
@@ -1339,18 +1350,64 @@
     `;
     const setZ = (nz) => {
       S.drawerZ = nz;
-      $("dbThumb").src = `/thumb.png?id=${r.idx}&z=${nz}`;
-      $("dbThumb").alt = `FLAIR slice ${nz} of ${r.id} with label overlay`;
       $("dbThumbZ").value = nz;
       $("dbThumbZL").textContent = `z = ${nz}`;
+      drawImages();
       drawProfile(r, nz, setZ);
       syncHash();
     };
     $("dbThumbZ").addEventListener("input", (e) => setZ(+e.target.value));
     $("dbThumbPeak").addEventListener("click", () => setZ(r.peak_z));
-    $("dbOpenExplore").addEventListener("click", () => window.App.openExplore(r.id, S.drawerZ != null ? S.drawerZ : r.peak_z));
+    $("dbDrawerBody").querySelector(".dr-mods").addEventListener("click", (e) => {
+      const b = e.target.closest(".dr-mod");
+      if (b && !b.disabled) setImage(b.dataset.mod);
+    });
+    $("dbOverlay").addEventListener("change", (e) => setOverlay(e.target.checked));
     for (const b of $("dbDrawerBody").querySelectorAll(".dr-other")) b.addEventListener("click", () => openPatient(b.dataset.id));
+    drawImages();
     drawProfile(r, z, setZ);
+  }
+
+  // The drawer's slice image(s): one modality / T1C - T1, or all five side by side.
+  const IMAGE_NOTES = { sub: "T1C minus T1 (negative values set to 0): where the contrast agent enhanced." };
+  function drawImages() {
+    const r = S.open ? S.byId[S.open] : null;
+    if (!r || !$("dbImages")) return;
+    const z = S.drawerZ != null ? Math.max(0, Math.min(r.shape[2] - 1, S.drawerZ)) : r.peak_z;
+    const all = S.mod === "all";
+    const kinds = all ? r.images : [S.mod];
+    const label = (k) => (S.imageKinds.find((x) => x.key === k) || { label: k }).label;
+    for (const b of $("dbDrawerBody").querySelectorAll(".dr-mod")) {
+      b.classList.toggle("on", b.dataset.mod === S.mod);
+      b.setAttribute("aria-pressed", b.dataset.mod === S.mod);
+    }
+    $("dbOverlay").checked = S.overlay;
+    const box = $("dbImages");
+    box.className = all ? "dr-images grid" : "dr-images";
+    if (!all && !r.images.includes(S.mod)) {
+      box.innerHTML = `<p class="db-empty-msg">${esc(label(S.mod))} is not available for this patient.</p>`;
+      $("dbImagesCap").textContent = "";
+      return;
+    }
+    box.innerHTML = kinds.map((k) =>
+      `<figure><img alt="${esc(label(k))} slice ${z} of ${esc(r.id)}${S.overlay ? " with label overlay" : ""}"
+        src="/thumb.png?id=${r.idx}&z=${z}&mod=${k}&ov=${S.overlay ? 1 : 0}">${all ? `<figcaption>${esc(label(k))}</figcaption>` : ""}</figure>`
+    ).join("");
+    $("dbImagesCap").textContent = [
+      all ? "All images at the same slice." : `${label(S.mod)}.`,
+      !all && IMAGE_NOTES[S.mod] ? IMAGE_NOTES[S.mod] : "",
+      "Radiological view (patient's right on the left).",
+    ].filter(Boolean).join(" ");
+  }
+  function setImage(k) {
+    S.mod = k;
+    drawImages();
+    syncHash();
+  }
+  function setOverlay(on) {
+    S.overlay = on;
+    drawImages();
+    syncHash();
   }
 
   function drawProfile(r, z, setZ) {
@@ -1529,6 +1586,12 @@
     } else if (!typing && S.open && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
       e.preventDefault();
       stepPatient(e.key === "ArrowRight" ? 1 : -1);
+    } else if (!typing && S.open && /^[1-6]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+      const k = [...S.imageKinds.map((x) => x.key), "all"][+e.key - 1];
+      const r = S.byId[S.open];
+      if (k && (k === "all" || r.images.includes(k))) setImage(k);
+    } else if (!typing && S.open && (e.key === "l" || e.key === "L") && !e.ctrlKey && !e.metaKey) {
+      setOverlay(!S.overlay);
     } else if (!typing && (e.key === "r" || e.key === "R") && !e.ctrlKey && !e.metaKey) {
       resetFilters();
     }
