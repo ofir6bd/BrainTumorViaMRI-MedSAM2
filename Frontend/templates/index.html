@@ -10,41 +10,244 @@
   <div class="app">
     <aside class="sidebar">
       <h1 class="brand">BraTS 2024</h1>
-      <p class="brand-sub">Tumour viewer</p>
+      <p class="brand-sub">Tumour dataset</p>
       <nav class="sidenav" id="sidenav">
-        <button class="navbtn active" data-mode="explore" type="button">
+        <button class="navbtn active" data-mode="analytics" type="button">
+          <span class="ic">&#9636;</span> Analytics
+        </button>
+        <button class="navbtn" data-mode="explore" type="button">
           <span class="ic">&#9635;</span> Explore
-        </button>
-        <button class="navbtn" data-mode="fcm-segmentation" type="button">
-          <span class="ic">&#9695;</span> FCM Segmentation
-        </button>
-        <button class="navbtn" data-mode="yolo-detection" type="button">
-          <span class="ic">&#9678;</span> YOLO Detection
-        </button>
-        <button class="navbtn" data-mode="gt-vs-yolo" type="button">
-          <span class="ic">&#9707;</span> GT vs YOLO
-        </button>
-        <button class="navbtn" data-mode="inference-tests" type="button">
-          <span class="ic">&#9878;</span> Inference tests
         </button>
       </nav>
       <button id="copyPageBtn" type="button" class="copy-page-btn">Copy page image</button>
       <p id="copyPageStatus" class="copy-page-status" aria-live="polite"></p>
-      <p class="sidefoot">data/sample &middot; FLAIR FCM segmentation</p>
+      <div class="shortcuts">
+        <p class="shortcuts-title">Keys</p>
+        <p><kbd>/</kbd> search</p>
+        <p><kbd>Esc</kbd> close / clear</p>
+        <p><kbd>&larr;</kbd> <kbd>&rarr;</kbd> prev / next patient</p>
+        <p><kbd>R</kbd> reset filters</p>
+      </div>
+      <p class="sidefoot" id="sidefoot"></p>
     </aside>
 
     <div class="content">
+      <!-- ============ ANALYTICS ============ -->
+      <section class="mode-panel" id="analyticsPanel">
+        <header class="db-header">
+          <div>
+            <h2>Dataset analytics</h2>
+            <p class="sub" id="dbSub">Loading&hellip;</p>
+          </div>
+          <div class="db-actions">
+            <button id="dbShare" type="button" title="Copy a link to this exact view (filters, sort, open patient)">Copy link</button>
+            <button id="dbExport" type="button" title="Download the filtered patients as CSV">Export CSV</button>
+            <button id="dbRecompute" type="button" title="Recompute every patient's statistics from the NIfTI files">Recompute</button>
+          </div>
+        </header>
+
+        <div id="dbProgress" class="db-progress hidden" role="status" aria-live="polite">
+          <div class="db-progress-text" id="dbProgressText"></div>
+          <div class="db-progress-track"><div class="db-progress-fill" id="dbProgressFill"></div></div>
+        </div>
+        <p id="dbErrors" class="db-errors hidden"></p>
+
+        <section class="db-filterbar" id="dbFilterbar" aria-label="Filters">
+          <div class="db-filter-group">
+            <span class="db-filter-label">Pool</span>
+            <div class="db-chips" id="dbPoolChips"></div>
+          </div>
+          <div class="db-filter-group">
+            <span class="db-filter-label" title="Keep only patients whose segmentation contains every selected label">Has label</span>
+            <div class="db-chips" id="dbLabelChips"></div>
+          </div>
+          <label class="db-filter-group">
+            <span class="db-filter-label" title="Share of tumour voxels on the patient's left of the brain's centroid plane: left > 2/3, right < 1/3, otherwise bilateral">Side</span>
+            <select id="dbSide">
+              <option value="">Any</option>
+              <option value="left">Left</option>
+              <option value="right">Right</option>
+              <option value="bilateral">Bilateral</option>
+            </select>
+          </label>
+          <label class="db-filter-group db-search-group">
+            <span class="db-filter-label">Search</span>
+            <input type="search" id="dbSearch" placeholder="Patient or subject id&hellip;" autocomplete="off">
+          </label>
+          <div class="db-filter-group db-active">
+            <div class="db-chips" id="dbActiveChips"></div>
+          </div>
+          <div class="db-filter-group db-count-group">
+            <span class="db-count" id="dbCount"></span>
+            <button id="dbReset" type="button">Reset</button>
+          </div>
+        </section>
+
+        <div class="db-body" id="dbBody">
+          <section class="db-kpis" id="dbKpis" aria-label="Summary"></section>
+
+          <div class="db-grid">
+            <section class="db-card db-span-2">
+              <div class="db-card-head">
+                <h3>Split integrity</h3>
+                <p class="db-card-sub">Subjects shared between pools (all timepoints of one person). YOLO and MedSAM2 pools must share none.</p>
+              </div>
+              <div class="db-integrity">
+                <div id="dbLeakMatrix" class="db-leak"></div>
+                <div id="dbManifest" class="db-manifest"></div>
+              </div>
+            </section>
+
+            <section class="db-card">
+              <div class="db-card-head">
+                <h3>Pools</h3>
+                <p class="db-card-sub">Patients per pool. Pale bar = whole pool, solid = current filter. Click a bar to filter.</p>
+              </div>
+              <div id="dbPoolChart"></div>
+            </section>
+
+            <section class="db-card">
+              <div class="db-card-head">
+                <h3>Scans per subject</h3>
+                <p class="db-card-sub">How many timepoints each person has, in the current filter.</p>
+              </div>
+              <div id="dbTimepointChart"></div>
+            </section>
+
+            <section class="db-card db-span-2">
+              <div class="db-card-head db-card-head-row">
+                <div>
+                  <h3>Is every pool like the test set?</h3>
+                  <p class="db-card-sub">Box = middle 50%, line = median, dots = patients. KS test against <code>test</code>; red if the difference is significant after correcting for 4 comparisons.</p>
+                </div>
+                <div class="db-card-ctrls">
+                  <select id="dbDistMetric" aria-label="Metric"></select>
+                  <label class="db-toggle"><input type="checkbox" id="dbDistLog"> log</label>
+                </div>
+              </div>
+              <div class="db-dist">
+                <div id="dbDistChart" class="db-dist-chart"></div>
+                <div id="dbKsTable" class="db-ks"></div>
+              </div>
+            </section>
+
+            <section class="db-card db-span-2">
+              <div class="db-card-head db-card-head-row">
+                <div>
+                  <h3>Distribution</h3>
+                  <p class="db-card-sub">Drag across the bars to filter every chart to that range. Double-click to clear.</p>
+                </div>
+                <div class="db-card-ctrls">
+                  <select id="dbHistMetric" aria-label="Metric"></select>
+                  <label class="db-toggle"><input type="checkbox" id="dbHistLog"> log</label>
+                </div>
+              </div>
+              <div id="dbHistChart"></div>
+            </section>
+
+            <section class="db-card">
+              <div class="db-card-head">
+                <h3>Label make-up</h3>
+                <p class="db-card-sub">Mean share of whole-tumour volume per label, by pool.</p>
+              </div>
+              <div id="dbLabelShare"></div>
+            </section>
+
+            <section class="db-card">
+              <div class="db-card-head">
+                <h3>Label presence</h3>
+                <p class="db-card-sub">Share of patients whose segmentation contains each label.</p>
+              </div>
+              <div id="dbLabelPresence"></div>
+            </section>
+
+            <section class="db-card db-span-2">
+              <div class="db-card-head db-card-head-row">
+                <div>
+                  <h3>Scatter explorer</h3>
+                  <p class="db-card-sub">Colour = model family, filled = train, ring = val. Drag a box to select, click a dot to open the patient.</p>
+                </div>
+                <div class="db-card-ctrls">
+                  <label class="db-inline">X <select id="dbScX" aria-label="X metric"></select></label>
+                  <label class="db-toggle"><input type="checkbox" id="dbScXLog"> log</label>
+                  <label class="db-inline">Y <select id="dbScY" aria-label="Y metric"></select></label>
+                  <label class="db-toggle"><input type="checkbox" id="dbScYLog"> log</label>
+                </div>
+              </div>
+              <div id="dbScatterLegend" class="db-legend"></div>
+              <div id="dbScatter"></div>
+            </section>
+
+            <section class="db-card">
+              <div class="db-card-head db-card-head-row">
+                <div>
+                  <h3>Where tumours sit</h3>
+                  <p class="db-card-sub">Tumour centre inside the brain&rsquo;s bounding box. Click a cell to filter.</p>
+                </div>
+                <div class="db-card-ctrls">
+                  <select id="dbPlane" aria-label="Plane">
+                    <option value="axial">Axial</option>
+                    <option value="coronal">Coronal</option>
+                    <option value="sagittal">Sagittal</option>
+                  </select>
+                </div>
+              </div>
+              <div id="dbHeatmap"></div>
+            </section>
+
+            <section class="db-card">
+              <div class="db-card-head">
+                <h3>Tumour along the head</h3>
+                <p class="db-card-sub">Mean tumour area per axial slice, inferior &rarr; superior, by model family.</p>
+              </div>
+              <div id="dbZLegend" class="db-legend"></div>
+              <div id="dbZProfile"></div>
+            </section>
+
+            <section class="db-card db-span-2">
+              <div class="db-card-head db-card-head-row">
+                <div>
+                  <h3>Patients</h3>
+                  <p class="db-card-sub">Click a column to sort, a row to open the patient.</p>
+                </div>
+                <div class="db-card-ctrls" id="dbPager"></div>
+              </div>
+              <div class="db-table-wrap" id="dbTableWrap"></div>
+            </section>
+          </div>
+        </div>
+
+        <aside class="db-drawer" id="dbDrawer" aria-hidden="true" aria-labelledby="dbDrawerTitle">
+          <div class="db-drawer-head">
+            <div>
+              <h3 id="dbDrawerTitle"></h3>
+              <p class="db-card-sub" id="dbDrawerSub"></p>
+            </div>
+            <div class="db-drawer-nav">
+              <button id="dbPrev" type="button" title="Previous patient (&larr;)" aria-label="Previous patient">&larr;</button>
+              <button id="dbNext" type="button" title="Next patient (&rarr;)" aria-label="Next patient">&rarr;</button>
+              <button id="dbClose" type="button" title="Close (Esc)" aria-label="Close">&times;</button>
+            </div>
+          </div>
+          <div class="db-drawer-body" id="dbDrawerBody"></div>
+        </aside>
+        <div class="db-tooltip hidden" id="dbTooltip" role="tooltip"></div>
+      </section>
+
       <!-- ============ EXPLORE ============ -->
-      <section class="mode-panel" id="explorePanel">
+      <section class="mode-panel hidden" id="explorePanel">
         <header>
           <h2>Explore</h2>
-          <p class="sub">Panels &middot; Modalities + Segmentation &middot; BBox per label &middot; 3D scatter</p>
+          <p class="sub">Panels &middot; Modalities + Segmentation &middot; BBox per label &middot; 3D scatter &middot; RGB</p>
         </header>
 
         <section class="controls">
           <label class="field">
-            <span>Patient</span>
+            <span>Patient <span class="pool-badge" id="poolBadge"></span></span>
+            <input type="search" id="patientSearch" class="patient-search"
+                   placeholder="Search patients&hellip;" autocomplete="off">
             <select id="patient"></select>
+            <span id="patientCount" class="patient-count"></span>
           </label>
 
           <div class="field">
@@ -71,307 +274,10 @@
           <img id="viewer" alt="" />
         </main>
       </section>
-
-      <!-- ============ FCM SEGMENTATION ============ -->
-      <section class="mode-panel hidden" id="fcmPanel">
-        <header>
-          <h2>FCM segmentation pipeline</h2>
-          <p class="sub">Whole-tumor segmentation (FLAIR only) &middot; per-slice Dice &middot; volume estimation (FLAIR already skull-stripped)</p>
-        </header>
-
-        <section class="controls fcm-subnav-wrap">
-          <div class="field">
-            <span>Pipeline view</span>
-            <div class="tabs" id="fcmViews">
-              <button class="tab active" data-aview="pipeline" type="button">Pipeline</button>
-              <button class="tab" data-aview="slice-summary" type="button">Slice summary</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="controls">
-          <label class="field">
-            <span>Patient</span>
-            <select id="fcmPatient"></select>
-          </label>
-          <div class="field">
-            <span>Navigate slices</span>
-            <div class="fcm-buttons">
-              <button id="fcmPrevSlice" type="button">&larr; Prev slice</button>
-              <button id="fcmSkipSlice" type="button">Next slice &rarr;</button>
-              <button id="fcmSkipPatient" type="button">Skip patient</button>
-            </div>
-          </div>
-        </section>
-
-        <div class="fcm-dicebar" id="fcmDiceBar">
-          <div class="dice-main">
-            <span class="dice-label">Volume Dice (whole)</span>
-            <span class="dice-value" id="fcmVolDice">&hellip;</span>
-          </div>
-          <div class="dice-slice" id="fcmSliceInfo">&mdash;</div>
-        </div>
-
-        <p id="fcmStatus" class="status"></p>
-        <div id="fcmStack" class="fcm-stack"></div>
-
-        <section id="fcmSummaryPanel" class="fcm-summary hidden">
-          <div class="fcm-summary-head">
-            <h3>Per-slice Dice summary</h3>
-          </div>
-          <div id="fcmSummaryTableWrap" class="fcm-summary-table-wrap"></div>
-        </section>
-      </section>
-
-      <!-- ============ YOLO DETECTION ============ -->
-      <section class="mode-panel hidden" id="yoloPanel">
-        <header>
-          <h2>YOLO tumour detection</h2>
-          <p class="sub">RGB slice (T1C&minus;T1 / T2 / FLAIR) &middot; predicted vs. expert whole-tumour mask &middot; per-slice Dice</p>
-        </header>
-
-        <section class="controls yolo-subnav-wrap">
-          <div class="field">
-            <span>View</span>
-            <div class="tabs" id="yoloViews">
-              <button class="tab active" data-yview="segment" type="button">Segmentation</button>
-              <button class="tab" data-yview="summary" type="button">Slice summary</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="controls">
-          <label class="field">
-            <span>Patient <span class="yolo-test-badge" title="Only patients from the held-out test split are listed here — never trained on, so Dice scores reflect genuine model performance.">test set only</span></span>
-            <input type="search" id="yoloPatientSearch" class="patient-search"
-                   placeholder="Search test set&hellip;" autocomplete="off">
-            <select id="yoloPatient" size="1"></select>
-            <span id="yoloPatientCount" class="patient-count"></span>
-          </label>
-
-          <label class="field">
-            <span>Model</span>
-            <select id="yoloModel"></select>
-          </label>
-
-          <div class="field">
-            <span>&nbsp;</span>
-            <button id="yoloShowTraining" type="button">Show training data</button>
-          </div>
-
-          <div class="field slice-field" id="yoloSliceField">
-            <span>Slice</span>
-            <button id="yoloBest" type="button">Best</button>
-            <input type="range" id="yoloZ" min="0" max="0" value="0">
-            <span id="yoloZLabel" class="zlabel">z = 0</span>
-          </div>
-        </section>
-
-        <section id="yoloTrainingPanel" class="yolo-training hidden">
-          <div class="yolo-summary-head">
-            <h3>Training data</h3>
-          </div>
-          <div id="yoloTrainingWrap" class="yolo-training-wrap"></div>
-        </section>
-
-        <main>
-          <p id="yoloStatus" class="status">Loading&hellip;</p>
-          <img id="yoloViewer" alt="" />
-          <div id="yoloMaskLegend" class="yolo-chart-legend yolo-mask-legend">
-            <span class="yolo-chart-legend-item" data-mask="gt" title="Click to show/hide ground truth">
-              <i style="background:#26ff26"></i>Ground truth
-            </span>
-            <span class="yolo-chart-legend-item" data-mask="pred" title="Click to show/hide prediction">
-              <i style="background:#ff2626"></i>Prediction
-            </span>
-            <span class="yolo-chart-legend-item" data-mask="overlap" title="Click to show/hide overlap">
-              <i style="background:#fff21a"></i>Overlap
-            </span>
-          </div>
-        </main>
-
-        <section id="yoloSummaryPanel" class="yolo-summary hidden">
-          <div class="yolo-summary-head">
-            <h3>Per-slice Dice summary</h3>
-          </div>
-          <div id="yoloSliceDiceChart" class="yolo-slice-dice-chart"></div>
-          <div id="yoloSummaryTableWrap" class="yolo-summary-table-wrap"></div>
-        </section>
-      </section>
-
-      <!-- ============ GT vs YOLO (MedSAM2 prompt comparison) ============ -->
-      <section class="mode-panel hidden" id="gtvsyoloPanel">
-        <header>
-          <h2>GT vs YOLO &mdash; MedSAM2 prompt comparison</h2>
-          <p class="sub">Same model (MedSAM2_latest), same slices-as-video propagation, same anchor slices &mdash; only the prompt mask differs: expert <code>seg&nbsp;&gt;&nbsp;0</code> vs YOLO prediction</p>
-        </header>
-
-        <section class="controls yolo-subnav-wrap">
-          <div class="field">
-            <span>View</span>
-            <div class="tabs" id="gvViews">
-              <button class="tab active" data-gview="segment" type="button">Segmentation</button>
-              <button class="tab" data-gview="summary" type="button">Slice summary</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="controls">
-          <label class="field">
-            <span>Patient <span class="yolo-test-badge" title="Held-out test split only — never trained on. A tick means a cached run exists and will load instantly.">test set only</span></span>
-            <input type="search" id="gvPatientSearch" class="patient-search"
-                   placeholder="Search test set&hellip;" autocomplete="off">
-            <select id="gvPatient" size="1"></select>
-            <span id="gvPatientCount" class="patient-count"></span>
-          </label>
-
-          <label class="field">
-            <span>Model <span class="yolo-test-badge" title="YOLO checkpoint that supplies the prompt masks for the YOLO arm. MedSAM2 itself is always MedSAM2_latest.pt.">YOLO arm</span></span>
-            <select id="gvModel"></select>
-          </label>
-
-          <div class="field">
-            <span>&nbsp;</span>
-            <button id="gvRerun" type="button" title="Discard the cached result and run both arms again">Re-run</button>
-          </div>
-
-          <div class="field slice-field" id="gvSliceField">
-            <span>Slice</span>
-            <button id="gvBest" type="button">Best</button>
-            <input type="range" id="gvZ" min="0" max="0" value="0">
-            <span id="gvZLabel" class="zlabel">z = 0</span>
-          </div>
-        </section>
-
-        <main>
-          <p id="gvStatus" class="status">Loading&hellip;</p>
-          <div id="gvSlicePanel">
-            <img id="gvViewer" alt="" />
-          </div>
-        </main>
-
-        <section id="gvSummaryPanel" class="yolo-summary hidden">
-          <div class="yolo-summary-head">
-            <h3>Run summary</h3>
-          </div>
-          <div id="gvArms" class="gv-arms"></div>
-          <div id="gvAnchors" class="gv-anchors"></div>
-          <div id="gvRoundChart" class="yolo-slice-dice-chart"></div>
-          <div id="gvSliceChart" class="yolo-slice-dice-chart"></div>
-          <div id="gvTableWrap" class="yolo-summary-table-wrap"></div>
-        </section>
-      </section>
-
-      <!-- ============ INFERENCE TESTS (YOLO confidence as a MedSAM2 prompt) ======= -->
-      <section class="mode-panel hidden" id="inftestPanel">
-        <header>
-          <h2>Inference tests &mdash; YOLO confidence as a MedSAM2 prompt</h2>
-          <p class="sub">Same patient, same anchor slices, same MedSAM2, same scoring &mdash; the only thing that changes between variants is the mask handed to the model on an anchor. <code>O</code> reproduces the GT&nbsp;vs&nbsp;YOLO arm exactly and is the baseline every &Delta; is measured against.</p>
-        </header>
-
-        <section class="controls yolo-subnav-wrap">
-          <div class="field">
-            <span>View</span>
-            <div class="tabs" id="itViews">
-              <button class="tab active" data-iview="variants" type="button">Variants</button>
-              <button class="tab" data-iview="slice" type="button">Slice</button>
-              <button class="tab" data-iview="probe" type="button">Confidence probe</button>
-              <button class="tab" data-iview="aggregate" type="button">All patients</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="controls">
-          <label class="field">
-            <span>Patient <span class="yolo-test-badge" title="Held-out test split only. A tick means every variant is cached and will load instantly.">test set only</span></span>
-            <input type="search" id="itPatientSearch" class="patient-search"
-                   placeholder="Search test set&hellip;" autocomplete="off">
-            <select id="itPatient" size="1"></select>
-            <span id="itPatientCount" class="patient-count"></span>
-          </label>
-
-          <label class="field">
-            <span>Model <span class="yolo-test-badge" title="YOLO checkpoint supplying the prompt masks. MedSAM2 itself is always MedSAM2_latest.pt.">prompt source</span></span>
-            <select id="itModel"></select>
-          </label>
-
-          <div class="field">
-            <span>&nbsp;</span>
-            <button id="itRunAll" type="button" title="Run every variant that is not already cached">Run all variants</button>
-          </div>
-          <div class="field">
-            <span>&nbsp;</span>
-            <button id="itRunAllPatients" type="button" title="Sweep every test patient, running only the variants each one is still missing">Run all patients</button>
-          </div>
-          <div class="field">
-            <span>&nbsp;</span>
-            <button id="itStop" type="button" class="hidden" title="Finish the variant in flight, then stop">Stop</button>
-          </div>
-          <div class="field">
-            <span>&nbsp;</span>
-            <button id="itRerun" type="button" title="Discard every cached result for this patient and recompute">Re-run all</button>
-          </div>
-
-          <label class="field">
-            <span>Variant shown</span>
-            <select id="itVariant"></select>
-          </label>
-
-          <div class="field slice-field hidden" id="itSliceField">
-            <span>Slice</span>
-            <button id="itBest" type="button">Best</button>
-            <input type="range" id="itZ" min="0" max="0" value="0">
-            <span id="itZLabel" class="zlabel">z = 0</span>
-          </div>
-        </section>
-
-        <main>
-          <p id="itStatus" class="status">Loading&hellip;</p>
-
-          <section id="itVariantsPanel" class="yolo-summary">
-            <div id="itVarTable" class="yolo-summary-table-wrap"></div>
-            <div id="itRoundChart" class="yolo-slice-dice-chart"></div>
-            <div id="itSliceChart" class="yolo-slice-dice-chart"></div>
-            <div id="itDeltaChart" class="yolo-slice-dice-chart"></div>
-            <div id="itVolumeChart" class="yolo-slice-dice-chart"></div>
-          </section>
-
-          <section id="itSlicePanel" class="hidden">
-            <img id="itViewer" alt="" />
-          </section>
-
-          <section id="itProbePanel" class="yolo-summary hidden">
-            <div class="yolo-summary-head">
-              <h3>Does confidence predict quality?</h3>
-            </div>
-            <p class="gv-caption">YOLO alone, no MedSAM2 &mdash; seconds rather than minutes. If confidence does not track YOLO&rsquo;s own Dice here, the confidence-driven variants (B, Bg, C1, C2) have nothing to work with.</p>
-            <div id="itProbeStats"></div>
-            <div id="itProbeChart" class="yolo-slice-dice-chart"></div>
-            <div id="itProbeScatter" class="yolo-slice-dice-chart"></div>
-            <div id="itProbeHist" class="yolo-slice-dice-chart"></div>
-            <div id="itProbeBins" class="yolo-slice-dice-chart"></div>
-          </section>
-
-          <section id="itAggPanel" class="yolo-summary hidden">
-            <div class="yolo-summary-head">
-              <h3>Every cached patient</h3>
-              <button id="itAggRefresh" type="button">Refresh</button>
-            </div>
-            <div id="itAggTable" class="yolo-summary-table-wrap"></div>
-            <div id="itAggChart" class="yolo-slice-dice-chart"></div>
-            <div id="itAggDelta" class="yolo-slice-dice-chart"></div>
-            <div id="itAggSpread" class="yolo-slice-dice-chart"></div>
-            <div id="itAggAnchors" class="yolo-slice-dice-chart"></div>
-          </section>
-        </main>
-      </section>
     </div>
   </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
-  <script src="{{ url_for('static', filename='fcm_segmentation.js') }}"></script>
-  <script src="{{ url_for('static', filename='yolo.js') }}"></script>
-  <script src="{{ url_for('static', filename='gtvsyolo.js') }}"></script>
-  <script src="{{ url_for('static', filename='inferencetest.js') }}"></script>
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
 </body>
 </html>

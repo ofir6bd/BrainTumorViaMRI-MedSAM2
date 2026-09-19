@@ -1706,10 +1706,14 @@ def run_pipeline():
     os.makedirs(OUTPUT_BASE_DIR, exist_ok=True)
     os.makedirs(TEMP_VIDEO_DIR,  exist_ok=True)
 
-    all_patient_dirs = sorted([
-        d for d in os.listdir(DATASET_DIR)
-        if os.path.isdir(os.path.join(DATASET_DIR, d))
-    ])
+    # Patient folders may sit directly under DATASET_DIR (paths.sample) or one level
+    # down inside the pool folders (yolo_train/, test/, ...) (paths.dataset), so walk for
+    # them: a patient dir is one that holds a `-seg` NIfTI.
+    all_patient_dirs = []
+    for root, _, files in os.walk(DATASET_DIR):
+        if any(f.endswith((".nii", ".nii.gz")) and "-seg" in f.lower() for f in files):
+            all_patient_dirs.append((os.path.basename(root), root))
+    all_patient_dirs.sort()
     if NUM_PATIENTS is not None:
         all_patient_dirs = all_patient_dirs[:NUM_PATIENTS]
 
@@ -1731,8 +1735,7 @@ def run_pipeline():
         ])
 
         failed_patients = []
-        for idx, patient_id in enumerate(all_patient_dirs):
-            patient_dir = os.path.join(DATASET_DIR, patient_id)
+        for idx, (patient_id, patient_dir) in enumerate(all_patient_dirs):
             print(f"\n[{idx + 1}/{len(all_patient_dirs)}] {patient_id}")
             try:
                 rows = process_patient(
