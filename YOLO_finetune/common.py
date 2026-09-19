@@ -21,7 +21,10 @@ RUNS_DIR = os.path.join(HERE, "runs")
 DATASETS_DIR = os.path.join(HERE, "dataset")
 PRETRAINED_DIR = os.path.join(HERE, "pretrained")
 
-FILE_SUFFIX = {"T1C": "-t1c", "T1": "-t1n", "T2": "-t2w", "FLAIR": "-t2f", "SEG": "-seg"}
+# The frame's red, green, blue channels, in that order. Also part of the dataset cache key,
+# so changing it can never silently reuse images built with other channels.
+CHANNELS = ("T1C", "T2", "FLAIR")
+FILE_SUFFIX = {"T1C": "-t1c", "T2": "-t2w", "FLAIR": "-t2f", "SEG": "-seg"}
 
 
 def load_config(path=CONFIG_PATH):
@@ -39,7 +42,7 @@ def pool_dir(pool_key):
 
 
 def list_patients(pool_key):
-    """Patient folders of a pool that have all four modalities and the `-seg` mask."""
+    """Patient folders of a pool that have the frame's modalities and the `-seg` mask."""
     root = pool_dir(pool_key)
     out = []
     for name in sorted(os.listdir(root)):
@@ -81,11 +84,8 @@ def _norm_uint8(sl, min_fg_voxels):
 
 
 def rgb_slice(vols, z, min_fg_voxels):
-    """The YOLO input frame: R = clip(T1C - T1, 0) (enhancement), G = T2, B = FLAIR."""
-    diff = np.clip(vols["T1C"][:, :, z] - vols["T1"][:, :, z], 0, None)
-    return np.stack([_norm_uint8(diff, min_fg_voxels),
-                     _norm_uint8(vols["T2"][:, :, z], min_fg_voxels),
-                     _norm_uint8(vols["FLAIR"][:, :, z], min_fg_voxels)], axis=-1)
+    """The YOLO input frame: R = T1C, G = T2, B = FLAIR, each scaled on its own."""
+    return np.stack([_norm_uint8(vols[m][:, :, z], min_fg_voxels) for m in CHANNELS], axis=-1)
 
 
 def tumour_polygons(mask, min_mask_area):

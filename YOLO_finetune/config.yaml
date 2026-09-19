@@ -10,8 +10,8 @@ data:
   test_pool: test
   min_fg_voxels: 100           # a slice needs this many non-zero FLAIR voxels (brain) to be used
   min_mask_area: 50            # tumour pieces smaller than this (pixels) are left out of the labels
-  # Each frame is one axial slice, 3 channels: R = T1C - T1 (enhancement, negatives -> 0),
-  # G = T2, B = FLAIR, each scaled to its own p0.5-p99.5. Label = whole tumour (seg > 0).
+  # Each frame is one axial slice, 3 channels: R = T1C, G = T2, B = FLAIR,
+  # each scaled to its own p0.5-p99.5. Label = whole tumour (seg > 0).
   # Slices with brain but no tumour are kept with an empty label (they teach "no tumour here").
 
 train:
@@ -24,7 +24,7 @@ train:
   mosaic: 1.0
   fliplr: 0.5                  # left-right flip: tumours occur on both sides
   hsv_h: 0.0                   # no hue / saturation jitter: the channels are MRI sequences,
-  hsv_s: 0.0                   #   not colours — shifting hue would mix T1C-T1, T2 and FLAIR
+  hsv_s: 0.0                   #   not colours — shifting hue would mix T1C, T2 and FLAIR
   hsv_v: 0.2                   # mild brightness jitter only
   seed: 42
   workers: 4

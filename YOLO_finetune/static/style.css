@@ -61,6 +61,22 @@ kbd { display: inline-block; min-width: 16px; padding: 0 4px; text-align: center
 .note { color: var(--muted); font-size: 0.78rem; margin: 6px 0 0; line-height: 1.5; }
 .empty { color: var(--muted); padding: 16px; text-align: center; margin: 0; }
 
+/* how it works */
+.how { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.how li { counter-increment: step; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px 12px 46px; position: relative; font-size: 0.85rem; line-height: 1.6; color: #cfcfe0; }
+.how li::before { content: counter(step); position: absolute; left: 12px; top: 12px; width: 24px; height: 24px;
+  border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 0.8rem;
+  display: flex; align-items: center; justify-content: center; }
+.how li > b:first-child { display: block; color: var(--fg); margin-bottom: 2px; }
+.how em { color: var(--fg); }
+.how-dice { display: block; margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--accent); }
+.ch { font-weight: 600; }
+.ch.r { color: #ff8080; }
+.ch.g { color: #7ee07e; }
+.ch.b { color: #8fb4ff; }
+
 /* start */
 .start-grid { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 22px; }
 @media (max-width: 900px) { .start-grid { grid-template-columns: minmax(0, 1fr); } }

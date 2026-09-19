@@ -40,7 +40,7 @@ def _predict_patient(model, patient, cfg):
     for i in range(0, len(zs), e["batch"]):
         batch_z = zs[i:i + e["batch"]]
         # PIL images, not numpy: Ultralytics treats numpy input as BGR and would swap
-        # the T1C-T1 and FLAIR channels relative to the PNGs the model trained on.
+        # the T1C and FLAIR channels relative to the PNGs the model trained on.
         imgs = [Image.fromarray(rgb_slice(vols, z, d["min_fg_voxels"])) for z in batch_z]
         results = model.predict(imgs, conf=min(thresholds), imgsz=cfg["train"]["imgsz"],
                                 retina_masks=True, verbose=False, device=cfg["train"]["device"])

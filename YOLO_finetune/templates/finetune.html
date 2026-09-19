@@ -21,13 +21,56 @@
   </header>
 
   <nav class="jump" aria-label="Sections">
-    <a href="#secStart">Start</a><a href="#secLive">Live run</a><a href="#secRuns">Runs</a>
+    <a href="#secHow">How it works</a><a href="#secStart">Start</a><a href="#secLive">Live run</a><a href="#secRuns">Runs</a>
     <a href="#secCurves">Training curves</a><a href="#secData">Dataset</a><a href="#secEval">Evaluation</a>
     <a href="#secViewer">Prediction viewer</a><a href="#secPlots">Plots</a>
     <span class="jump-keys"><kbd>/</kbd> search &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> slice &middot; <kbd>[</kbd><kbd>]</kbd> patient</span>
   </nav>
 
   <main class="wrap">
+    <!-- ================= HOW IT WORKS ================= -->
+    <section class="card" id="secHow">
+      <div class="card-head">
+        <h2>How the fine-tune works</h2>
+        <p class="card-sub">We teach YOLO to draw the tumour on MRI slices, one slice at a time.</p>
+      </div>
+      <ol class="how">
+        <li>
+          <b>Turn every slice into a colour picture.</b>
+          For every patient in <code>yolo_train</code>, each axial slice that shows brain becomes one
+          picture: <span class="ch r">red = T1C</span>, <span class="ch g">green = T2</span>,
+          <span class="ch b">blue = FLAIR</span>. The expert segmentation of that slice (all tumour
+          labels together = whole tumour) is the right answer. Slices with no tumour are used too —
+          they teach YOLO when to draw nothing.
+        </li>
+        <li>
+          <b>Start from a YOLO that can already see.</b>
+          YOLO11m-seg comes pre-trained on everyday photos (COCO). We keep that knowledge and
+          only teach it the new job: finding tumours.
+        </li>
+        <li>
+          <b>Training: guess, compare, correct.</b>
+          Each slice passes through YOLO, which draws a mask of where it thinks the tumour is.
+          That mask is compared with the expert mask; the difference (the <em>loss</em>) is used to
+          adjust YOLO a little so its next guess is better. Slices go through in groups of <b data-cfg="train.batch"></b>.
+        </li>
+        <li>
+          <b>Check after every round.</b>
+          One round (an <em>epoch</em>) = every training slice once. After each round YOLO is checked
+          on <code>yolo_val</code> — patients it never trains on — and the best round so far is saved
+          as <code>best.pt</code>. Training stops early if <b data-cfg="train.patience"></b> rounds pass without getting better (at most <b data-cfg="train.epochs"></b> rounds).
+        </li>
+        <li>
+          <b>Final score on patients it has never seen.</b>
+          <code>best.pt</code> draws a mask on every slice of every <code>test</code> patient, and each
+          mask is compared with the expert one:
+          <span class="how-dice"><b>2D Dice</b> per slice — how well YOLO's mask overlaps the expert mask on that one slice.</span>
+          <span class="how-dice"><b>3D Dice</b> per patient — the same, with all of the patient's slices stacked together into one volume.</span>
+          Dice runs from 0 (no overlap) to 1 (perfect match).
+        </li>
+      </ol>
+    </section>
+
     <!-- ================= START ================= -->
     <section class="card" id="secStart">
       <div class="card-head">
@@ -195,7 +238,7 @@
         <div class="card-head row">
           <div>
             <h2>Prediction viewer</h2>
-            <p class="card-sub">Runs best.pt on one slice now. Left: the RGB frame the model sees (R = T1C&minus;T1, G = T2, B = FLAIR). Right: FLAIR with <span class="lg tp">found</span> <span class="lg fn">missed</span> <span class="lg fp">false</span> tumour pixels. Radiological view (patient's right on the left).</p>
+            <p class="card-sub">Runs best.pt on one slice now. Left: the colour picture the model sees (red = T1C, green = T2, blue = FLAIR). Right: FLAIR with <span class="lg tp">found</span> <span class="lg fn">missed</span> <span class="lg fp">false</span> tumour pixels. Radiological view (patient's right on the left).</p>
           </div>
         </div>
         <div class="viewer-ctrls">

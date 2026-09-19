@@ -106,6 +106,9 @@
       }
       fillForm(ov.config);
       $("configText").innerHTML = highlightYaml(ov.config_text);
+      for (const n of document.querySelectorAll("[data-cfg]")) {  // numbers quoted in "How it works"
+        n.textContent = n.dataset.cfg.split(".").reduce((o, k) => o[k], ov.config);
+      }
     }
     $("topSub").innerHTML = `${esc(ov.config.model)} on <code>${esc(ov.config.data.train_pool)}</code> (${ov.pools.train}) · val <code>${esc(ov.config.data.val_pool)}</code> (${ov.pools.val}) · test <code>${esc(ov.config.data.test_pool)}</code> (${ov.pools.test}) · ${ov.runs.length} run${ov.runs.length === 1 ? "" : "s"}`;
     $("startBtn").disabled = !!S.active;

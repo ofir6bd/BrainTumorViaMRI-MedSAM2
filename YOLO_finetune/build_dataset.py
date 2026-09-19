@@ -13,8 +13,8 @@ from datetime import datetime
 import numpy as np
 from PIL import Image
 
-from .common import (DATASETS_DIR, brain_slices, list_patients, load_volumes, rgb_slice,
-                    short_hash, tumour_polygons, write_json, read_json, yolo_seg_lines)
+from .common import (CHANNELS, DATASETS_DIR, brain_slices, list_patients, load_volumes, rgb_slice,
+                     short_hash, tumour_polygons, write_json, read_json, yolo_seg_lines)
 
 AREA_BINS = [0, 50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000, 40000]  # mask px per slice
 WORKERS = 6
@@ -30,7 +30,7 @@ def dataset_splits(cfg, max_patients=None):
 
 def dataset_key(cfg, splits):
     d = cfg["data"]
-    return short_hash({"min_fg_voxels": d["min_fg_voxels"], "min_mask_area": d["min_mask_area"],
+    return short_hash({"channels": CHANNELS, "min_fg_voxels": d["min_fg_voxels"], "min_mask_area": d["min_mask_area"],
                        "splits": {k: [p["id"] for p in v] for k, v in splits.items()}})
 
 
