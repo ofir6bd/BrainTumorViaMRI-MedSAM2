@@ -24,10 +24,10 @@
       <div class="shortcuts">
         <p class="shortcuts-title">Keys</p>
         <p><kbd>/</kbd> search</p>
-        <p><kbd>Esc</kbd> close / clear</p>
+        <p><kbd>Esc</kbd> close</p>
         <p><kbd>&larr;</kbd> <kbd>&rarr;</kbd> prev / next patient</p>
-        <p><kbd>1</kbd>&ndash;<kbd>6</kbd> image (T1C &hellip; All)</p>
-        <p><kbd>L</kbd> labels on / off</p>
+        <p><kbd>1</kbd>&ndash;<kbd>6</kbd> change image</p>
+        <p><kbd>L</kbd> tumour parts on / off</p>
         <p><kbd>R</kbd> reset filters</p>
       </div>
       <p class="sidefoot" id="sidefoot"></p>
@@ -42,9 +42,9 @@
             <p class="sub" id="dbSub">Loading&hellip;</p>
           </div>
           <div class="db-actions">
-            <button id="dbShare" type="button" title="Copy a link to this exact view (filters, sort, open patient)">Copy link</button>
-            <button id="dbExport" type="button" title="Download the filtered patients as CSV">Export CSV</button>
-            <button id="dbRecompute" type="button" title="Recompute every patient's statistics from the NIfTI files">Recompute</button>
+            <button id="dbShare" type="button" title="Copy a link that opens this exact view">Copy link</button>
+            <button id="dbExport" type="button" title="Save the patients you see (after filters) as a CSV file">Save as CSV</button>
+            <button id="dbRecompute" type="button" title="Measure every patient again from the scan files (takes a few minutes)">Measure again</button>
           </div>
         </header>
 
@@ -60,21 +60,21 @@
             <div class="db-chips" id="dbPoolChips"></div>
           </div>
           <div class="db-filter-group">
-            <span class="db-filter-label" title="Keep only patients whose segmentation contains every selected label">Has label</span>
+            <span class="db-filter-label" title="Show only patients whose tumour has all the parts you pick">Tumour has</span>
             <div class="db-chips" id="dbLabelChips"></div>
           </div>
           <label class="db-filter-group">
-            <span class="db-filter-label" title="Share of tumour voxels on the patient's left of the brain's centroid plane: left > 2/3, right < 1/3, otherwise bilateral">Side</span>
+            <span class="db-filter-label" title="Which side of the brain the tumour is on. Left = more than 2/3 of it on the left, right = less than 1/3, otherwise both sides.">Side of brain</span>
             <select id="dbSide">
               <option value="">Any</option>
               <option value="left">Left</option>
               <option value="right">Right</option>
-              <option value="bilateral">Bilateral</option>
+              <option value="bilateral">Both sides</option>
             </select>
           </label>
           <label class="db-filter-group db-search-group">
             <span class="db-filter-label">Search</span>
-            <input type="search" id="dbSearch" placeholder="Patient or subject id&hellip;" autocomplete="off">
+            <input type="search" id="dbSearch" placeholder="Patient ID, e.g. 00008&hellip;" autocomplete="off">
           </label>
           <div class="db-filter-group db-active">
             <div class="db-chips" id="dbActiveChips"></div>
@@ -91,8 +91,8 @@
           <div class="db-grid">
             <section class="db-card db-span-2">
               <div class="db-card-head">
-                <h3>Split integrity</h3>
-                <p class="db-card-sub">Subjects shared between pools (all timepoints of one person). YOLO and MedSAM2 pools must share none.</p>
+                <h3>Is the split clean?</h3>
+                <p class="db-card-sub">How many people are in two pools at once (one person can have several scans). A YOLO pool and a MedSAM2 pool must never share a person.</p>
               </div>
               <div class="db-integrity">
                 <div id="dbLeakMatrix" class="db-leak"></div>
@@ -103,15 +103,15 @@
             <section class="db-card">
               <div class="db-card-head">
                 <h3>Pools</h3>
-                <p class="db-card-sub">Patients per pool. Pale bar = whole pool, solid = current filter. Click a bar to filter.</p>
+                <p class="db-card-sub">Patients in each pool. Light bar = the whole pool, dark bar = the ones that match your filters. Striped = val pool. Click a bar to show only that pool.</p>
               </div>
               <div id="dbPoolChart"></div>
             </section>
 
             <section class="db-card">
               <div class="db-card-head">
-                <h3>Scans per subject</h3>
-                <p class="db-card-sub">How many timepoints each person has, in the current filter.</p>
+                <h3>Scans per person</h3>
+                <p class="db-card-sub">How many scans each person has (for the people in your filter).</p>
               </div>
               <div id="dbTimepointChart"></div>
             </section>
@@ -120,11 +120,11 @@
               <div class="db-card-head db-card-head-row">
                 <div>
                   <h3>Is every pool like the test set?</h3>
-                  <p class="db-card-sub">Box = middle 50%, line = median, dots = patients. KS test against <code>test</code>; red if the difference is significant after correcting for 4 comparisons.</p>
+                  <p class="db-card-sub">Each dot is one patient. The box holds the middle half of the patients, the coloured line is the middle value. The table says if each pool looks like the test pool.</p>
                 </div>
                 <div class="db-card-ctrls">
-                  <select id="dbDistMetric" aria-label="Metric"></select>
-                  <label class="db-toggle"><input type="checkbox" id="dbDistLog"> log</label>
+                  <select id="dbDistMetric" aria-label="What to measure"></select>
+                  <label class="db-toggle" title="Log scale: spreads out small values so big ones do not squash them"><input type="checkbox" id="dbDistLog"> log scale</label>
                 </div>
               </div>
               <div class="db-dist">
@@ -136,12 +136,12 @@
             <section class="db-card db-span-2">
               <div class="db-card-head db-card-head-row">
                 <div>
-                  <h3>Distribution</h3>
-                  <p class="db-card-sub">Drag across the bars to filter every chart to that range. Double-click to clear.</p>
+                  <h3>How the patients spread</h3>
+                  <p class="db-card-sub">Each bar counts the patients in one range. Drag across the bars to show only that range in every chart. Double-click to undo.</p>
                 </div>
                 <div class="db-card-ctrls">
-                  <select id="dbHistMetric" aria-label="Metric"></select>
-                  <label class="db-toggle"><input type="checkbox" id="dbHistLog"> log</label>
+                  <select id="dbHistMetric" aria-label="What to measure"></select>
+                  <label class="db-toggle" title="Log scale: spreads out small values so big ones do not squash them"><input type="checkbox" id="dbHistLog"> log scale</label>
                 </div>
               </div>
               <div id="dbHistChart"></div>
@@ -149,16 +149,16 @@
 
             <section class="db-card">
               <div class="db-card-head">
-                <h3>Label make-up</h3>
-                <p class="db-card-sub">Mean share of whole-tumour volume per label, by pool.</p>
+                <h3>What the tumour is made of</h3>
+                <p class="db-card-sub">On average, how much of the tumour each part takes up, in each pool.</p>
               </div>
               <div id="dbLabelShare"></div>
             </section>
 
             <section class="db-card">
               <div class="db-card-head">
-                <h3>Label presence</h3>
-                <p class="db-card-sub">Share of patients whose segmentation contains each label.</p>
+                <h3>How often each part appears</h3>
+                <p class="db-card-sub">Share of patients whose tumour has that part.</p>
               </div>
               <div id="dbLabelPresence"></div>
             </section>
@@ -166,13 +166,13 @@
             <section class="db-card db-span-2">
               <div class="db-card-head db-card-head-row">
                 <div>
-                  <h3>Scatter explorer</h3>
-                  <p class="db-card-sub">Colour = model family, filled = train, ring = val. Drag a box to select, click a dot to open the patient.</p>
+                  <h3>Compare two measures</h3>
+                  <p class="db-card-sub">Each dot is one patient. Pick what goes on each axis. Drag a box to select patients; click a dot to open one.</p>
                 </div>
                 <div class="db-card-ctrls">
-                  <label class="db-inline">X <select id="dbScX" aria-label="X metric"></select></label>
+                  <label class="db-inline">Across (x) <select id="dbScX" aria-label="Measure on the x axis"></select></label>
                   <label class="db-toggle"><input type="checkbox" id="dbScXLog"> log</label>
-                  <label class="db-inline">Y <select id="dbScY" aria-label="Y metric"></select></label>
+                  <label class="db-inline">Up (y) <select id="dbScY" aria-label="Measure on the y axis"></select></label>
                   <label class="db-toggle"><input type="checkbox" id="dbScYLog"> log</label>
                 </div>
               </div>
@@ -183,14 +183,14 @@
             <section class="db-card">
               <div class="db-card-head db-card-head-row">
                 <div>
-                  <h3>Where tumours sit</h3>
-                  <p class="db-card-sub">Tumour centre inside the brain&rsquo;s bounding box. Click a cell to filter.</p>
+                  <h3>Where the tumours are</h3>
+                  <p class="db-card-sub">Where the centre of each tumour is inside the brain. Brighter square = more patients. Click a square to show only those patients.</p>
                 </div>
                 <div class="db-card-ctrls">
                   <select id="dbPlane" aria-label="Plane">
-                    <option value="axial">Axial</option>
-                    <option value="coronal">Coronal</option>
-                    <option value="sagittal">Sagittal</option>
+                    <option value="axial">From above (axial)</option>
+                    <option value="coronal">From the front (coronal)</option>
+                    <option value="sagittal">From the side (sagittal)</option>
                   </select>
                 </div>
               </div>
@@ -199,8 +199,8 @@
 
             <section class="db-card">
               <div class="db-card-head">
-                <h3>Tumour along the head</h3>
-                <p class="db-card-sub">Mean tumour area per axial slice, inferior &rarr; superior, by model family.</p>
+                <h3>Tumour size along the head</h3>
+                <p class="db-card-sub">Average tumour size on each slice, from the bottom of the head to the top.</p>
               </div>
               <div id="dbZLegend" class="db-legend"></div>
               <div id="dbZProfile"></div>
@@ -210,7 +210,7 @@
               <div class="db-card-head db-card-head-row">
                 <div>
                   <h3>Patients</h3>
-                  <p class="db-card-sub">Click a column to sort, a row to open the patient.</p>
+                  <p class="db-card-sub">Click a column title to sort. Click a row to open that patient.</p>
                 </div>
                 <div class="db-card-ctrls" id="dbPager"></div>
               </div>

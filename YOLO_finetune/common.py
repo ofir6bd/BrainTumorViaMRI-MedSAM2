@@ -7,6 +7,7 @@ The patient pools are only *read*, from the project's `config.yaml -> paths`.
 import hashlib
 import json
 import os
+import time
 
 import nibabel as nib
 import numpy as np
@@ -118,12 +119,24 @@ def short_hash(obj):
     return hashlib.sha1(json.dumps(obj, sort_keys=True).encode("utf-8")).hexdigest()[:10]
 
 
-def write_json(path, data):
-    """Atomic write, so the UI never reads a half-written file."""
-    tmp = path + ".tmp"
+def write_json(path, data, attempts=8):
+    """Atomic write, so a reader never sees half a file.
+
+    On Windows the rename fails with "Access is denied" if another process (the page
+    polling for progress) happens to have the file open, so retry for a moment.
+    """
+    tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f)
-    os.replace(tmp, path)
+    for i in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                os.remove(tmp)
+                raise
+            time.sleep(0.1 * (i + 1))
 
 
 def read_json(path, default=None):

@@ -17,14 +17,14 @@
       <h1>YOLO_finetune</h1>
       <p class="sub" id="topSub">Loading&hellip;</p>
     </div>
-    <div class="gpu" id="gpu" title="Live GPU readout from nvidia-smi (every 3 s)"></div>
+    <div class="gpu" id="gpu" title="How busy the graphics card is right now (updated every 3 seconds)"></div>
   </header>
 
   <nav class="jump" aria-label="Sections">
     <a href="#secHow">How it works</a><a href="#secStart">Start</a><a href="#secLive">Live run</a><a href="#secRuns">Runs</a>
-    <a href="#secCurves">Training curves</a><a href="#secData">Dataset</a><a href="#secEval">Evaluation</a>
-    <a href="#secViewer">Prediction viewer</a><a href="#secPlots">Plots</a>
-    <span class="jump-keys"><kbd>/</kbd> search &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> slice &middot; <kbd>[</kbd><kbd>]</kbd> patient</span>
+    <a href="#secCurves">Training charts</a><a href="#secData">Pictures</a><a href="#secEval">Results</a>
+    <a href="#secViewer">See a slice</a><a href="#secPlots">More charts</a>
+    <span class="jump-keys"><kbd>/</kbd> search &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> next slice &middot; <kbd>[</kbd><kbd>]</kbd> next patient</span>
   </nav>
 
   <main class="wrap">
@@ -75,27 +75,27 @@
     <section class="card" id="secStart">
       <div class="card-head">
         <h2>Start a fine-tune</h2>
-        <p class="card-sub">Dataset (built once, then reused) &rarr; training &rarr; evaluation on val and test. The run is its own process: closing this page does not stop it.</p>
+        <p class="card-sub">Make the pictures (once, then reused) &rarr; train &rarr; final check on the val and test pools. A run keeps going on its own: closing this page does not stop it.</p>
       </div>
       <div class="start-grid">
         <form id="startForm" class="start-form" autocomplete="off">
           <label class="fld"><span>Model</span><select id="fModel"></select></label>
-          <label class="fld"><span>Epochs <em>upper bound</em></span><input type="number" id="fEpochs" required></label>
-          <label class="fld"><span>Patience <em>early stop</em></span><input type="number" id="fPatience" required></label>
-          <label class="fld"><span>Image size <em>multiple of 32</em></span><input type="number" id="fImgsz" step="32" required></label>
-          <label class="fld"><span>Batch</span><input type="number" id="fBatch" required></label>
-          <label class="fld chk"><input type="checkbox" id="fSmoke"> <span>Smoke test <em>2 patients per pool, 2 epochs — checks everything works in about a minute</em></span></label>
+          <label class="fld"><span>Rounds <em>most it may use</em></span><input type="number" id="fEpochs" required></label>
+          <label class="fld"><span>Patience <em>stop after this many rounds with no gain</em></span><input type="number" id="fPatience" required></label>
+          <label class="fld"><span>Picture size <em>must be a multiple of 32</em></span><input type="number" id="fImgsz" step="32" required></label>
+          <label class="fld"><span>Slices per step <em>batch</em></span><input type="number" id="fBatch" required></label>
+          <label class="fld chk"><input type="checkbox" id="fSmoke"> <span>Quick test <em>2 patients per pool, 2 rounds &mdash; checks that everything works, takes about a minute</em></span></label>
           <p class="estimate" id="estimate"></p>
           <p class="form-err" id="formErr" role="alert"></p>
           <div class="start-btns">
             <button type="submit" class="primary big" id="startBtn">&#9654; Run fine-tune</button>
-            <button type="button" id="resetForm">Reset to config</button>
+            <button type="button" id="resetForm">Back to the saved settings</button>
           </div>
-          <p class="card-sub">First run of a model downloads its COCO weights (<code>yolo11m-seg.pt</code> &asymp; 45&nbsp;MB) from Ultralytics into <code>YOLO_finetune/pretrained/</code>.</p>
+          <p class="card-sub">The first run of a model downloads it (<code>yolo11m-seg.pt</code>, about 45&nbsp;MB) into <code>YOLO_finetune/pretrained/</code>. This needs internet.</p>
         </form>
         <div class="config">
           <div class="config-head">
-            <h3>Fine-tune configuration <span class="dim">YOLO_finetune/config.yaml</span></h3>
+            <h3>All the settings <span class="dim">YOLO_finetune/config.yaml</span></h3>
             <button type="button" id="copyCfg">Copy</button>
           </div>
           <pre id="configText" class="yaml" tabindex="0"></pre>
@@ -107,24 +107,24 @@
     <section class="card" id="secLive">
       <div class="card-head row">
         <div>
-          <h2>Live run <span id="liveId" class="mono dim"></span></h2>
-          <p class="card-sub" id="liveSub">No run is going.</p>
+          <h2>What is running now <span id="liveId" class="mono dim"></span></h2>
+          <p class="card-sub" id="liveSub">Nothing is running right now.</p>
         </div>
         <div class="btns">
           <button type="button" id="stopBtn" class="danger" disabled>&#9632; Stop</button>
         </div>
       </div>
       <ol class="stepper" id="stepper">
-        <li data-stage="dataset"><b>Dataset</b><span class="step-bar"><i></i></span><em></em></li>
-        <li data-stage="train"><b>Training</b><span class="step-bar"><i></i></span><em></em></li>
-        <li data-stage="evaluate"><b>Evaluation</b><span class="step-bar"><i></i></span><em></em></li>
-        <li data-stage="done"><b>Done</b><span class="step-bar"><i></i></span><em></em></li>
+        <li data-stage="dataset"><b>1. Make pictures</b><span class="step-bar"><i></i></span><em></em></li>
+        <li data-stage="train"><b>2. Train</b><span class="step-bar"><i></i></span><em></em></li>
+        <li data-stage="evaluate"><b>3. Final check</b><span class="step-bar"><i></i></span><em></em></li>
+        <li data-stage="done"><b>4. Done</b><span class="step-bar"><i></i></span><em></em></li>
       </ol>
       <div class="live-kpis" id="liveKpis"></div>
       <div class="log-head">
         <h3>Log</h3>
-        <input type="search" id="logFilter" placeholder="Filter lines&hellip;" aria-label="Filter log lines">
-        <label class="tog"><input type="checkbox" id="logFollow" checked> follow</label>
+        <input type="search" id="logFilter" placeholder="Show only lines with&hellip;" aria-label="Filter log lines">
+        <label class="tog"><input type="checkbox" id="logFollow" checked> follow the end</label>
         <label class="tog"><input type="checkbox" id="logBars"> show progress bars</label>
       </div>
       <pre class="log" id="log" tabindex="0" aria-live="off"></pre>
@@ -135,7 +135,7 @@
       <div class="card-head row">
         <div>
           <h2>Runs</h2>
-          <p class="card-sub">Click a run to analyse it below. Tick up to 3 to overlay their training curves.</p>
+          <p class="card-sub">Click a run to see its results below. Tick up to 3 runs to draw their curves on top of each other.</p>
         </div>
         <div class="btns">
           <button type="button" id="copyLink">Copy link</button>
@@ -152,11 +152,11 @@
             <p class="card-sub" id="selSub"></p>
           </div>
           <div class="btns">
-            <button type="button" id="resumeBtn" title="Continue training from last.pt">Resume</button>
-            <button type="button" id="reevalBtn" title="Evaluate best.pt again on val and test">Re-evaluate</button>
-            <button type="button" id="dlResults">results.csv</button>
-            <button type="button" id="dlEval">Per-patient CSV</button>
-            <button type="button" id="showRunCfg">Run config</button>
+            <button type="button" id="resumeBtn" title="Continue training from where it stopped">Resume</button>
+            <button type="button" id="reevalBtn" title="Score the best model again on the val and test pools">Check again</button>
+            <button type="button" id="dlResults">Save rounds (CSV)</button>
+            <button type="button" id="dlEval">Save patients (CSV)</button>
+            <button type="button" id="showRunCfg">Settings of this run</button>
           </div>
         </div>
         <div class="kpis" id="kpis"></div>
@@ -167,8 +167,8 @@
       <section class="card" id="secCurves">
         <div class="card-head row">
           <div>
-            <h2>Training curves</h2>
-            <p class="card-sub" id="curvesSub">Per epoch, from Ultralytics' results.csv. Hover to read every chart at the same epoch.</p>
+            <h2>Training charts</h2>
+            <p class="card-sub" id="curvesSub">One point per round of training. Hover over any chart to read all of them at the same round.</p>
           </div>
           <div class="chips" id="curveGroups" role="group" aria-label="Curve group"></div>
         </div>
@@ -179,12 +179,12 @@
       <!-- ================= DATASET ================= -->
       <section class="card" id="secData">
         <div class="card-head">
-          <h2>Dataset</h2>
+          <h2>The pictures YOLO learns from</h2>
           <p class="card-sub" id="dataSub"></p>
         </div>
         <div class="two">
-          <div><h3>Slices per split</h3><div id="dataBars"></div><div id="dataTable"></div></div>
-          <div><h3>Tumour size per labelled slice <span class="dim">(pixels)</span></h3><div id="areaBars"></div></div>
+          <div><h3>How many slices in each pool</h3><div id="dataBars"></div><div id="dataTable"></div></div>
+          <div><h3>How big the tumour is on a slice</h3><div id="areaBars"></div></div>
         </div>
       </section>
 
@@ -192,8 +192,8 @@
       <section class="card" id="secEval">
         <div class="card-head row">
           <div>
-            <h2>Evaluation</h2>
-            <p class="card-sub">Scored from the NIfTI files, straight from best.pt. <b>val</b> is for choosing; <b>test</b> is the result.</p>
+            <h2>Results</h2>
+            <p class="card-sub">The best model is run again on whole patients, straight from the scan files. Use <b>val</b> to choose settings; <b>test</b> is the real result.</p>
           </div>
           <div class="chips" role="group" aria-label="Split" id="splitChips">
             <button type="button" class="chip" data-split="test">test</button>
@@ -203,30 +203,30 @@
         <div class="kpis" id="evalKpis"></div>
         <div class="two">
           <div>
-            <h3>Confidence threshold sweep <span class="dim">mean 3D Dice</span></h3>
+            <h3>How sure must YOLO be? <span class="dim">average 3D Dice at each threshold</span></h3>
             <div id="sweepChart"></div>
             <p class="note" id="sweepNote"></p>
           </div>
           <div>
-            <h3>3D Dice per patient</h3>
+            <h3>How many patients got each score</h3>
             <div id="diceHist"></div>
-            <p class="note">Click a bar to list those patients in the table.</p>
+            <p class="note">Each bar counts patients with that 3D Dice. Click a bar to see them in the table below.</p>
           </div>
           <div>
-            <h3>Dice vs tumour size</h3>
+            <h3>Does tumour size matter?</h3>
             <div id="diceScatter"></div>
-            <p class="note">Click a dot to open that patient in the viewer.</p>
+            <p class="note">One dot per patient. Click a dot to see that patient slice by slice.</p>
           </div>
           <div>
-            <h3>Dice by tumour size</h3>
+            <h3>Average score by tumour size</h3>
             <div id="sizeBars"></div>
-            <h3>Slice-level detection <span class="dim">at the configured threshold</span></h3>
+            <h3>Slice by slice: found or missed?</h3>
             <div id="confusion"></div>
           </div>
         </div>
         <div class="table-head">
-          <h3>Patients</h3>
-          <input type="search" id="patSearch" placeholder="Search patient&hellip;" aria-label="Search patients">
+          <h3>Every patient</h3>
+          <input type="search" id="patSearch" placeholder="Search a patient&hellip;" aria-label="Search patients">
           <span class="chip on hidden" id="patRange"></span>
           <span class="dim" id="patCount"></span>
         </div>
@@ -237,21 +237,21 @@
       <section class="card" id="secViewer">
         <div class="card-head row">
           <div>
-            <h2>Prediction viewer</h2>
-            <p class="card-sub">Runs best.pt on one slice now. Left: the colour picture the model sees (red = T1C, green = T2, blue = FLAIR). Right: FLAIR with <span class="lg tp">found</span> <span class="lg fn">missed</span> <span class="lg fp">false</span> tumour pixels. Radiological view (patient's right on the left).</p>
+            <h2>See a slice</h2>
+            <p class="card-sub">YOLO runs on this one slice right now. Left: the colour picture it sees (red = T1C, green = T2, blue = FLAIR). Right: FLAIR with <span class="lg tp">found</span>, <span class="lg fn">missed</span> and <span class="lg fp">false</span> tumour pixels. Seen from below, like a hospital scan: the patient's right is on the left.</p>
           </div>
         </div>
         <div class="viewer-ctrls">
           <label class="fld"><span>Patient</span><select id="vPatient"></select></label>
           <label class="fld grow"><span>Slice <b id="vZl"></b></span><input type="range" id="vZ" min="0" max="0" value="0"></label>
-          <label class="fld"><span>Confidence <b id="vConfL"></b></span><input type="range" id="vConf" min="0.05" max="0.9" step="0.05" value="0.25"></label>
-          <button type="button" id="vPeak">Largest tumour slice</button>
+          <label class="fld"><span>How sure YOLO must be <b id="vConfL"></b></span><input type="range" id="vConf" min="0.05" max="0.9" step="0.05" value="0.25"></label>
+          <button type="button" id="vPeak">Biggest tumour slice</button>
         </div>
         <div class="viewer">
           <div class="viewer-img"><img id="vImg" alt=""><p class="note" id="vStatus"></p></div>
           <div class="viewer-side">
             <div class="kpis small" id="vStats"></div>
-            <h3>This patient, slice by slice <span class="dim">Dice at the configured threshold</span></h3>
+            <h3>This patient, slice by slice</h3>
             <div id="vProfile"></div>
           </div>
         </div>
@@ -260,8 +260,8 @@
       <!-- ================= PLOTS ================= -->
       <section class="card" id="secPlots">
         <div class="card-head">
-          <h2>Ultralytics plots</h2>
-          <p class="card-sub">Saved by Ultralytics during training. Click to enlarge.</p>
+          <h2>More charts</h2>
+          <p class="card-sub">Extra pictures saved by Ultralytics while training. Click one to make it bigger.</p>
         </div>
         <div class="plots" id="plots"></div>
       </section>

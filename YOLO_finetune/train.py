@@ -40,7 +40,11 @@ class Status:
 
     def update(self, **kw):
         self.data.update(kw, updated=datetime.now().isoformat(timespec="seconds"))
-        write_json(self.path, self.data)
+        try:
+            write_json(self.path, self.data)
+        except OSError as e:
+            # Progress reporting must never kill a run: the next update will catch up.
+            print(f"[status] could not write status.json ({e}); continuing", flush=True)
 
 
 def _set(cfg, dotted, value):

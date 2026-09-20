@@ -8,7 +8,7 @@
   const { fmt, esc, row } = window.Charts;
   const BASE = document.body.dataset.base; // "/finetune/" — this page is a blueprint of the main viewer
   const C = { val: "#3987e5", test: "#199e70", train: "#3987e5", valLoss: "#d95926", cmp: ["#3987e5", "#d95926", "#199e70"] };
-  const STATE_LABEL = { queued: "starting", running: "running", done: "done", failed: "failed", stopped: "stopped", interrupted: "interrupted" };
+  const STATE_LABEL = { queued: "starting", running: "running", done: "finished", failed: "failed", stopped: "stopped", interrupted: "cut off" };
   const LIVE = ["queued", "running"];
 
   const S = {
@@ -129,13 +129,13 @@
                    "train.imgsz": +$("fImgsz").value, "train.batch": +$("fBatch").value },
     };
     if (body.overrides["train.imgsz"] % 32) {
-      $("formErr").textContent = "Image size must be a multiple of 32.";
+      $("formErr").textContent = "Image size must be a multiple of 32 (e.g. 480, 512, 640).";
       $("fImgsz").focus();
       return;
     }
-    const what = body.smoke ? "a smoke test (2 patients per pool, 2 epochs)"
-      : `${body.model}, up to ${body.overrides["train.epochs"]} epochs, imgsz ${body.overrides["train.imgsz"]}, batch ${body.overrides["train.batch"]}`;
-    if (!confirm(`Start ${what}?\n\nIt uses the GPU until it finishes or you press Stop.`)) return;
+    const what = body.smoke ? "a quick test run (2 patients per pool, 2 rounds)"
+      : `${body.model}, up to ${body.overrides["train.epochs"]} rounds, image size ${body.overrides["train.imgsz"]}, ${body.overrides["train.batch"]} slices per step`;
+    if (!confirm(`Start ${what}?\n\nIt uses the graphics card (GPU) until it finishes or you press Stop.`)) return;
     $("startBtn").disabled = true;
     try {
       const r = await api(BASE + "api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -152,14 +152,14 @@
   // ------------------------------------------------------------------ runs table
   function renderRuns() {
     if (!S.runs.length) {
-      $("runsTable").innerHTML = `<p class="empty">No runs yet — start one above.</p>`;
+      $("runsTable").innerHTML = `<p class="empty">No runs yet. Start one above.</p>`;
       return;
     }
     const rows = S.runs.map((r) => {
       const t = r.test;
       return `<tr data-id="${esc(r.id)}" class="${r.id === S.sel ? "sel" : ""}" tabindex="0">
         <td><input type="checkbox" class="cmp" data-id="${esc(r.id)}" ${S.cmp.has(r.id) ? "checked" : ""} aria-label="Compare ${esc(r.id)}"></td>
-        <td class="mono">${esc(r.id)}${r.smoke ? ' <span class="badge smoke">smoke</span>' : ""}</td>
+        <td class="mono">${esc(r.id)}${r.smoke ? ' <span class="badge smoke">quick test</span>' : ""}</td>
         <td>${badge(r.state)}${r.error ? ` <span class="err" title="${esc(r.error)}">!</span>` : ""}</td>
         <td>${esc(r.model)}</td>
         <td class="num">${r.epochs_done}/${r.epochs || r.epochs_cfg}</td>
@@ -170,18 +170,18 @@
         <td class="num">${dur(r.train_seconds)}</td>
         <td>${esc((r.created || "").replace("T", " "))}</td></tr>`;
     }).join("");
-    $("runsTable").innerHTML = `<table class="tbl"><thead><tr><th title="Compare">&#8645;</th><th>Run</th><th>State</th><th>Model</th>
-      <th class="num">Epochs</th><th class="num" title="Best mask mAP50-95 on val">Best mAP50-95 (M)</th>
-      <th class="num" title="Mean 3D Dice per test patient">Test 3D Dice</th><th class="num" title="Mean Dice over test slices that have tumour">Tumour-slice Dice</th>
-      <th class="num" title="Old YOLO/ metric: mean over all brain slices, an empty-vs-empty slice counts 1.0">Legacy slice Dice</th>
-      <th class="num">Train time</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table>`;
+    $("runsTable").innerHTML = `<table class="tbl"><thead><tr><th title="Tick to compare this run's curves">Compare</th><th>Run</th><th>Status</th><th>Model</th>
+      <th class="num" title="Rounds done / most rounds allowed">Rounds</th><th class="num" title="Best mask score on the val pool during training (mAP50-95, 0 to 1)">Best val score</th>
+      <th class="num" title="Average 3D Dice over the test patients — the main result">Test 3D Dice</th><th class="num" title="Average 2D Dice over test slices that have tumour">Test 2D Dice</th>
+      <th class="num" title="The old YOLO/ number: average over all slices, where an empty slice with no drawing counts as perfect">Old-style Dice</th>
+      <th class="num">Training time</th><th>Started</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   $("runsTable").addEventListener("click", (e) => {
     const cb = e.target.closest(".cmp");
     if (cb) {
       if (cb.checked && S.cmp.size >= 3) {
         cb.checked = false;
-        alert("Compare up to 3 runs at a time.");
+        alert("You can compare up to 3 runs at a time.");
         return;
       }
       if (cb.checked) S.cmp.add(cb.dataset.id); else S.cmp.delete(cb.dataset.id);
@@ -224,8 +224,8 @@
     if (!r) return;
     $("analysis").classList.remove("hidden");
     $("selId").textContent = r.id;
-    $("selSub").innerHTML = `${badge(r.state)} ${esc(r.model)} · imgsz ${r.imgsz} · batch ${r.batch} · ` +
-      `${r.epochs_done} epoch${r.epochs_done === 1 ? "" : "s"} trained${r.smoke ? " · smoke test" : ""}` +
+    $("selSub").innerHTML = `${badge(r.state)} ${esc(r.model)} · image size ${r.imgsz} · ${r.batch} slices per step · ` +
+      `${r.epochs_done} round${r.epochs_done === 1 ? "" : "s"} trained${r.smoke ? " · quick test" : ""}` +
       (r.error ? ` · <span class="err">${esc(r.error)}</span>` : "");
     const live = LIVE.includes(r.state);
     $("resumeBtn").disabled = live || !!S.active || !r.has_last || r.state === "done";
@@ -237,13 +237,13 @@
     const v = r.eval && r.eval.val;
     const best = r.best;
     $("kpis").innerHTML = [
-      kpi("Test 3D Dice", t ? t.dice3d_mean.toFixed(4) : "–", t ? `median ${t.dice3d_median.toFixed(4)} · ${t.patients} patients` : "after evaluation", "hero"),
-      kpi("Tumour-slice Dice", t ? t.tumour_slice_dice.toFixed(4) : "–", "test slices that have tumour"),
-      kpi("Legacy slice Dice", t ? t.legacy_slice_dice.toFixed(4) : "–", "old YOLO/ metric · was 0.8662"),
-      kpi("Slice sensitivity", t ? pct(t.sensitivity) : "–", t ? `specificity ${pct(t.specificity)}` : ""),
-      kpi("Best mAP50-95 (mask)", best ? fmt(best.map5095_m) : "–", best ? `epoch ${best.epoch} · mAP50 ${fmt(best.map50_m)}` : "val, during training"),
-      kpi("Val-chosen threshold", v ? v.best_conf : "–", v ? `config uses ${v.conf}` : ""),
-      kpi("Training time", dur(r.train_seconds), r.results.time ? `${dur(r.train_seconds / r.epochs_done)} per epoch` : ""),
+      kpi("Test 3D Dice", t ? t.dice3d_mean.toFixed(4) : "–", t ? `average per patient · middle value ${t.dice3d_median.toFixed(4)} · ${t.patients} patients` : "shown after the final check", "hero"),
+      kpi("Test 2D Dice", t ? t.tumour_slice_dice.toFixed(4) : "–", "average per slice, slices with tumour"),
+      kpi("Old-style Dice", t ? t.legacy_slice_dice.toFixed(4) : "–", "how the old YOLO/ scored (was 0.8662)"),
+      kpi("Tumour slices found", t ? pct(t.sensitivity) : "–", t ? `empty slices left empty: ${pct(t.specificity)}` : ""),
+      kpi("Best val score", best ? fmt(best.map5095_m) : "–", best ? `mask mAP50-95, round ${best.epoch}` : "measured during training"),
+      kpi("Best threshold (val)", v ? v.best_conf : "–", v ? `the setting uses ${v.conf}` : ""),
+      kpi("Training time", dur(r.train_seconds), r.results.time ? `${dur(r.train_seconds / r.epochs_done)} per round` : ""),
     ].join("");
     renderCurves();
     renderDataset();
@@ -253,8 +253,8 @@
 
   $("showRunCfg").addEventListener("click", () => $("runCfg").classList.toggle("hidden"));
   $("dlResults").addEventListener("click", () => { location.href = `${BASE}api/runs/${encodeURIComponent(S.sel)}/file/results.csv?download=1`; });
-  $("resumeBtn").addEventListener("click", () => runAction("resume", "Resume training from last.pt?"));
-  $("reevalBtn").addEventListener("click", () => runAction("evaluate", "Evaluate best.pt again on val and test?"));
+  $("resumeBtn").addEventListener("click", () => runAction("resume", "Continue training from where it stopped (last.pt)?"));
+  $("reevalBtn").addEventListener("click", () => runAction("evaluate", "Score the best model (best.pt) again on the val and test pools?"));
   async function runAction(kind, question) {
     if (!confirm(question)) return;
     try {
@@ -268,14 +268,21 @@
 
   // ------------------------------------------------------------------ curves
   const GROUPS = {
-    loss: { label: "Losses", charts: ["box", "seg", "cls", "dfl"].map((k) => ({
-      title: `${k} loss`, series: [{ col: `train/${k}_loss`, name: "train", color: C.train }, { col: `val/${k}_loss`, name: "val", color: C.valLoss, dash: "6 4" }],
+    loss: { label: "Errors (loss)", y: "Error (lower = better)", charts: [
+      ["box", "Box error — where the tumour is"], ["seg", "Mask error — the tumour outline"],
+      ["cls", "Class error — tumour or not"], ["dfl", "Box-edge error"],
+    ].map(([k, title]) => ({
+      title, series: [{ col: `train/${k}_loss`, name: "training slices", color: C.train }, { col: `val/${k}_loss`, name: "val slices", color: C.valLoss, dash: "6 4" }],
       cmpCol: `val/${k}_loss` })) },
-    mask: { label: "Mask metrics", charts: ["precision", "recall", "mAP50", "mAP50-95"].map((k) => ({
-      title: `mask ${k}`, series: [{ col: `metrics/${k}(M)`, name: `mask ${k}`, color: C.train }], cmpCol: `metrics/${k}(M)`, y01: true })) },
-    box: { label: "Box metrics", charts: ["precision", "recall", "mAP50", "mAP50-95"].map((k) => ({
-      title: `box ${k}`, series: [{ col: `metrics/${k}(B)`, name: `box ${k}`, color: C.train }], cmpCol: `metrics/${k}(B)`, y01: true })) },
-    lr: { label: "Learning rate", charts: [{ title: "learning rate", series: [0, 1, 2].map((i) => ({ col: `lr/pg${i}`, name: `group ${i}`, color: C.cmp[i], dash: i ? "5 4" : null })), cmpCol: "lr/pg0" }] },
+    mask: { label: "Mask scores", y: "Score (0–1, higher = better)", charts: [
+      ["precision", "Precision — drawn tumours that are real"], ["recall", "Recall — real tumours that were drawn"],
+      ["mAP50", "mAP50 — overall score"], ["mAP50-95", "mAP50-95 — strict overall score"],
+    ].map(([k, title]) => ({ title, series: [{ col: `metrics/${k}(M)`, name: `mask ${k}`, color: C.train }], cmpCol: `metrics/${k}(M)`, y01: true })) },
+    box: { label: "Box scores", y: "Score (0–1, higher = better)", charts: [
+      ["precision", "Precision — boxes on real tumours"], ["recall", "Recall — tumours that got a box"],
+      ["mAP50", "mAP50 — overall score"], ["mAP50-95", "mAP50-95 — strict overall score"],
+    ].map(([k, title]) => ({ title, series: [{ col: `metrics/${k}(B)`, name: `box ${k}`, color: C.train }], cmpCol: `metrics/${k}(B)`, y01: true })) },
+    lr: { label: "Learning speed", y: "Learning rate", charts: [{ title: "Learning rate — how big each correction step is", series: [0, 1, 2].map((i) => ({ col: `lr/pg${i}`, name: `weight group ${i}`, color: C.cmp[i], dash: i ? "5 4" : null })), cmpCol: "lr/pg0" }] },
   };
   $("curveGroups").innerHTML = Object.entries(GROUPS).map(([k, g]) => `<button type="button" class="chip" data-group="${k}">${g.label}</button>`).join("");
   $("curveGroups").addEventListener("click", (e) => {
@@ -304,10 +311,10 @@
     const valid = runs.filter((r) => r && r.results && r.results.epoch && r.results.epoch.length);
     box.innerHTML = g.charts.map((_, i) => `<div class="curve"><h4>${esc(g.charts[i].title)}</h4><div id="curve${i}"></div></div>`).join("");
     $("curvesSub").textContent = comparing
-      ? `Comparing ${valid.length} runs — ${cmpIds.join(", ")}. Val curves where train/val exist.`
-      : "Per epoch, from Ultralytics' results.csv. Hover to read every chart at the same epoch.";
+      ? `Comparing ${valid.length} runs: ${cmpIds.join(", ")}. For the errors, the val line of each run is shown.`
+      : "One point per round of training. Hover over any chart to read all of them at the same round.";
     if (!valid.length) {
-      box.innerHTML = `<p class="empty">No epochs finished yet.</p>`;
+      box.innerHTML = `<p class="empty">No round has finished yet.</p>`;
       $("curveNote").textContent = "";
       return;
     }
@@ -318,12 +325,10 @@
                                  points: r.results.epoch.map((e, j) => [e, (r.results[ch.cmpCol] || [])[j]]) }))
         : ch.series.map((s) => ({ ...s, points: valid[0].results.epoch.map((e, j) => [e, (valid[0].results[s.col] || [])[j]]) }));
       const be = comparing ? null : bestEpoch(valid[0].results);
-      Charts.line($(`curve${i}`), { series, sync, height: 180, xName: "epoch", xLabel: "epoch",
-        yMin: ch.y01 ? 0 : undefined, markers: be ? [{ x: be, label: `best ${be}` }] : [],
-        yFmt: S.group === "lr" ? (v) => v.toExponential(1) : undefined, left: S.group === "lr" ? 58 : 50 });
+      Charts.line($(`curve${i}`), { series, sync, height: 200, xName: "round", xLabel: "Training round (epoch)", yLabel: g.y,
+        yMin: ch.y01 ? 0 : undefined, markers: be ? [{ x: be, label: `best: round ${be}` }] : [],
+        yFmt: S.group === "lr" ? (v) => v.toExponential(1) : undefined, left: S.group === "lr" ? 62 : 54 });
     });
-    const legend = comparing ? valid.map((r, k) => `<span class="lgd"><i style="border-color:${C.cmp[k]};border-top-style:${k === 1 ? "dashed" : k === 2 ? "dotted" : "solid"}"></i>${esc(r.id)}</span>`).join("")
-      : g.charts[0].series.map((s) => `<span class="lgd"><i style="border-color:${s.color};border-top-style:${s.dash ? "dashed" : "solid"}"></i>${esc(s.name)}</span>`).join("");
     const res = valid[0].results;
     let note = "";
     if (!comparing && res["val/seg_loss"]) {
@@ -331,28 +336,28 @@
       let mi = 0;
       vl.forEach((v, i) => { if (v != null && v < vl[mi]) mi = i; });
       const since = res.epoch.length - 1 - mi;
-      note = `Val seg loss is lowest at epoch ${res.epoch[mi]} (${fmt(vl[mi])})` +
-        (since ? `, ${since} epoch${since > 1 ? "s" : ""} ago — rising since then means the model is starting to memorise the training slices.` : " — the latest epoch.");
+      note = `The mask error on the val slices was lowest at round ${res.epoch[mi]} (${fmt(vl[mi])})` +
+        (since ? `, ${since} round${since > 1 ? "s" : ""} ago. If it keeps going up, the model is starting to memorise the training slices instead of learning.` : ", the latest round.");
     }
-    $("curveNote").innerHTML = `<span class="lgds">${legend}</span> ${esc(note)}`;
+    $("curveNote").textContent = note;
   }
 
   // ------------------------------------------------------------------ dataset
   function renderDataset() {
     const m = S.run.dataset;
     if (!m) {
-      $("dataSub").textContent = "Available once the run has built (or reused) its dataset.";
+      $("dataSub").textContent = "Shown once the run has made (or reused) its pictures.";
       ["dataBars", "dataTable", "areaBars"].forEach((id) => { $(id).innerHTML = ""; });
       return;
     }
-    $("dataSub").innerHTML = `<code>dataset/${esc(m.key)}</code>, built ${esc(m.created.replace("T", " "))}. One PNG per axial slice with at least ${m.data.min_fg_voxels} brain voxels; tumour pieces under ${m.data.min_mask_area} px left out of the labels.`;
+    $("dataSub").innerHTML = `Saved in <code>dataset/${esc(m.key)}</code>, made ${esc(m.created.replace("T", " at "))}. One picture per axial slice that shows brain (at least ${m.data.min_fg_voxels} brain pixels). Tumour pieces smaller than ${m.data.min_mask_area} pixels are left out of the answers.`;
     const items = [];
     for (const [split, s] of Object.entries(m.splits)) {
-      items.push({ label: `${split} · tumour`, value: s.positive, color: C[split] || C.train, tip: `<div class="tt-title">${split}</div>${s.positive.toLocaleString()} slices with tumour` });
-      items.push({ label: `${split} · none`, value: s.negative, color: "#5a5a78", tip: `<div class="tt-title">${split}</div>${s.negative.toLocaleString()} slices without tumour (empty label)` });
+      items.push({ label: `${split} · with tumour`, value: s.positive, color: C[split] || C.train, tip: `<div class="tt-title">${split}</div>${s.positive.toLocaleString()} slices with tumour` });
+      items.push({ label: `${split} · no tumour`, value: s.negative, color: "#5a5a78", tip: `<div class="tt-title">${split}</div>${s.negative.toLocaleString()} slices without tumour (YOLO learns to draw nothing)` });
     }
-    Charts.bars($("dataBars"), { items, labelWidth: 110 });
-    $("dataTable").innerHTML = `<table class="tbl small"><thead><tr><th>Split</th><th class="num">Patients</th><th class="num">Slices</th><th class="num">With tumour</th><th class="num">Tumour outlines</th><th class="num">Median size</th></tr></thead><tbody>` +
+    Charts.bars($("dataBars"), { items, labelWidth: 130, xLabel: "Number of slices (pictures)", yLabel: "Pool" });
+    $("dataTable").innerHTML = `<table class="tbl small"><thead><tr><th>Pool</th><th class="num">Patients</th><th class="num">Slices</th><th class="num">With tumour</th><th class="num">Tumour pieces drawn</th><th class="num">Typical tumour size</th></tr></thead><tbody>` +
       Object.entries(m.splits).map(([k, s]) => `<tr><td>${k}</td><td class="num">${s.patients}</td><td class="num">${s.slices.toLocaleString()}</td><td class="num">${pct(s.positive / s.slices, 0)}</td><td class="num">${s.instances.toLocaleString()}</td><td class="num">${s.area_median != null ? `${fmt(s.area_median)} px` : "–"}</td></tr>`).join("") + "</tbody></table>";
     const bins = m.area_bins;
     const lab = (i) => (i === bins.length - 1 ? `≥ ${bins[i].toLocaleString()}` : `${bins[i].toLocaleString()}–${bins[i + 1].toLocaleString()}`);
@@ -361,8 +366,8 @@
     Charts.bars($("areaBars"), {
       items: tr.area_hist.map((c, i) => ({ label: lab(i), value: c, color: C.train,
         text: `${c.toLocaleString()}${va ? ` · val ${va.area_hist[i].toLocaleString()}` : ""}`,
-        tip: `<div class="tt-title">${lab(i)} px</div>${row(C.train, "train slices", c.toLocaleString())}${va ? row("#5a5a78", "val slices", va.area_hist[i].toLocaleString()) : ""}` })),
-      labelWidth: 100, valueWidth: 110, rowH: 24,
+        tip: `<div class="tt-title">Tumour of ${lab(i)} pixels</div>${row(C.train, "training slices", c.toLocaleString())}${va ? row("#5a5a78", "val slices", va.area_hist[i].toLocaleString()) : ""}` })),
+      labelWidth: 100, valueWidth: 110, rowH: 24, xLabel: "Number of training slices (val count on the right)", yLabel: "Tumour size (pixels)",
     });
   }
 
@@ -394,48 +399,48 @@
       $("patCount").textContent = "";
       renderViewer(null);
     };
-    if (!sum) return clear(LIVE.includes(r.state) ? "Evaluation runs after training." : "This run has no evaluation.");
+    if (!sum) return clear(LIVE.includes(r.state) ? "The final check runs after training." : "This run has no final check yet.");
     const data = await evalData(S.split);
-    if (!data) return clear("Evaluation files not found.");
+    if (!data) return clear("The result files of the final check were not found.");
     const conf = sum.conf;
     const rows = patientRows(data, conf);
     const col = C[S.split];
     $("evalKpis").innerHTML = [
-      kpi(`${S.split} 3D Dice`, sum.dice3d_mean.toFixed(4), `median ${sum.dice3d_median.toFixed(4)} · ${sum.patients} patients`, "hero"),
-      kpi("Tumour-slice Dice", sum.tumour_slice_dice.toFixed(4), "slices that have tumour"),
-      kpi("Legacy slice Dice", sum.legacy_slice_dice.toFixed(4), "empty-vs-empty slice = 1.0"),
-      kpi("Sensitivity", pct(sum.sensitivity), "tumour slices found"),
-      kpi("Specificity", pct(sum.specificity), "tumour-free slices left empty"),
-      kpi("Threshold", conf, `best on ${S.split}: ${sum.best_conf}`),
+      kpi(`3D Dice (${S.split})`, sum.dice3d_mean.toFixed(4), `average per patient · middle value ${sum.dice3d_median.toFixed(4)} · ${sum.patients} patients`, "hero"),
+      kpi("2D Dice", sum.tumour_slice_dice.toFixed(4), "average per slice, slices with tumour"),
+      kpi("Old-style Dice", sum.legacy_slice_dice.toFixed(4), "empty slice with no drawing counts as 1"),
+      kpi("Tumour slices found", pct(sum.sensitivity), "slices with tumour where YOLO drew something"),
+      kpi("Empty slices left empty", pct(sum.specificity), "slices without tumour where YOLO drew nothing"),
+      kpi("Threshold used", conf, `best here: ${sum.best_conf}`),
     ].join("");
 
     // sweep: val + test from the summaries
-    const series = ["val", "test"].filter((s) => r.eval[s]).map((s) => ({ name: s, color: C[s], dash: s === "val" ? "6 4" : null, dots: true,
+    const series = ["val", "test"].filter((s) => r.eval[s]).map((s) => ({ name: `${s} pool`, color: C[s], dash: s === "val" ? "6 4" : null, dots: true,
       points: r.eval[s].sweep.map((p) => [p.conf, p.dice3d_mean]) }));
     const vb = r.eval.val && r.eval.val.best_conf;
-    Charts.line($("sweepChart"), { series, height: 210, xName: "threshold", xLabel: "confidence threshold", yLabel: "mean 3D Dice",
-      markers: [{ x: conf, label: "config" }, ...(vb != null && vb !== conf ? [{ x: vb, label: "val best", color: C.val }] : [])] });
+    Charts.line($("sweepChart"), { series, height: 230, xName: "threshold", xLabel: "Confidence threshold (lower = YOLO draws more)", yLabel: "Average 3D Dice",
+      markers: [{ x: conf, label: "setting" }, ...(vb != null && vb !== conf ? [{ x: vb, label: "best on val", color: C.val }] : [])] });
     if (r.eval.val && r.eval.test) {
       const at = (s, c) => (r.eval[s].sweep.find((p) => p.conf === c) || {}).dice3d_mean;
-      $("sweepNote").innerHTML = `val is highest at <b>${vb}</b>; test at that threshold: <b>${fmt(at("test", vb))}</b> vs <b>${fmt(at("test", conf))}</b> at the configured ${conf}. ` +
-        `Pick the threshold on val, never on test.`;
+      $("sweepNote").innerHTML = `YOLO only keeps a drawing when it is at least this sure. On val the best threshold is <b>${vb}</b>; on test that gives <b>${fmt(at("test", vb))}</b>, compared with <b>${fmt(at("test", conf))}</b> at the current setting (${conf}). ` +
+        `Always choose the threshold on val, never on test.`;
     }
 
     Charts.histogram($("diceHist"), { values: rows.map((x) => x.dice), lo: 0, hi: 1, bins: 20, color: col, unit: "patients",
-      xLabel: "3D Dice", markers: [{ x: sum.dice3d_mean, label: "mean" }],
+      xLabel: "3D Dice (0 = no overlap, 1 = perfect)", yLabel: "Number of patients", markers: [{ x: sum.dice3d_mean, label: "average" }],
       onClick: (lo, hi) => { S.patRange = [lo, hi]; renderPatTable(rows); $("patTable").scrollIntoView({ behavior: "smooth", block: "center" }); } });
 
     Charts.scatter($("diceScatter"), { points: rows.map((x) => ({ x: x.gt_ml, y: x.dice, color: col, id: x.id, big: x.id === S.vPatient,
-      tip: `<div class="tt-title">${esc(x.id)}</div>${row(col, "3D Dice", fmt(x.dice))}${row("#9a9ab0", "tumour", `${fmt(x.gt_ml)} mL`)}${row("#9a9ab0", "predicted", `${fmt(x.pred_ml)} mL`)}` })),
-      logX: true, yMin: 0, yMax: 1, xLabel: "tumour volume (mL, log)", yLabel: "3D Dice", onClick: (p) => openViewer(p.id) });
+      tip: `<div class="tt-title">${esc(x.id)}</div>${row(col, "3D Dice", fmt(x.dice))}${row("#9a9ab0", "real tumour", `${fmt(x.gt_ml)} mL`)}${row("#9a9ab0", "YOLO drew", `${fmt(x.pred_ml)} mL`)}` })),
+      logX: true, yMin: 0, yMax: 1, xLabel: "Real tumour size (mL, log scale)", yLabel: "3D Dice", onClick: (p) => openViewer(p.id) });
 
     const buckets = [[0, 10], [10, 30], [30, 60], [60, 100], [100, Infinity]];
-    Charts.bars($("sizeBars"), { max: 1, labelWidth: 100, items: buckets.map(([a, b]) => {
+    Charts.bars($("sizeBars"), { max: 1, labelWidth: 90, xLabel: "Average 3D Dice", yLabel: "Tumour size", items: buckets.map(([a, b]) => {
       const inB = rows.filter((x) => x.gt_ml >= a && x.gt_ml < b);
       const m = inB.length ? inB.reduce((s, x) => s + x.dice, 0) / inB.length : 0;
       const label = b === Infinity ? `≥ ${a} mL` : `${a}–${b} mL`;
-      return { label, value: m, color: col, text: inB.length ? `${m.toFixed(3)} · n=${inB.length}` : "n=0",
-               tip: `<div class="tt-title">${label}</div>${inB.length} patients, mean 3D Dice ${inB.length ? m.toFixed(4) : "–"}` };
+      return { label, value: m, color: col, text: inB.length ? `${m.toFixed(3)} · ${inB.length} pts` : "no patients",
+               tip: `<div class="tt-title">Tumours of ${label}</div>${inB.length} patients, average 3D Dice ${inB.length ? m.toFixed(4) : "–"}` };
     }) });
 
     const d = sum.detection;
@@ -448,8 +453,8 @@
     renderViewer(data);
   }
 
-  const PCOLS = [["id", "Patient", true], ["dice", "3D Dice"], ["gt_ml", "Tumour mL"], ["pred_ml", "Predicted mL"],
-                 ["tumour_slices", "Tumour slices"], ["tp", "Found"], ["fn", "Missed"], ["fp", "False"], ["maxconf", "Top conf"]];
+  const PCOLS = [["id", "Patient", true], ["dice", "3D Dice"], ["gt_ml", "Real tumour (mL)"], ["pred_ml", "YOLO drew (mL)"],
+                 ["tumour_slices", "Slices with tumour"], ["tp", "Found"], ["fn", "Missed"], ["fp", "False alarms"], ["maxconf", "Top confidence"]];
   function renderPatTable(rows) {
     const q = S.patQ.toLowerCase();
     let list = rows.filter((x) => !q || x.id.toLowerCase().includes(q));
@@ -458,8 +463,8 @@
     const isStr = k === "id";
     list.sort((a, b) => (isStr ? a[k].localeCompare(b[k]) : a[k] - b[k]) * dir);
     $("patRange").classList.toggle("hidden", !S.patRange);
-    if (S.patRange) $("patRange").innerHTML = `3D Dice ${S.patRange[0].toFixed(2)}–${S.patRange[1].toFixed(2)} <button type="button" aria-label="Clear range" id="clearRange">&times;</button>`;
-    $("patCount").textContent = `${list.length} of ${rows.length}`;
+    if (S.patRange) $("patRange").innerHTML = `Only 3D Dice ${S.patRange[0].toFixed(2)}–${S.patRange[1].toFixed(2)} <button type="button" aria-label="Show all again" id="clearRange">&times;</button>`;
+    $("patCount").textContent = `Showing ${list.length} of ${rows.length} patients`;
     $("patTable").innerHTML = `<table class="tbl"><thead><tr>${PCOLS.map(([c, l, s]) =>
       `<th data-k="${c}" class="${s ? "" : "num"}${k === c ? " sorted" : ""}" tabindex="0">${l}${k === c ? (dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead><tbody>` +
       list.map((x) => `<tr data-id="${esc(x.id)}" class="${x.id === S.vPatient ? "sel" : ""}" tabindex="0"><td class="mono">${esc(x.id)}</td>
@@ -522,7 +527,7 @@
     if (!on) {
       sel.innerHTML = "";
       $("vImg").removeAttribute("src");
-      $("vStatus").textContent = "Available once the run has been evaluated.";
+      $("vStatus").textContent = "Shown once the run has finished its final check.";
       $("vStats").innerHTML = "";
       $("vProfile").innerHTML = "";
       return;
@@ -566,19 +571,19 @@
     clearTimeout(predT);
     predT = setTimeout(async () => {
       const q = `split=${S.split}&patient=${encodeURIComponent(S.vPatient)}&z=${S.vZ}&conf=${S.vConf}`;
-      $("vStatus").textContent = "Predicting…";
+      $("vStatus").textContent = "Asking YOLO about this slice…";
       const img = $("vImg");
       img.onload = () => { $("vStatus").textContent = ""; };
-      img.onerror = () => { $("vStatus").textContent = "Could not render this slice."; };
+      img.onerror = () => { $("vStatus").textContent = "This slice could not be drawn."; };
       img.src = `${BASE}api/runs/${encodeURIComponent(S.sel)}/predict.png?${q}`;
-      img.alt = `${S.vPatient} slice ${S.vZ}: model input and prediction vs expert mask`;
+      img.alt = `${S.vPatient} slice ${S.vZ}: the picture YOLO sees, and its drawing next to the expert answer`;
       try {
         const st = await api(`${BASE}api/runs/${encodeURIComponent(S.sel)}/predict.json?${q}`);
         $("vStats").innerHTML = [
-          kpi("Slice Dice", st.gt || st.pred ? st.dice.toFixed(3) : "–", st.gt || st.pred ? "" : "no tumour, none predicted"),
-          kpi("Expert", `${st.gt.toLocaleString()} px`),
-          kpi("Predicted", `${st.pred.toLocaleString()} px`, `${st.inter.toLocaleString()} px overlap`),
-          kpi("Instances", st.confs.length, st.confs.length ? `conf ${st.confs.join(", ")}` : `none ≥ ${S.vConf}`),
+          kpi("2D Dice on this slice", st.gt || st.pred ? st.dice.toFixed(3) : "–", st.gt || st.pred ? "overlap between the two masks" : "no tumour here, and YOLO drew nothing"),
+          kpi("Expert tumour", `${st.gt.toLocaleString()} px`, "pixels marked by the expert"),
+          kpi("YOLO drew", `${st.pred.toLocaleString()} px`, `${st.inter.toLocaleString()} px match the expert`),
+          kpi("Shapes drawn", st.confs.length, st.confs.length ? `how sure: ${st.confs.join(", ")}` : `nothing was sure enough (needs ${S.vConf})`),
         ].join("");
       } catch (err) {
         $("vStats").innerHTML = `<p class="err">${esc(err.message)}</p>`;
@@ -590,9 +595,11 @@
     const s = p.slices;
     const pts = s.z.map((z, i) => [z, s.gt[i] || s.pred[i] ? dice(s.inter[i], s.pred[i], s.gt[i]) : null]);
     const area = s.z.map((z, i) => [z, s.gt[i] / Math.max(1, Math.max(...s.gt))]);
-    Charts.line($("vProfile"), { height: 170, xName: "z", xLabel: "axial slice", yMin: 0, yMax: 1,
-      series: [{ name: "slice Dice", color: C[S.split], points: pts }, { name: "expert tumour (scaled)", color: "#5a5a78", dash: "4 3", points: area }],
-      markers: [{ x: S.vZ, label: `z ${S.vZ}` }], onClick: (z) => { S.vZ = z; showSlice(); } });
+    Charts.line($("vProfile"), { height: 200, xName: "slice", xLabel: "Axial slice number (bottom of the head → top)",
+      yLabel: "2D Dice / tumour size", yMin: 0, yMax: 1,
+      series: [{ name: "2D Dice on the slice", color: C[S.split], points: pts },
+               { name: "expert tumour size (scaled to 1)", color: "#5a5a78", dash: "4 3", points: area }],
+      markers: [{ x: S.vZ, label: `slice ${S.vZ}` }], onClick: (z) => { S.vZ = z; showSlice(); } });
   }
 
   function openViewer(id) {
@@ -615,7 +622,7 @@
     const files = [...r.plots].sort((a, b) => order(a) - order(b) || a.localeCompare(b));
     $("plots").innerHTML = files.length
       ? files.map((f) => `<figure><button type="button" data-f="${esc(f)}"><img loading="lazy" src="${BASE}api/runs/${encodeURIComponent(r.id)}/file/${encodeURIComponent(f)}" alt="${esc(f)}"></button><figcaption>${esc(f)}</figcaption></figure>`).join("")
-      : `<p class="empty">Ultralytics saves its plots at the end of training.</p>`;
+      : `<p class="empty">These pictures are saved when training finishes.</p>`;
   }
   $("plots").addEventListener("click", (e) => {
     const b = e.target.closest("[data-f]");
@@ -632,7 +639,7 @@
     $("stopBtn").disabled = !live;
     $("liveId").textContent = run ? run.id : "";
     if (!run) {
-      $("liveSub").textContent = "No run is going.";
+      $("liveSub").textContent = "Nothing is running right now.";
       $("stepper").querySelectorAll("li").forEach((li) => { li.className = ""; li.querySelector("i").style.width = "0"; li.querySelector("em").textContent = ""; });
       $("liveKpis").innerHTML = "";
       return;
@@ -646,10 +653,10 @@
       done: run.state === "done" ? 1 : 0,
     };
     const text = {
-      dataset: st.dataset_total ? `${st.dataset_done} / ${st.dataset_total} patients` : "",
-      train: st.epochs ? `epoch ${st.epoch} / ${st.epochs}${st.batches && cur === 1 ? ` · batch ${st.batch} / ${st.batches}` : ""}` : "",
-      evaluate: st.eval_total ? `${st.eval_done} / ${st.eval_total} patients${st.eval_split ? ` (${st.eval_split})` : ""}` : "",
-      done: run.state === "done" ? (st.finished || "").replace("T", " ") : "",
+      dataset: st.dataset_total ? `${st.dataset_done} of ${st.dataset_total} patients` : "",
+      train: st.epochs ? `round ${st.epoch} of ${st.epochs}${st.batches && cur === 1 ? ` · step ${st.batch} of ${st.batches}` : ""}` : "",
+      evaluate: st.eval_total ? `${st.eval_done} of ${st.eval_total} patients${st.eval_split ? ` (${st.eval_split} pool)` : ""}` : "",
+      done: run.state === "done" ? (st.finished || "").replace("T", " at ") : "",
     };
     $("stepper").querySelectorAll("li").forEach((li, i) => {
       const k = li.dataset.stage;
@@ -665,21 +672,21 @@
     const be = bestEpoch(res);
     const sinceBest = be != null && res.epoch ? res.epoch[res.epoch.length - 1] - be : null;
     const patience = run.config.train.patience;
-    $("liveSub").innerHTML = `${badge(run.state)} ${esc(run.model)}${run.smoke ? " · smoke test" : ""} · started ${esc((st.started || "").replace("T", " "))}` +
+    $("liveSub").innerHTML = `${badge(run.state)} ${esc(run.model)}${run.smoke ? " · quick test" : ""} · started ${esc((st.started || "").replace("T", " at "))}` +
       (run.error ? ` · <span class="err">${esc(run.error)}</span>` : "");
     $("liveKpis").innerHTML = [
-      kpi("Elapsed", live ? dur(since(st.started)) : dur(since(st.started) - since(st.finished || st.updated))),
-      kpi("Time per epoch", perEpoch ? dur(perEpoch) : "–", times.length ? `${times.length} done` : ""),
-      kpi("Training left", left != null ? `≤ ${dur(left)}` : "–", left != null ? "estimate; early stop can end it sooner" : ""),
-      kpi("Best mAP50-95 (M)", be != null ? fmt(Math.max(...res["metrics/mAP50-95(M)"].filter((v) => v != null))) : "–", be != null ? `epoch ${be}` : ""),
-      kpi("Since best", sinceBest != null ? `${sinceBest} epoch${sinceBest === 1 ? "" : "s"}` : "–", sinceBest != null ? `stops at ${patience} (patience)` : "",
+      kpi("Time so far", live ? dur(since(st.started)) : dur(since(st.started) - since(st.finished || st.updated))),
+      kpi("Time per round", perEpoch ? dur(perEpoch) : "–", times.length ? `${times.length} round${times.length === 1 ? "" : "s"} done` : ""),
+      kpi("Training time left", left != null ? `about ${dur(left)}` : "–", left != null ? "a guess; it can stop earlier" : ""),
+      kpi("Best val score", be != null ? fmt(Math.max(...res["metrics/mAP50-95(M)"].filter((v) => v != null))) : "–", be != null ? `round ${be} (mask mAP50-95)` : ""),
+      kpi("Rounds since the best", sinceBest != null ? `${sinceBest}` : "–", sinceBest != null ? `training stops at ${patience}` : "",
           sinceBest != null && patience && sinceBest >= patience * 0.7 ? "warnk" : ""),
     ].join("");
   }
 
   $("stopBtn").addEventListener("click", async () => {
     const id = S.active;
-    if (!id || !confirm(`Stop run ${id}? Training can be resumed later from its last.pt.`)) return;
+    if (!id || !confirm(`Stop run ${id}?\n\nYou can continue it later with Resume.`)) return;
     try {
       await api(`${BASE}api/runs/${encodeURIComponent(id)}/stop`, { method: "POST" });
     } catch (err) {
@@ -715,7 +722,7 @@
     const bars = $("logBars").checked;
     const lines = S.logLines.filter((l) => (bars || !BAR_RE.test(l)) && (!f || l.toLowerCase().includes(f)));
     const box = $("log");
-    box.textContent = lines.slice(-1500).join("\n") || (S.logRun ? "(no output yet)" : "");
+    box.textContent = lines.slice(-1500).join("\n") || (S.logRun ? "(nothing yet)" : "");
     if ($("logFollow").checked) box.scrollTop = box.scrollHeight;
   }
   $("logFilter").addEventListener("input", renderLog);

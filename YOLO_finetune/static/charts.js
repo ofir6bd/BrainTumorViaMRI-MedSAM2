@@ -71,7 +71,7 @@
 
   function axes(svg, x, y, box, opt) {
     const { L, R, T, B, w, h } = box;
-    for (const t of ticks(y.lo, y.hi, opt.yTicks || 4)) {
+    for (const t of opt.yTickValues || ticks(y.lo, y.hi, opt.yTicks || 4)) {
       const yy = y(t);
       el("line", { x1: L, x2: w - R, y1: yy, y2: yy, class: "ch-grid" }, svg);
       txt(svg, L - 6, yy, (opt.yFmt || fmt)(t), { class: "ch-tick", "text-anchor": "end", "dominant-baseline": "middle" });
@@ -88,11 +88,25 @@
       { class: "ch-axis", "text-anchor": "middle", transform: `rotate(-90 12 ${T + (h - B - T) / 2})` });
   }
 
+  /* A row of legend keys at the top of a chart: line keys (solid / dashed) or squares. */
+  function legend(svg, x, y, items) {
+    let lx = x;
+    for (const it of items) {
+      if (it.line) el("line", { x1: lx, x2: lx + 18, y1: y - 4, y2: y - 4, stroke: it.color, "stroke-width": 2, "stroke-dasharray": it.dash || null }, svg);
+      else el("rect", { x: lx + 4, y: y - 9, width: 10, height: 10, rx: 2, fill: it.color }, svg);
+      txt(svg, lx + 23, y, it.name, { class: "ch-tick" });
+      lx += 34 + it.name.length * 6.1;
+    }
+  }
+
   /* Line chart. series: [{name, color, dash, points:[[x,y],...]}]. markers: [{x, label}].
+   * With more than one series a legend is drawn on top. xLabel / yLabel name the axes.
    * sync: a shared {listeners:Set} so hovering one chart moves the crosshair on all. */
   function line(container, opt) {
     const { svg, w, h } = root(container, opt.height || 200, opt.title);
-    const box = { L: opt.left || 50, R: 12, T: 10, B: opt.xLabel ? 36 : 24, w, h };
+    const withLegend = opt.series.length > 1;
+    const box = { L: opt.left || 54, R: 12, T: withLegend ? 26 : 10, B: opt.xLabel ? 36 : 24, w, h };
+    if (withLegend) legend(svg, box.L, 13, opt.series.map((s) => ({ name: s.name, color: s.color, dash: s.dash, line: true })));
     const pts = opt.series.flatMap((s) => s.points.filter((p) => p[1] != null && Number.isFinite(p[1])));
     if (!pts.length) {
       txt(svg, w / 2, h / 2, opt.empty || "No data yet", { class: "ch-empty", "text-anchor": "middle" });
@@ -107,7 +121,11 @@
     const x = scale(Math.min(...xs), Math.max(...xs), box.L, w - box.R);
     const y = scale(ylo, yhi, h - box.B, box.T);
     x.lo = Math.min(...xs); x.hi = Math.max(...xs); y.lo = ylo; y.hi = yhi;
-    axes(svg, x, y, box, opt);
+    // Whole-number x values (rounds, slices) get whole-number ticks, never 1.20 / 1.40.
+    const intX = xs.every(Number.isInteger);
+    const xTickValues = opt.xTickValues
+      || (intX ? [...new Set(ticks(x.lo, x.hi, opt.xTicks || 6).map(Math.round))].filter((t) => t >= x.lo && t <= x.hi) : null);
+    axes(svg, x, y, box, { ...opt, xTickValues });
     for (const m of opt.markers || []) {
       const xx = x(m.x);
       el("line", { x1: xx, x2: xx, y1: box.T, y2: h - box.B, stroke: m.color || INK.muted, "stroke-dasharray": "3 3" }, svg);
@@ -171,10 +189,11 @@
     return { move };
   }
 
-  /* Histogram over [lo, hi] in `bins` equal bins; markers: [{x, label, color}]. */
+  /* Histogram over [lo, hi] in `bins` equal bins; each bar shows its count on top.
+   * markers: [{x, label, color}]. */
   function histogram(container, opt) {
     const { svg, w, h } = root(container, opt.height || 190, opt.title);
-    const box = { L: 44, R: 12, T: 12, B: opt.xLabel ? 36 : 24, w, h };
+    const box = { L: 54, R: 12, T: 20, B: opt.xLabel ? 36 : 24, w, h };
     const vals = opt.values.filter((v) => v != null && Number.isFinite(v));
     if (!vals.length) {
       txt(svg, w / 2, h / 2, opt.empty || "No data yet", { class: "ch-empty", "text-anchor": "middle" });
@@ -189,7 +208,12 @@
     const x = scale(lo, hi, box.L, w - box.R);
     const y = scale(0, Math.max(...counts) * 1.08, h - box.B, box.T);
     x.lo = lo; x.hi = hi; y.lo = 0; y.hi = Math.max(...counts) * 1.08;
-    axes(svg, x, y, box, { ...opt, yFmt: (v) => fmt(v) });
+    // Counts are whole numbers: never label the axis 0.5 / 1.50.
+    const maxC = Math.max(...counts);
+    const step = Math.max(1, Math.ceil(maxC / 4));
+    const yTickValues = maxC <= 8 ? Array.from({ length: maxC + 1 }, (_, i) => i)
+      : Array.from({ length: Math.floor(maxC / step) + 1 }, (_, i) => i * step);
+    axes(svg, x, y, box, { ...opt, yTickValues, yFmt: (v) => fmt(v) });
     counts.forEach((c, i) => {
       const x0 = x(lo + i * bw) + 1;
       const ww = Math.max(1, x(lo + (i + 1) * bw) - x(lo + i * bw) - 2);
@@ -199,6 +223,7 @@
         const r = Math.min(3, ww / 2, hh);
         el("path", { d: `M${x0},${h - box.B}V${y(c) + r}Q${x0},${y(c)} ${x0 + r},${y(c)}H${x0 + ww - r}Q${x0 + ww},${y(c)} ${x0 + ww},${y(c) + r}V${h - box.B}Z`,
                      fill: opt.color || "#3987e5" }, g);
+        if (ww >= 11) txt(g, x0 + ww / 2, y(c) - 4, c, { class: "ch-val", "text-anchor": "middle" });
       }
       el("rect", { x: x0, y: box.T, width: ww, height: h - box.T - box.B, fill: "transparent" }, g);
       g.addEventListener("mousemove", (e) => showTip(`<div class="tt-title">${(opt.xFmt || fmt)(lo + i * bw)} – ${(opt.xFmt || fmt)(lo + (i + 1) * bw)}</div>${c} ${esc(opt.unit || "items")}`, e));
@@ -251,14 +276,27 @@
     }
   }
 
-  /* Horizontal bars. items: [{label, value, color, text, tip}], max optional. */
+  /* Horizontal bars. items: [{label, value, color, text, tip}], max optional.
+   * xLabel names the bar length (with ticks under the bars), yLabel names the rows. */
   function bars(container, opt) {
     const rowH = opt.rowH || 28;
-    const { svg, w } = root(container, opt.items.length * rowH + 8, opt.title);
-    const L = opt.labelWidth || 120;
+    const bottom = opt.xLabel ? 40 : 8;
+    const { svg, w, h } = root(container, opt.items.length * rowH + 4 + bottom, opt.title);
+    const L = (opt.labelWidth || 120) + (opt.yLabel ? 22 : 0);
     const R = opt.valueWidth || 70;
     const max = opt.max || Math.max(1e-9, ...opt.items.map((i) => i.value || 0));
     const x = scale(0, max, L, w - R);
+    const yEnd = 4 + opt.items.length * rowH;
+    if (opt.xLabel) {
+      for (const t of ticks(0, max, 4)) {
+        el("line", { x1: x(t), x2: x(t), y1: yEnd, y2: yEnd + 4, stroke: INK.base }, svg);
+        txt(svg, x(t), yEnd + 16, (opt.xFmt || fmt)(t), { class: "ch-tick", "text-anchor": "middle" });
+      }
+      txt(svg, L + (w - L - R) / 2, h - 4, opt.xLabel, { class: "ch-axis", "text-anchor": "middle" });
+    }
+    if (opt.yLabel) {
+      txt(svg, 12, yEnd / 2, opt.yLabel, { class: "ch-axis", "text-anchor": "middle", transform: `rotate(-90 12 ${yEnd / 2})` });
+    }
     opt.items.forEach((it, i) => {
       const y0 = 4 + i * rowH;
       const g = el("g", {}, svg);

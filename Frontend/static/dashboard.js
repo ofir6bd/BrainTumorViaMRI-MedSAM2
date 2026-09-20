@@ -20,7 +20,7 @@
   const FAMILY = {
     yolo: { label: "YOLO pools", color: "#3987e5" },
     medsam2: { label: "MedSAM2 pools", color: "#d95926" },
-    test: { label: "Test", color: "#199e70" },
+    test: { label: "Test pool", color: "#199e70" },
     other: { label: "Other", color: "#8a8aa0" },
   };
   const INK = { text: "#e8e8f0", muted: "#9a9ab0", grid: "#2c2c44", base: "#4a4a66",
@@ -31,24 +31,28 @@
 
   const pct = (v) => (v == null ? "–" : `${(v * 100).toFixed(v * 100 >= 10 ? 0 : 1)}%`);
   const METRICS = [
-    { k: "wt", l: "Whole tumour (mL)", get: (r) => r.ml.WT, logDefault: true },
-    { k: "tc", l: "Tumour core (mL)", get: (r) => r.ml.TC, logDefault: true },
-    { k: "et", l: "Enhancing tumour ET (mL)", get: (r) => r.ml.ET, logDefault: true },
-    { k: "netc", l: "Necrotic core NETC (mL)", get: (r) => r.ml.NETC, logDefault: true },
-    { k: "snfh", l: "Oedema SNFH (mL)", get: (r) => r.ml.SNFH, logDefault: true },
-    { k: "rc", l: "Resection cavity RC (mL)", get: (r) => r.ml.RC, logDefault: true },
-    { k: "pct", l: "Tumour % of brain", get: (r) => r.wt_pct_brain, logDefault: true },
-    { k: "brain", l: "Brain volume (mL)", get: (r) => r.brain_ml },
-    { k: "slices", l: "Tumour slices", get: (r) => r.n_slices },
-    { k: "peak", l: "Largest slice area (mm²)", get: (r) => r.peak_area_mm2 },
-    { k: "ncc", l: "Connected components", get: (r) => r.n_cc, logDefault: true },
-    { k: "lcc", l: "Largest component share", get: (r) => r.largest_cc_frac, fmt: pct },
-    { k: "exlr", l: "Extent left–right (mm)", get: (r) => (r.extent_mm ? r.extent_mm[0] : null) },
-    { k: "exap", l: "Extent front–back (mm)", get: (r) => (r.extent_mm ? r.extent_mm[1] : null) },
-    { k: "exsi", l: "Extent up–down (mm)", get: (r) => (r.extent_mm ? r.extent_mm[2] : null) },
-    { k: "left", l: "Share of tumour on left", get: (r) => r.left_frac, fmt: pct },
+    { k: "wt", l: "Whole tumour size (mL)", get: (r) => r.ml.WT, logDefault: true },
+    { k: "tc", l: "Tumour core size (mL)", get: (r) => r.ml.TC, logDefault: true },
+    { k: "et", l: "Enhancing part, ET (mL)", get: (r) => r.ml.ET, logDefault: true },
+    { k: "netc", l: "Dead core, NETC (mL)", get: (r) => r.ml.NETC, logDefault: true },
+    { k: "snfh", l: "Swelling, SNFH (mL)", get: (r) => r.ml.SNFH, logDefault: true },
+    { k: "rc", l: "Surgery cavity, RC (mL)", get: (r) => r.ml.RC, logDefault: true },
+    { k: "pct", l: "Tumour size, % of brain", get: (r) => r.wt_pct_brain, logDefault: true },
+    { k: "brain", l: "Brain size (mL)", get: (r) => r.brain_ml },
+    { k: "slices", l: "Slices with tumour", get: (r) => r.n_slices },
+    { k: "peak", l: "Biggest tumour slice (mm²)", get: (r) => r.peak_area_mm2 },
+    { k: "ncc", l: "Number of tumour pieces", get: (r) => r.n_cc, logDefault: true },
+    { k: "lcc", l: "Share in the biggest piece", get: (r) => r.largest_cc_frac, fmt: pct },
+    { k: "exlr", l: "Width, left to right (mm)", get: (r) => (r.extent_mm ? r.extent_mm[0] : null) },
+    { k: "exap", l: "Length, front to back (mm)", get: (r) => (r.extent_mm ? r.extent_mm[1] : null) },
+    { k: "exsi", l: "Height, bottom to top (mm)", get: (r) => (r.extent_mm ? r.extent_mm[2] : null) },
+    { k: "left", l: "Share of tumour on the left", get: (r) => r.left_frac, fmt: pct },
   ];
   const M = Object.fromEntries(METRICS.map((m) => [m.k, m]));
+  // Plain words for the BraTS labels, shown next to their short codes.
+  const LABEL_WORDS = { NETC: "dead core", SNFH: "swelling", ET: "enhancing", RC: "surgery cavity" };
+  const labelName = (n) => `${n} · ${LABEL_WORDS[n] || n}`;
+  const SIDE_WORDS = { left: "left", right: "right", bilateral: "both sides" };
 
   const S = {
     loaded: false, loading: null, pollTimer: null,
@@ -157,6 +161,36 @@
     return `url(#${id})`;
   }
   const widthOf = (node) => Math.max(280, node.clientWidth || 600);
+  // Every chart names both axes: x centred under the plot, y turned up the left edge.
+  function axisNames(svg, b, xName, yName) {
+    if (xName) txt(svg, b.L + (b.W - b.L - b.R) / 2, b.H - 4, xName, { class: "db-axis-title", "text-anchor": "middle" });
+    if (yName) {
+      const cy = b.T + (b.H - b.B - b.T) / 2;
+      txt(svg, 12, cy, yName, { class: "db-axis-title", "text-anchor": "middle", transform: `rotate(-90 12 ${cy})` });
+    }
+  }
+  // Split legend keys into rows that fit the chart width.
+  function legendLayout(items, x, maxX) {
+    const rows = [[]];
+    let lx = x;
+    for (const it of items) {
+      const w = 26 + it.label.length * 6.2;
+      if (lx + w > maxX && rows[rows.length - 1].length) { rows.push([]); lx = x; }
+      rows[rows.length - 1].push(it);
+      lx += w;
+    }
+    return rows;
+  }
+  // A row of legend keys drawn inside a chart: [{label, color, ring}]
+  function legendRow(svg, x, y, items) {
+    let lx = x;
+    for (const it of items) {
+      if (it.ring) el("circle", { cx: lx + 5, cy: y - 4, r: 4, fill: "none", stroke: it.color, "stroke-width": 1.6 }, svg);
+      else el("rect", { x: lx, y: y - 9, width: 10, height: 10, rx: 2, fill: it.color }, svg);
+      txt(svg, lx + 15, y, it.label, { class: "db-tick" });
+      lx += 26 + it.label.length * 6.2;
+    }
+  }
 
   // tooltip
   const tip = $("dbTooltip");
@@ -182,7 +216,7 @@
   const recTip = (r, extra) =>
     `<div class="tt-title">${esc(r.id)}</div>` +
     tipRow(colorOf(r), r.pool || "other", roleOf(r)) +
-    tipRow(INK.neutral, "Whole tumour", `${fmt(r.ml.WT)} mL`) + (extra || "");
+    tipRow(INK.neutral, "Whole tumour size", `${fmt(r.ml.WT)} mL`) + (extra || "");
 
   // ------------------------------------------------------------------ filtering
   function passes(r, skip) {
@@ -291,7 +325,7 @@
       box.classList.remove("hidden");
       const p = st.total ? st.done / st.total : 0;
       $("dbProgressText").textContent =
-        `Computing statistics from the NIfTI files: ${st.done} / ${st.total} patients (${Math.round(p * 100)}%)`;
+        `Measuring every patient from the scan files: ${st.done} of ${st.total} done (${Math.round(p * 100)}%)`;
       $("dbProgressFill").style.width = `${p * 100}%`;
       S.pollTimer = setTimeout(poll, 1000);
       return;
@@ -330,13 +364,13 @@
     const errBox = $("dbErrors");
     errBox.classList.toggle("hidden", !errs.length);
     errBox.innerHTML = errs.length
-      ? `<b>${errs.length} patient(s) could not be read and are left out:</b> ` +
+      ? `<b>${errs.length} patient(s) could not be read, so they are left out:</b> ` +
         errs.slice(0, 8).map(([id, e]) => `${esc(id)} (${esc(e)})`).join("; ") +
         (errs.length > 8 ? "; …" : "")
       : "";
     $("dbSub").textContent =
-      `${d.records.length.toLocaleString()} of ${d.n_patients.toLocaleString()} patients from ${d.dataset_dir}` +
-      (d.computed_at ? ` · statistics computed ${d.computed_at.replace("T", " ")}` : "");
+      `${d.records.length.toLocaleString()} of ${d.n_patients.toLocaleString()} patients, from the folder ${d.dataset_dir}` +
+      (d.computed_at ? ` · measured on ${d.computed_at.replace("T", " at ")}` : "");
     $("sidefoot").textContent = `${d.dataset_dir} · ${d.n_patients.toLocaleString()} patients`;
     buildControls();
     renderAll();
@@ -356,7 +390,7 @@
       return `<button type="button" class="db-chip" data-pool="${p.key}" title="${esc(p.use)}">${dot}${esc(p.key)}</button>`;
     }).join("");
     $("dbLabelChips").innerHTML = S.labels.map((l) =>
-      `<button type="button" class="db-chip" data-label="${l.name}"><i class="chip-dot sq" style="background:${l.color}"></i>${l.name}</button>`
+      `<button type="button" class="db-chip" data-label="${l.name}" title="Show only patients whose tumour has a ${esc(LABEL_WORDS[l.name] || l.name)} part"><i class="chip-dot sq" style="background:${l.color}"></i>${esc(labelName(l.name))}</button>`
     ).join("");
   }
 
@@ -387,9 +421,9 @@
     if (f.range) {
       chips.push(["range", `${M[f.range.m].l}: ${fmtM(M[f.range.m], f.range.lo)} – ${fmtM(M[f.range.m], f.range.hi)}`]);
     }
-    if (f.sel) chips.push(["sel", `Scatter box: ${M[f.sel.x].l.split(" (")[0]} × ${M[f.sel.y].l.split(" (")[0]}`]);
-    if (f.cell) chips.push(["cell", `Location cell (${f.cell.plane})`]);
-    if (f.shared) chips.push(["shared", `Subjects in both ${f.shared[0]} and ${f.shared[1]}`]);
+    if (f.sel) chips.push(["sel", `Box on the scatter chart: ${M[f.sel.x].l.split(" (")[0]} × ${M[f.sel.y].l.split(" (")[0]}`]);
+    if (f.cell) chips.push(["cell", `One square of the location map (${f.cell.plane})`]);
+    if (f.shared) chips.push(["shared", `People in both ${f.shared[0]} and ${f.shared[1]}`]);
     $("dbActiveChips").innerHTML = chips.map(([k, l]) =>
       `<button type="button" class="db-chip on removable" data-clear="${k}" title="Remove this filter">${esc(l)} <span aria-hidden="true">&times;</span></button>`
     ).join("");
@@ -413,7 +447,7 @@
     const rows = filtered();
     const nSubj = new Set(rows.map((r) => r.subject)).size;
     $("dbCount").textContent =
-      `${rows.length.toLocaleString()} of ${S.records.length.toLocaleString()} patients · ${nSubj.toLocaleString()} subjects`;
+      `Showing ${rows.length.toLocaleString()} of ${S.records.length.toLocaleString()} patients · ${nSubj.toLocaleString()} people`;
     renderKpis(rows);
     renderIntegrity();
     renderPoolChart();
@@ -440,17 +474,17 @@
     const share = (rs, test) => (rs.length ? rs.filter(test).length / rs.length : null);
     const isFiltered = rows.length !== all.length;
     const cards = [
-      { l: "Patients", v: rows.length.toLocaleString(), s: isFiltered ? `of ${all.length.toLocaleString()}` : "all pools" },
-      { l: "Subjects", v: new Set(rows.map((r) => r.subject)).size.toLocaleString(),
-        s: `${(rows.length / Math.max(1, new Set(rows.map((r) => r.subject)).size)).toFixed(2)} scans each` },
-      { l: "Median whole tumour", v: `${fmt(med(rows, (r) => r.ml.WT))} mL`,
-        s: `IQR ${iqr(rows, (r) => r.ml.WT)}${isFiltered ? ` · all ${fmt(med(all, (r) => r.ml.WT))}` : ""}` },
-      { l: "Median % of brain", v: `${fmt(med(rows, (r) => r.wt_pct_brain))}%`,
-        s: isFiltered ? `all ${fmt(med(all, (r) => r.wt_pct_brain))}%` : `IQR ${iqr(rows, (r) => r.wt_pct_brain)}` },
-      { l: "Post-op (has RC)", v: pct(share(rows, (r) => r.present.includes("RC"))),
-        s: isFiltered ? `all ${pct(share(all, (r) => r.present.includes("RC")))}` : "resection cavity present" },
-      { l: "Median components", v: fmt(med(rows, (r) => r.n_cc)),
-        s: `${pct(share(rows, (r) => r.n_cc === 1))} single-piece` },
+      { l: "Patients (scans)", v: rows.length.toLocaleString(), s: isFiltered ? `out of ${all.length.toLocaleString()}` : "in all pools" },
+      { l: "People", v: new Set(rows.map((r) => r.subject)).size.toLocaleString(),
+        s: `${(rows.length / Math.max(1, new Set(rows.map((r) => r.subject)).size)).toFixed(2)} scans per person` },
+      { l: "Typical tumour size", v: `${fmt(med(rows, (r) => r.ml.WT))} mL`,
+        s: `middle half: ${iqr(rows, (r) => r.ml.WT)} mL${isFiltered ? ` · everyone: ${fmt(med(all, (r) => r.ml.WT))}` : ""}` },
+      { l: "Typical tumour % of brain", v: `${fmt(med(rows, (r) => r.wt_pct_brain))}%`,
+        s: isFiltered ? `everyone: ${fmt(med(all, (r) => r.wt_pct_brain))}%` : `middle half: ${iqr(rows, (r) => r.wt_pct_brain)}%` },
+      { l: "After surgery", v: pct(share(rows, (r) => r.present.includes("RC"))),
+        s: isFiltered ? `everyone: ${pct(share(all, (r) => r.present.includes("RC")))}` : "have a surgery cavity (RC)" },
+      { l: "Typical tumour pieces", v: fmt(med(rows, (r) => r.n_cc)),
+        s: `${pct(share(rows, (r) => r.n_cc === 1))} are in one piece` },
     ];
     $("dbKpis").innerHTML = cards.map((c) =>
       `<div class="db-kpi"><span class="db-kpi-l">${c.l}</span><span class="db-kpi-v">${c.v}</span><span class="db-kpi-s">${c.s}</span></div>`
@@ -489,13 +523,13 @@
     }
     html += "</tbody></table>";
     const verdict = bad
-      ? `<p class="db-verdict bad">✕ ${bad / 2} YOLO↔MedSAM2 pool pair(s) share subjects — MedSAM2 would train on prompts YOLO has memorised.</p>`
-      : `<p class="db-verdict good">✓ No subject is in both a YOLO pool and a MedSAM2 pool.</p>`;
+      ? `<p class="db-verdict bad">✕ Some people are in both a YOLO pool and a MedSAM2 pool (${bad / 2} pair${bad > 2 ? "s" : ""}). MedSAM2 would then learn from YOLO masks on people YOLO already knows.</p>`
+      : `<p class="db-verdict good">✓ Nobody is in both a YOLO pool and a MedSAM2 pool.</p>`;
     const warnLine = warns.length
-      ? `<p class="db-verdict warn">⚠ Same person in a model's train and val pool (${warns.join(", ")} subjects) — that model's val score will be optimistic.</p>`
+      ? `<p class="db-verdict warn">⚠ Some people are in both the train and the val pool of one model (${warns.join(", ")} people). That model's val score will look better than it really is.</p>`
       : "";
     $("dbLeakMatrix").innerHTML = html + verdict + warnLine +
-      `<p class="db-card-sub">Diagonal = subjects in the pool. Click a shared-subject cell to list those patients.</p>`;
+      `<p class="db-card-sub">Grey diagonal = number of people in that pool. Other numbers = people in both pools. Click a number to list those patients.</p>`;
     for (const td of $("dbLeakMatrix").querySelectorAll("td[tabindex]")) {
       const a = td.dataset.a;
       const b = td.dataset.b;
@@ -508,13 +542,13 @@
       td.addEventListener("keydown", (e) => { if (e.key === "Enter") pick(); });
       hover(td, () => {
         const subs = [...S.sharedSubjects(a, b)].sort();
-        return `<div class="tt-title">${esc(a)} ∩ ${esc(b)}</div>${subs.length} shared subjects<br><span class="tt-muted">${esc(subs.slice(0, 6).join(", "))}${subs.length > 6 ? ", …" : ""}</span>`;
+        return `<div class="tt-title">${esc(a)} and ${esc(b)}</div>${subs.length} people are in both<br><span class="tt-muted">${esc(subs.slice(0, 6).join(", "))}${subs.length > 6 ? ", …" : ""}</span>`;
       });
     }
 
     const m = S.manifest;
     if (!m || !m.found) {
-      $("dbManifest").innerHTML = `<p class="db-verdict bad">✕ No split_manifest.json found next to the pools.</p>`;
+      $("dbManifest").innerHTML = `<p class="db-verdict bad">✕ The split list (split_manifest.json) is missing.</p>`;
       return;
     }
     const diskCounts = {};
@@ -526,12 +560,12 @@
     }).join("");
     const drift = m.moved.length + m.not_in_manifest.length + m.missing_on_disk.length;
     $("dbManifest").innerHTML =
-      `<h4>Manifest vs disk</h4>` +
-      `<table class="db-mini-table"><thead><tr><th>Pool</th><th>Manifest</th><th>On disk</th><th></th></tr></thead><tbody>${rows}</tbody></table>` +
+      `<h4>Does the split list match the folders?</h4>` +
+      `<table class="db-mini-table"><thead><tr><th>Pool</th><th>In the list</th><th>In the folder</th><th></th></tr></thead><tbody>${rows}</tbody></table>` +
       (drift
-        ? `<p class="db-verdict bad">✕ ${m.moved.length} moved, ${m.not_in_manifest.length} not in manifest, ${m.missing_on_disk.length} missing on disk.` +
+        ? `<p class="db-verdict bad">✕ ${m.moved.length} moved, ${m.not_in_manifest.length} not in the list, ${m.missing_on_disk.length} missing from the folders.` +
           (m.moved.length ? `<br><span class="tt-muted">${m.moved.slice(0, 4).map((x) => `${esc(x.id)}: ${esc(x.manifest)} → ${esc(x.disk)}`).join("; ")}</span>` : "") + `</p>`
-        : `<p class="db-verdict good">✓ Every folder is where split_manifest.json says it is.</p>`) +
+        : `<p class="db-verdict good">✓ Every patient folder is where the list (split_manifest.json) says.</p>`) +
       (m.note ? `<p class="db-card-sub db-note">${esc(m.note)}</p>` : "");
   }
 
@@ -539,11 +573,11 @@
     const box = $("dbPoolChart");
     const W = widthOf(box);
     const rowH = 34;
-    const H = S.pools.length * rowH + 10;
+    const H = S.pools.length * rowH + 34;
     const svg = svgRoot(box, W, H, "Patients per pool");
     const rows = filtered("pool");
-    const L = 118;
-    const R = 118;
+    const L = 136;   // room for the rotated "Pool" title next to the pool names
+    const R = 124;
     const full = {};
     const cur = {};
     const subj = {};
@@ -568,7 +602,7 @@
       if (sel.has(p.key)) el("rect", { x: L - 3, y: y + 3, width: x(full[p.key]) - L + 6, height: rowH - 8, rx: 5,
                                         fill: "none", stroke: INK.text, "stroke-width": 1.5 }, g);
       txt(g, W - R + 8, y + rowH / 2,
-        `${(cur[p.key] || 0).toLocaleString()} · ${(subj[p.key] || new Set()).size} subj`,
+        `${(cur[p.key] || 0).toLocaleString()} · ${(subj[p.key] || new Set()).size} people`,
         { class: "db-val", "dominant-baseline": "middle" });
       el("rect", { x: 0, y, width: W, height: rowH, fill: "transparent" }, g);
       g.addEventListener("click", () => {
@@ -576,17 +610,18 @@
         update();
       });
       hover(g, () => `<div class="tt-title">${esc(p.key)}</div>${esc(p.use)}<br>` +
-        tipRow(c, "In current filter", (cur[p.key] || 0).toLocaleString()) +
+        tipRow(c, "Match your filters", (cur[p.key] || 0).toLocaleString()) +
         tipRow(INK.muted, "Whole pool", (full[p.key] || 0).toLocaleString()) +
-        tipRow(INK.muted, "Subjects (filter)", (subj[p.key] || new Set()).size));
+        tipRow(INK.muted, "People (filtered)", (subj[p.key] || new Set()).size));
     });
+    axisNames(svg, { L, R, T: 6, B: 28, W, H }, "Number of patients (scans)", "Pool");
   }
 
   function renderTimepoints(rows) {
     const box = $("dbTimepointChart");
     const W = widthOf(box);
     const H = 190;
-    const svg = svgRoot(box, W, H, "Subjects by number of scans");
+    const svg = svgRoot(box, W, H, "People by number of scans");
     const subs = new Set(rows.map((r) => r.subject));
     const counts = {};
     for (const s of subs) {
@@ -594,11 +629,11 @@
       counts[k] = (counts[k] || 0) + 1;
     }
     const ks = Object.keys(counts).map(Number).sort((a, b) => a - b);
-    if (!ks.length) { txt(svg, W / 2, H / 2, "No patients in filter", { class: "db-empty", "text-anchor": "middle" }); return; }
+    if (!ks.length) { txt(svg, W / 2, H / 2, "No patients match your filters", { class: "db-empty", "text-anchor": "middle" }); return; }
     const maxK = Math.max(...ks);
     const cats = Array.from({ length: maxK }, (_, i) => i + 1);
-    const L = 44;
-    const B = 34;
+    const L = 56;
+    const B = 36;
     const T = 16;
     const maxV = Math.max(...Object.values(counts));
     const y = scale(0, maxV, H - B, T);
@@ -616,9 +651,9 @@
       txt(g, x(i) + bw / 2, y(v) - 5, v, { class: "db-val", "text-anchor": "middle" });
       txt(g, x(i) + bw / 2, H - B + 16, k, { class: "db-tick", "text-anchor": "middle" });
       el("rect", { x: x(i) - 4, y: T, width: bw + 8, height: H - B - T, fill: "transparent" }, g);
-      hover(g, () => `<div class="tt-title">${k} scan${k > 1 ? "s" : ""} per subject</div>${v} subjects in the current filter`);
+      hover(g, () => `<div class="tt-title">${k} scan${k > 1 ? "s" : ""} per person</div>${v} people (in your filter) have ${k} scan${k > 1 ? "s" : ""}`);
     });
-    txt(svg, L + (W - L) / 2, H - 4, "scans per subject (whole dataset)", { class: "db-axis-title", "text-anchor": "middle" });
+    axisNames(svg, { L, R: 4, T, B, W, H }, "Scans per person", "Number of people");
   }
 
   function roundTop(x, y, w, h) {  // bar with 4px rounded data-end, square baseline
@@ -662,7 +697,7 @@
     const W = widthOf(box);
     const H = 300;
     const L = 58;
-    const B = 34;
+    const B = 50;
     const T = 12;
     const svg = svgRoot(box, W, H, `${m.l} by pool`);
     const byPool = {};
@@ -673,7 +708,7 @@
       (byPool[r.pool] ||= []).push({ r, v, t: tr.f(v) });
     }
     const allT = Object.values(byPool).flat().map((d) => d.t);
-    if (!allT.length) { txt(svg, W / 2, H / 2, "No values in filter", { class: "db-empty", "text-anchor": "middle" }); $("dbKsTable").innerHTML = ""; return; }
+    if (!allT.length) { txt(svg, W / 2, H / 2, "No values for the patients in your filters", { class: "db-empty", "text-anchor": "middle" }); $("dbKsTable").innerHTML = ""; return; }
     const lo = Math.min(...allT);
     const hi = Math.max(...allT);
     const pad = (hi - lo) * 0.04 || 1;
@@ -691,7 +726,7 @@
       const cx = L + slot * i + slot / 2;
       const c = FAMILY[p.family].color;
       txt(svg, cx, H - B + 16, p.key, { class: "db-tick", "text-anchor": "middle" });
-      txt(svg, cx, H - B + 29, `n=${d.length}`, { class: "db-tick dim", "text-anchor": "middle" });
+      txt(svg, cx, H - B + 29, `${d.length} patients`, { class: "db-tick dim", "text-anchor": "middle" });
       if (!d.length) return;
       const ts = d.map((x) => x.t);
       const q1 = quantile(ts, 0.25);
@@ -722,28 +757,27 @@
       el("line", { x1: cx - bw / 2, x2: cx + bw / 2, y1: y(q2), y2: y(q2), stroke: c, "stroke-width": 3 }, svg);
       const hit = el("rect", { x: cx - bw / 2, y: y(q3), width: bw, height: Math.max(4, y(q1) - y(q3)), fill: "transparent" }, svg);
       hover(hit, () => `<div class="tt-title">${esc(p.key)} — ${esc(m.l)}</div>` +
-        tipRow(c, "Median", fmtM(m, tr.inv(q2))) +
-        tipRow(INK.muted, "Middle 50%", `${fmtM(m, tr.inv(q1))} – ${fmtM(m, tr.inv(q3))}`) +
+        tipRow(c, "Middle value", fmtM(m, tr.inv(q2))) +
+        tipRow(INK.muted, "Middle half", `${fmtM(m, tr.inv(q1))} – ${fmtM(m, tr.inv(q3))}`) +
         tipRow(INK.muted, "Patients", d.length));
     });
-    txt(svg, 14, T + (H - B - T) / 2, `${m.l}${S.distLog ? " (log)" : ""}`,
-      { class: "db-axis-title", "text-anchor": "middle", transform: `rotate(-90 14 ${T + (H - B - T) / 2})` });
+    axisNames(svg, { L, R: 6, T, B, W, H }, "Pool", `${m.l}${S.distLog ? " (log scale)" : ""}`);
 
     // KS table vs test
     const ref = stats.test;
     const alpha = 0.05 / Math.max(1, S.pools.length - 1);
-    let t = `<table class="db-mini-table"><thead><tr><th>Pool</th><th>Median</th><th title="Largest gap between the two cumulative distributions">KS D</th><th>p</th></tr></thead><tbody>`;
+    let t = `<table class="db-mini-table"><thead><tr><th>Pool</th><th>Middle value</th><th title="How different the pool is from test, 0 (same) to 1 (completely different). Kolmogorov–Smirnov D.">Gap to test</th><th title="p-value: the chance of a gap this big if the pools were really alike">Like test?</th></tr></thead><tbody>`;
     for (const p of S.pools) {
       const s = stats[p.key];
       if (!s) { t += `<tr><td>${esc(p.key)}</td><td colspan="3">no values</td></tr>`; continue; }
-      if (p.key === "test") { t += `<tr><td>${esc(p.key)}</td><td>${fmtM(m, s.median)}</td><td colspan="2" class="dim">reference</td></tr>`; continue; }
+      if (p.key === "test") { t += `<tr><td>${esc(p.key)}</td><td>${fmtM(m, s.median)}</td><td colspan="2" class="dim">compared against</td></tr>`; continue; }
       if (!ref) { t += `<tr><td>${esc(p.key)}</td><td>${fmtM(m, s.median)}</td><td colspan="2" class="dim">no test values</td></tr>`; continue; }
       const r = ks(s.vals.slice().sort((a, b) => a - b), ref.vals.slice().sort((a, b) => a - b));
       const sig = r.p < alpha;
-      t += `<tr><td>${esc(p.key)}</td><td>${fmtM(m, s.median)}</td><td>${r.d.toFixed(3)}</td><td class="${sig ? "db-bad" : "db-ok"}">${sig ? "✕ " : "✓ "}${r.p < 0.001 ? "<0.001" : r.p.toFixed(3)}</td></tr>`;
+      t += `<tr><td>${esc(p.key)}</td><td>${fmtM(m, s.median)}</td><td>${r.d.toFixed(3)}</td><td class="${sig ? "db-bad" : "db-ok"}" title="p = ${r.p < 0.001 ? "less than 0.001" : r.p.toFixed(3)}">${sig ? "✕ different" : "✓ alike"}</td></tr>`;
     }
-    t += `</tbody></table><p class="db-card-sub">✓ = no significant difference from test (p ≥ ${alpha.toFixed(4)}, Bonferroni).` +
-      `${missing ? ` ${missing} patient(s) without a value are left out.` : ""}</p>`;
+    t += `</tbody></table><p class="db-card-sub">✓ alike = no clear difference from the test pool. ✕ different = a clear difference (p below ${alpha.toFixed(4)}, strict because 4 pools are checked). Hover for the exact p-value.` +
+      `${missing ? ` ${missing} patient(s) have no value for this and are left out.` : ""}</p>`;
     $("dbKsTable").innerHTML = t;
   }
 
@@ -754,10 +788,12 @@
     const rows = filtered("range");
     const W = widthOf(box);
     const H = 230;
-    const L = 52;
+    const L = 56;
     const B = 40;
-    const T = 14;
+    const T = 26;
     const svg = svgRoot(box, W, H, `Histogram of ${m.l}`);
+    legendLayout(["yolo", "medsam2", "test"].map((f) => ({ label: FAMILY[f].label, color: FAMILY[f].color })), L, W - 8)
+      .forEach((row, i) => legendRow(svg, L, 12 + i * 16, row));
     const vals = rows.map((r) => ({ r, v: m.get(r) })).filter((d) => d.v != null);
     const allT = S.records.map((r) => m.get(r)).filter((v) => v != null).map(tr.f);
     if (!allT.length) return;
@@ -801,7 +837,7 @@
         base -= h;
       });
     });
-    txt(svg, L + (W - L) / 2, H - 6, `${m.l}${S.histLog ? " (log)" : ""}`, { class: "db-axis-title", "text-anchor": "middle" });
+    axisNames(svg, { L, R: 8, T, B, W, H }, `${m.l}${S.histLog ? " (log scale)" : ""}`, "Number of patients");
 
     // current range + brush
     const rng = S.filters.range && S.filters.range.m === S.histMetric ? S.filters.range : null;
@@ -838,7 +874,7 @@
       const b = bins[i];
       showTip(`<div class="tt-title">${fmtM(m, tr.inv(lo + i * bw))} – ${fmtM(m, tr.inv(lo + (i + 1) * bw))}</div>` +
         ["yolo", "medsam2", "test"].map((f) => tipRow(FAMILY[f].color, FAMILY[f].label, b[f])).join("") +
-        tipRow(INK.muted, "Total", b.n), e);
+        tipRow(INK.muted, "All patients", b.n), e);
     });
     overlay.addEventListener("mouseleave", hideTip);
     overlay.addEventListener("pointerup", (e) => {
@@ -861,19 +897,21 @@
     const rows = filtered("pool");
     const W = widthOf(box);
     const rowH = 30;
-    const T = 26;
-    const H = T + S.pools.length * rowH + 6;
-    const svg = svgRoot(box, W, H, "Label share of whole tumour by pool");
     const L = 110;
-    const R = 10;
+    const R = 14;
+    const keys = legendLayout(S.labels.map((l) => ({ label: labelName(l.name), color: l.color })), L, W - R);
+    const T = 12 + keys.length * 18;
+    const B = 44;
+    const H = T + S.pools.length * rowH + B;
+    const svg = svgRoot(box, W, H, "What the tumour is made of, by pool");
     const x = scale(0, 1, L, W - R);
-    // legend
-    let lx = L;
-    for (const l of S.labels) {
-      el("rect", { x: lx, y: 4, width: 10, height: 10, rx: 2, fill: l.color }, svg);
-      txt(svg, lx + 14, 13, l.name, { class: "db-tick" });
-      lx += 62;
+    keys.forEach((row, i) => legendRow(svg, L, 14 + i * 18, row));
+    const yEnd = T + S.pools.length * rowH;
+    for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+      el("line", { x1: x(t), x2: x(t), y1: yEnd, y2: yEnd + 4, stroke: INK.base }, svg);
+      txt(svg, x(t), yEnd + 16, `${t * 100}%`, { class: "db-tick", "text-anchor": "middle" });
     }
+    axisNames(svg, { L, R, T, B, W, H }, "Share of the whole tumour (average)", "Pool");
     S.pools.forEach((p, i) => {
       const rs = rows.filter((r) => r.pool === p.key && r.ml.WT > 0);
       const y0 = T + i * rowH;
@@ -891,8 +929,8 @@
           ? { d: roundRight(xa, y0 + 5, w, rowH - 10), fill: l.color }
           : { x: xa, y: y0 + 5, width: w, height: rowH - 10, fill: l.color }, g);
         if (s >= 0.09) txt(g, xa + w / 2, y0 + rowH / 2, pct(s), { class: "db-inbar", "text-anchor": "middle", "dominant-baseline": "middle" });
-        hover(g, () => `<div class="tt-title">${esc(p.key)} — ${l.name}</div>` +
-          tipRow(l.color, "Mean share of WT", pct(s)) + tipRow(INK.muted, "Patients", rs.length));
+        hover(g, () => `<div class="tt-title">${esc(p.key)} — ${esc(labelName(l.name))}</div>` +
+          tipRow(l.color, "Average share of the tumour", pct(s)) + tipRow(INK.muted, "Patients", rs.length));
         acc += s;
       });
     });
@@ -900,13 +938,13 @@
 
   function renderLabelPresence() {
     const rows = filtered("pool");
-    let html = `<table class="db-presence"><thead><tr><th></th>${S.labels.map((l) => `<th><i class="chip-dot sq" style="background:${l.color}"></i>${l.name}</th>`).join("")}</tr></thead><tbody>`;
+    let html = `<table class="db-presence"><thead><tr><th>Pool</th>${S.labels.map((l) => `<th><i class="chip-dot sq" style="background:${l.color}"></i>${esc(labelName(l.name))}</th>`).join("")}</tr></thead><tbody>`;
     for (const p of S.pools) {
       const rs = rows.filter((r) => r.pool === p.key);
       html += `<tr><th>${esc(p.key)}</th>`;
       for (const l of S.labels) {
         const s = rs.length ? rs.filter((r) => r.present.includes(l.name)).length / rs.length : null;
-        html += `<td title="${esc(p.key)}: ${s == null ? "no patients" : `${pct(s)} have ${l.name}`}"><div class="pres-bar"><span style="width:${(s || 0) * 100}%;background:${l.color}"></span></div><b>${pct(s)}</b></td>`;
+        html += `<td title="${esc(p.key)}: ${s == null ? "no patients" : `${pct(s)} of patients have a ${esc(LABEL_WORDS[l.name] || l.name)} part`}"><div class="pres-bar"><span style="width:${(s || 0) * 100}%;background:${l.color}"></span></div><b>${pct(s)}</b></td>`;
       }
       html += "</tr>";
     }
@@ -957,9 +995,7 @@
       el("line", { x1: xx, x2: xx, y1: T, y2: H - B, class: "db-gridline" }, svg);
       txt(svg, xx, H - B + 16, fmtM(mx, t), { class: "db-tick", "text-anchor": "middle" });
     }
-    txt(svg, L + (W - L - R) / 2, H - 8, `${mx.l}${S.scXLog ? " (log)" : ""}`, { class: "db-axis-title", "text-anchor": "middle" });
-    txt(svg, 14, T + (H - B - T) / 2, `${my.l}${S.scYLog ? " (log)" : ""}`,
-      { class: "db-axis-title", "text-anchor": "middle", transform: `rotate(-90 14 ${T + (H - B - T) / 2})` });
+    axisNames(svg, { L, R, T, B, W, H }, `${mx.l}${S.scXLog ? " (log scale)" : ""}`, `${my.l}${S.scYLog ? " (log scale)" : ""}`);
 
     // current selection box (only drawn when it is on these axes)
     const sel = S.filters.sel;
@@ -988,7 +1024,7 @@
       hover(dot, () => recTip(p.r, tipRow(INK.neutral, mx.l, fmtM(mx, p.a)) + tipRow(INK.neutral, my.l, fmtM(my, p.b))));
       dot.addEventListener("click", () => openPatient(p.r.id));
     }
-    if (missing) txt(svg, W - R, T + 10, `${missing} without a value not shown`, { class: "db-tick dim", "text-anchor": "end" });
+    if (missing) txt(svg, W - R, T + 10, `${missing} patients have no value here and are not shown`, { class: "db-tick dim", "text-anchor": "end" });
 
     const brush = el("rect", { fill: INK.text, "fill-opacity": 0.1, stroke: INK.text, visibility: "hidden" }, svg);
     const toP = (e) => {
@@ -1042,9 +1078,9 @@
     $("dbScatterLegend").innerHTML =
       ["yolo", "medsam2", "test"].map((f) =>
         `<span class="db-legend-item"><i class="chip-dot" style="background:${FAMILY[f].color}"></i>${FAMILY[f].label}</span>`).join("") +
-      `<span class="db-legend-item"><i class="chip-dot" style="background:${INK.muted}"></i>train</span>` +
-      `<span class="db-legend-item"><i class="chip-dot ring" style="border-color:${INK.muted}"></i>val</span>` +
-      `<span class="db-legend-item dim">${pts.length.toLocaleString()} shown · drag to select · double-click to clear</span>`;
+      `<span class="db-legend-item"><i class="chip-dot" style="background:${INK.muted}"></i>filled = train</span>` +
+      `<span class="db-legend-item"><i class="chip-dot ring" style="border-color:${INK.muted}"></i>ring = val</span>` +
+      `<span class="db-legend-item dim">${pts.length.toLocaleString()} patients shown · drag a box to select · double-click to undo</span>`;
   }
 
   const NBIN = 12;
@@ -1056,21 +1092,22 @@
     if (plane === "coronal") return [c[0], c[2]];
     return [1 - c[1], c[2]];                            // sagittal: anterior on the left
   }
+  // Ends of each axis + axis names, in the patient's terms (radiological: patient's right on the left).
   const PLANE_AXES = {
-    axial: { l: "R", r: "L", b: "posterior", t: "anterior" },
-    coronal: { l: "R", r: "L", b: "inferior", t: "superior" },
-    sagittal: { l: "anterior", r: "posterior", b: "inferior", t: "superior" },
+    axial: { l: "right", r: "left", b: "back", t: "front", x: "Side to side (patient's right → left)", y: "Back → front" },
+    coronal: { l: "right", r: "left", b: "bottom", t: "top", x: "Side to side (patient's right → left)", y: "Bottom → top" },
+    sagittal: { l: "front", r: "back", b: "bottom", t: "top", x: "Front → back", y: "Bottom → top" },
   };
 
   function renderHeatmap() {
     const box = $("dbHeatmap");
     const rows = filtered("cell");
     const W = widthOf(box);
-    const side = Math.min(W - 70, 330);
-    const H = side + 60;
-    const svg = svgRoot(box, W, H, `Tumour centre density, ${S.plane} plane`);
-    const x0 = (W - side) / 2;
-    const y0 = 20;
+    const side = Math.min(W - 110, 330);
+    const H = side + 96;
+    const svg = svgRoot(box, W, H, `Where tumour centres are, ${S.plane} view`);
+    const x0 = Math.max(64, (W - side) / 2);
+    const y0 = 12;
     const cell = side / NBIN;
     const grid = Array.from({ length: NBIN }, () => new Array(NBIN).fill(0));
     for (const r of rows) {
@@ -1096,7 +1133,7 @@
                                   fill: n ? color(n) : "transparent", stroke: active ? "#fff" : "none",
                                   "stroke-width": 2, class: n ? "db-clickable" : "" }, svg);
         if (!n) continue;
-        hover(rect, () => `<div class="tt-title">${n} patient${n > 1 ? "s" : ""}</div><span class="tt-muted">cell ${i + 1},${j + 1} of ${NBIN}×${NBIN} · click to filter</span>`);
+        hover(rect, () => `<div class="tt-title">${n} patient${n > 1 ? "s" : ""}</div><span class="tt-muted">tumour centre in this square · click to show only them</span>`);
         rect.addEventListener("click", () => {
           S.filters.cell = active ? null : { plane: S.plane, i, j };
           update();
@@ -1104,12 +1141,16 @@
       }
     }
     const ax = PLANE_AXES[S.plane];
-    txt(svg, x0 - 6, y0 + side / 2, ax.l, { class: "db-lbl", "text-anchor": "end", "dominant-baseline": "middle" });
-    txt(svg, x0 + side + 6, y0 + side / 2, ax.r, { class: "db-lbl", "dominant-baseline": "middle" });
-    txt(svg, x0 + side / 2, y0 - 6, ax.t, { class: "db-tick", "text-anchor": "middle" });
-    txt(svg, x0 + side / 2, y0 + side + 14, ax.b, { class: "db-tick", "text-anchor": "middle" });
+    // axis ends: x under the corners, y beside the corners
+    txt(svg, x0, y0 + side + 14, ax.l, { class: "db-tick" });
+    txt(svg, x0 + side, y0 + side + 14, ax.r, { class: "db-tick", "text-anchor": "end" });
+    txt(svg, x0 - 6, y0 + 8, ax.t, { class: "db-tick", "text-anchor": "end" });
+    txt(svg, x0 - 6, y0 + side, ax.b, { class: "db-tick", "text-anchor": "end" });
+    txt(svg, x0 + side / 2, y0 + side + 30, ax.x, { class: "db-axis-title", "text-anchor": "middle" });
+    const cy = y0 + side / 2;
+    txt(svg, x0 - 44, cy, ax.y, { class: "db-axis-title", "text-anchor": "middle", transform: `rotate(-90 ${x0 - 44} ${cy})` });
     // colour key
-    const ky = y0 + side + 30;
+    const ky = y0 + side + 52;
     const kw = Math.min(160, side * 0.6);
     const kx = x0 + (side - kw) / 2;
     for (let k = 0; k < 20; k++) {
@@ -1117,17 +1158,18 @@
     }
     txt(svg, kx - 6, ky + 7, "1", { class: "db-tick", "text-anchor": "end" });
     txt(svg, kx + kw + 6, ky + 7, `${max} patients`, { class: "db-tick" });
+    txt(svg, x0 + side / 2, ky + 24, "Colour = number of patients in the square", { class: "db-tick", "text-anchor": "middle" });
   }
 
   function renderZProfile(rows) {
     const box = $("dbZProfile");
     const W = widthOf(box);
     const H = 250;
-    const L = 52;
+    const L = 56;
     const B = 38;
     const T = 12;
     const R = 10;
-    const svg = svgRoot(box, W, H, "Mean tumour area per axial slice by family");
+    const svg = svgRoot(box, W, H, "Average tumour size on each slice, by model's pools");
     const fams = ["yolo", "medsam2", "test"];
     const n = Math.max(0, ...rows.map((r) => r.z_profile_mm2.length));
     const series = {};
@@ -1141,7 +1183,7 @@
     const fs = Object.keys(series);
     $("dbZLegend").innerHTML = fs.map((f) =>
       `<span class="db-legend-item"><i class="chip-line${f === "medsam2" ? " dashed" : f === "test" ? " dotted" : ""}" style="border-color:${FAMILY[f].color}"></i>${FAMILY[f].label} (${series[f].n})</span>`).join("");
-    if (!fs.length) { txt(svg, W / 2, H / 2, "No patients in filter", { class: "db-empty", "text-anchor": "middle" }); return; }
+    if (!fs.length) { txt(svg, W / 2, H / 2, "No patients match your filters", { class: "db-empty", "text-anchor": "middle" }); return; }
     const maxV = Math.max(1, ...fs.flatMap((f) => series[f].mean));
     const x = scale(0, n - 1, L, W - R);
     const y = scale(0, maxV * 1.05, H - B, T);
@@ -1153,9 +1195,7 @@
       txt(svg, x(t), H - B + 16, t, { class: "db-tick", "text-anchor": "middle" });
     }
     el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, stroke: INK.base }, svg);
-    txt(svg, L + (W - L - R) / 2, H - 6, "axial slice (inferior → superior)", { class: "db-axis-title", "text-anchor": "middle" });
-    txt(svg, 14, T + (H - B - T) / 2, "mean area (mm²)",
-      { class: "db-axis-title", "text-anchor": "middle", transform: `rotate(-90 14 ${T + (H - B - T) / 2})` });
+    axisNames(svg, { L, R, T, B, W, H }, "Axial slice number (bottom of the head → top)", "Average tumour area (mm²)");
     const dash = { yolo: null, medsam2: "7 4", test: "2 3" };
     for (const f of fs) {
       const d = series[f].mean.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
@@ -1176,7 +1216,7 @@
         marks[k].setAttribute("cy", y(series[f].mean[i]));
         marks[k].setAttribute("visibility", "visible");
       });
-      showTip(`<div class="tt-title">Slice ${i}</div>` +
+      showTip(`<div class="tt-title">Slice ${i} — average tumour area</div>` +
         fs.map((f) => tipRow(FAMILY[f].color, FAMILY[f].label, `${fmt(series[f].mean[i])} mm²`)).join(""), e);
     });
     ov.addEventListener("mouseleave", () => {
@@ -1187,16 +1227,16 @@
   }
 
   // ------------------------------------------------------------------ table
-  const SHORT = { wt: "WT", tc: "TC", et: "ET", netc: "NETC", snfh: "SNFH", rc: "RC" };
+  const SHORT = { wt: "Whole", tc: "Core", et: "Enhancing", netc: "Dead core", snfh: "Swelling", rc: "Cavity" };
   const COLS = [
     { k: "id", l: "Patient", get: (r) => r.id, str: true },
     { k: "pool", l: "Pool", get: (r) => r.pool || "", str: true },
     ...Object.keys(SHORT).map((k) => ({ k, l: SHORT[k], get: M[k].get })),
-    { k: "pct", l: "% brain", get: M.pct.get },
+    { k: "pct", l: "% of brain", get: M.pct.get },
     { k: "slices", l: "Slices", get: M.slices.get },
-    { k: "ncc", l: "Parts", get: M.ncc.get },
+    { k: "ncc", l: "Pieces", get: M.ncc.get },
     { k: "side", l: "Side", get: (r) => sideOf(r) || "", str: true },
-    { k: "labels", l: "Labels", get: (r) => r.present.join(" "), str: true },
+    { k: "labels", l: "Parts found", get: (r) => r.present.join(" "), str: true },
   ];
 
   function sortRows(rows) {
@@ -1221,7 +1261,7 @@
     const page = S.tableRows.slice(start, start + S.pageSize);
     const head = COLS.map((c) => {
       const on = S.sort.key === c.k;
-      const label = SHORT[c.k] ? `${SHORT[c.k]} <span class="dim">mL</span>` : c.l;
+      const label = SHORT[c.k] ? `<span title="${esc(M[c.k].l)}">${SHORT[c.k]} <span class="dim">mL</span></span>` : c.l;
       return `<th data-k="${c.k}" class="${c.str ? "" : "num"}${on ? " sorted" : ""}" aria-sort="${on ? (S.sort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${label}${on ? (S.sort.dir > 0 ? " ▲" : " ▼") : ""}</th>`;
     }).join("");
     const body = page.map((r) => {
@@ -1234,9 +1274,9 @@
           return `<td>${dot}${esc(r.pool || "other")}</td>`;
         }
         if (c.k === "labels") {
-          return `<td>${S.labels.map((l) => `<i class="lab-sq${r.present.includes(l.name) ? "" : " off"}" style="--c:${l.color}" title="${l.name}${r.present.includes(l.name) ? " present" : " absent"}"></i>`).join("")}</td>`;
+          return `<td>${S.labels.map((l) => `<i class="lab-sq${r.present.includes(l.name) ? "" : " off"}" style="--c:${l.color}" title="${esc(labelName(l.name))}: ${r.present.includes(l.name) ? "yes" : "no"}"></i>`).join("")}</td>`;
         }
-        if (c.k === "side") return `<td>${esc(sideOf(r) || "–")}</td>`;
+        if (c.k === "side") return `<td>${esc(SIDE_WORDS[sideOf(r)] || "–")}</td>`;
         const v = c.get(r);
         return `<td class="num">${c.k === "pct" ? `${fmt(v)}%` : fmt(v)}</td>`;
       }).join("");
@@ -1244,7 +1284,7 @@
     }).join("");
     $("dbTableWrap").innerHTML = rows.length
       ? `<table class="db-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
-      : `<p class="db-empty-msg">No patients match these filters. <button type="button" id="dbEmptyReset">Reset filters</button></p>`;
+      : `<p class="db-empty-msg">No patients match your filters. <button type="button" id="dbEmptyReset">Clear the filters</button></p>`;
     $("dbPager").innerHTML = rows.length
       ? `<span class="dim">${(start + 1).toLocaleString()}–${Math.min(start + S.pageSize, S.tableRows.length).toLocaleString()} of ${S.tableRows.length.toLocaleString()}</span>
          <button type="button" data-pg="-1" ${S.page ? "" : "disabled"} aria-label="Previous page">‹</button>
@@ -1287,7 +1327,7 @@
     const z = S.drawerZ != null ? Math.max(0, Math.min(depth - 1, S.drawerZ)) : r.peak_z;
     const pool = S.poolMeta[r.pool];
     $("dbDrawerTitle").textContent = r.id;
-    $("dbDrawerSub").textContent = `${r.pool || "other"}${pool ? ` · ${pool.use}` : ""} · subject ${r.subject}, timepoint ${r.timepoint}`;
+    $("dbDrawerSub").textContent = `Pool ${r.pool || "other"}${pool ? ` — ${pool.use}` : ""} · person ${r.subject}, scan ${r.timepoint}`;
     const pos = S.tableRows.findIndex((x) => x.id === r.id);
     $("dbPrev").disabled = pos <= 0;
     $("dbNext").disabled = pos < 0 || pos >= S.tableRows.length - 1;
@@ -1303,18 +1343,18 @@
     const labelBars = S.labels.map((l) => {
       const v = r.ml[l.name];
       const s = r.ml.WT ? v / r.ml.WT : 0;
-      return `<div class="dr-lab"><span><i class="chip-dot sq" style="background:${l.color}"></i>${l.name}</span>
+      return `<div class="dr-lab"><span title="${esc(labelName(l.name))}"><i class="chip-dot sq" style="background:${l.color}"></i>${esc(labelName(l.name))}</span>
         <div class="pres-bar"><span style="width:${s * 100}%;background:${l.color}"></span></div><b>${fmt(v)} mL</b></div>`;
     }).join("");
     const kv = [
-      ["Whole tumour", `${fmt(r.ml.WT)} mL`, `larger than ${pct(rank((x) => x.ml.WT, inPool))} of ${r.pool} · ${pct(rank((x) => x.ml.WT, S.records))} of all`],
-      ["Tumour core", `${fmt(r.ml.TC)} mL`],
-      ["Brain", `${fmt(r.brain_ml)} mL`, `tumour = ${fmt(r.wt_pct_brain)}% of brain`],
-      ["Tumour slices", `${r.n_slices}`, `largest slice ${fmt(r.peak_area_mm2)} mm² at z=${r.peak_z}`],
-      ["Connected parts", `${r.n_cc}`, r.largest_cc_frac != null ? `largest part holds ${pct(r.largest_cc_frac)}` : ""],
-      ["Extent", r.extent_mm ? `${r.extent_mm.map((v) => fmt(v)).join(" × ")} mm` : "–", "left–right × front–back × up–down"],
-      ["Side", sideOf(r) || "–", r.left_frac != null ? `${pct(r.left_frac)} of tumour on the left` : ""],
-      ["Volume", `${r.shape.join(" × ")}`, `${r.spacing_mm.join(" × ")} mm voxels · ${r.axcodes}`],
+      ["Whole tumour", `${fmt(r.ml.WT)} mL`, `bigger than ${pct(rank((x) => x.ml.WT, inPool))} of ${r.pool} · ${pct(rank((x) => x.ml.WT, S.records))} of everyone`],
+      ["Tumour core", `${fmt(r.ml.TC)} mL`, "dead core + enhancing + cavity"],
+      ["Brain", `${fmt(r.brain_ml)} mL`, `the tumour is ${fmt(r.wt_pct_brain)}% of the brain`],
+      ["Slices with tumour", `${r.n_slices}`, `biggest: ${fmt(r.peak_area_mm2)} mm² on slice ${r.peak_z}`],
+      ["Tumour pieces", `${r.n_cc}`, r.largest_cc_frac != null ? `the biggest piece holds ${pct(r.largest_cc_frac)}` : ""],
+      ["Size", r.extent_mm ? `${r.extent_mm.map((v) => fmt(v)).join(" × ")} mm` : "–", "width × length × height"],
+      ["Side", SIDE_WORDS[sideOf(r)] || "–", r.left_frac != null ? `${pct(r.left_frac)} of the tumour is on the left` : ""],
+      ["Scan", `${r.shape.join(" × ")}`, `${r.spacing_mm.join(" × ")} mm per voxel · ${r.axcodes}`],
     ].map(([k, v, s]) => `<div class="dr-kv"><span>${k}</span><b>${esc(v)}</b>${s ? `<em>${esc(s)}</em>` : ""}</div>`).join("");
 
     const mods = [...S.imageKinds, { key: "all", label: "All" }];
@@ -1330,23 +1370,23 @@
           <span class="zlabel" id="dbThumbZL">z = ${z}</span>
         </div>
         <div class="dr-btns">
-          <button type="button" id="dbThumbPeak">Largest slice</button>
-          <label class="db-toggle dr-ov" title="Show the segmentation labels on the image (key L)"><input type="checkbox" id="dbOverlay"> Labels</label>
+          <button type="button" id="dbThumbPeak">Biggest tumour slice</button>
+          <label class="db-toggle dr-ov" title="Colour the tumour parts on the image (key L)"><input type="checkbox" id="dbOverlay"> Show tumour parts</label>
         </div>
         <p class="db-card-sub" id="dbImagesCap"></p>
       </div>
-      <h4>Tumour along the head</h4>
+      <h4>Tumour size on each slice</h4>
       <div id="dbDrawerProfile"></div>
-      <h4>Labels</h4>
+      <h4>Tumour parts</h4>
       <div class="dr-labs">${labelBars}</div>
       <h4>Measurements</h4>
       <div class="dr-kvs">${kv}</div>
-      <h4>Other scans of this subject</h4>
+      <h4>Other scans of this person</h4>
       ${others.length
         ? `<div class="dr-others">${others.map((o) => `<button type="button" class="dr-other" data-id="${esc(o.id)}">
             <i class="chip-dot${roleOf(o) === "val" ? " ring" : ""}" style="${roleOf(o) === "val" ? "border-color" : "background"}:${colorOf(o)}"></i>
             <span class="mono">${esc(o.id)}</span><span class="dim">${esc(o.pool || "other")}</span><b>${fmt(o.ml.WT)} mL</b></button>`).join("")}</div>`
-        : `<p class="db-card-sub">Only one scan of this subject in the dataset.</p>`}
+        : `<p class="db-card-sub">This person has only one scan.</p>`}
     `;
     const setZ = (nz) => {
       S.drawerZ = nz;
@@ -1369,7 +1409,7 @@
   }
 
   // The drawer's slice image(s): one modality / T1C - T1, or all five side by side.
-  const IMAGE_NOTES = { sub: "T1C minus T1 (negative values set to 0): where the contrast agent enhanced." };
+  const IMAGE_NOTES = { sub: "T1C minus T1: bright where the contrast dye made the tissue light up." };
   function drawImages() {
     const r = S.open ? S.byId[S.open] : null;
     if (!r || !$("dbImages")) return;
@@ -1394,9 +1434,9 @@
         src="/thumb.png?id=${r.idx}&z=${z}&mod=${k}&ov=${S.overlay ? 1 : 0}">${all ? `<figcaption>${esc(label(k))}</figcaption>` : ""}</figure>`
     ).join("");
     $("dbImagesCap").textContent = [
-      all ? "All images at the same slice." : `${label(S.mod)}.`,
+      all ? "All five images of the same slice." : `${label(S.mod)}.`,
       !all && IMAGE_NOTES[S.mod] ? IMAGE_NOTES[S.mod] : "",
-      "Radiological view (patient's right on the left).",
+      "Seen from below, like a hospital scan: the patient's right is on the left.",
     ].filter(Boolean).join(" ");
   }
   function setImage(k) {
@@ -1413,30 +1453,38 @@
   function drawProfile(r, z, setZ) {
     const box = $("dbDrawerProfile");
     const W = Math.max(260, box.clientWidth || 340);
-    const H = 90;
-    const svg = svgRoot(box, W, H, "Tumour area per slice for this patient");
+    const H = 150;
+    const svg = svgRoot(box, W, H, "Tumour area on each slice for this patient");
     const prof = r.z_profile_mm2;
     const maxV = Math.max(1, ...prof);
-    const x = scale(0, prof.length - 1, 4, W - 4);
-    const y = scale(0, maxV, H - 16, 6);
+    const L = 50;
+    const B = 50;
+    const x = scale(0, prof.length - 1, L, W - 6);
+    const y = scale(0, maxV, H - B, 8);
+    for (const t of niceTicks(0, maxV, 3)) {
+      el("line", { x1: L, x2: W - 6, y1: y(t), y2: y(t), class: "db-gridline" }, svg);
+      txt(svg, L - 5, y(t), fmt(t), { class: "db-tick", "text-anchor": "end", "dominant-baseline": "middle" });
+    }
+    for (const t of niceTicks(0, prof.length - 1, 5)) txt(svg, x(t), H - B + 14, t, { class: "db-tick", "text-anchor": "middle" });
+    axisNames(svg, { L, R: 6, T: 8, B, W, H }, "Slice (bottom of the head → top)", "Area (mm²)");
     const area = `M${x(0)},${y(0)}` + prof.map((v, i) => `L${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("") + `L${x(prof.length - 1)},${y(0)}Z`;
     const c = colorOf(r);
     el("path", { d: area, fill: c, "fill-opacity": 0.12 }, svg);
     el("path", { d: prof.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(""), fill: "none", stroke: c, "stroke-width": 2 }, svg);
     const iz = profileToZ(r, z);
-    el("line", { x1: x(iz), x2: x(iz), y1: 4, y2: H - 16, stroke: INK.text, "stroke-dasharray": "3 3" }, svg);
+    el("line", { x1: x(iz), x2: x(iz), y1: 8, y2: H - B, stroke: INK.text, "stroke-dasharray": "3 3" }, svg);
     el("circle", { cx: x(iz), cy: y(prof[iz] || 0), r: 4, fill: c, stroke: INK.surface, "stroke-width": 2 }, svg);
-    txt(svg, 4, H - 3, "inferior", { class: "db-tick" });
-    txt(svg, W - 4, H - 3, "superior", { class: "db-tick", "text-anchor": "end" });
-    txt(svg, W / 2, H - 3, `${fmt(prof[iz] || 0)} mm² at z=${z}`, { class: "db-tick", "text-anchor": "middle" });
-    const ov = el("rect", { x: 0, y: 0, width: W, height: H, fill: "transparent", class: "db-clickable" }, svg);
+    const right = x(iz) > W * 0.6;
+    txt(svg, x(iz) + (right ? -5 : 5), 18, `slice ${z}: ${fmt(prof[iz] || 0)} mm²`,
+      { class: "db-tick", "text-anchor": right ? "end" : "start" });
+    const ov = el("rect", { x: L, y: 0, width: W - L, height: H - B, fill: "transparent", class: "db-clickable" }, svg);
     const idxAt = (e) => {
       const b = svg.getBoundingClientRect();
       return Math.max(0, Math.min(prof.length - 1, Math.round(x.invert(((e.clientX - b.left) / b.width) * W))));
     };
     ov.addEventListener("mousemove", (e) => {
       const i = idxAt(e);
-      showTip(`<div class="tt-title">z = ${profileToZ(r, i)}</div>${fmt(prof[i])} mm² · click to view`, e);
+      showTip(`<div class="tt-title">Slice ${profileToZ(r, i)}</div>Tumour area ${fmt(prof[i])} mm² · click to show this slice`, e);
     });
     ov.addEventListener("mouseleave", hideTip);
     ov.addEventListener("click", (e) => setZ(profileToZ(r, idxAt(e))));
@@ -1564,7 +1612,7 @@
     }
   });
   $("dbRecompute").addEventListener("click", async () => {
-    if (!confirm("Recompute statistics for every patient from the NIfTI files? This takes a few minutes.")) return;
+    if (!confirm("Measure every patient again from the scan files? This takes a few minutes.")) return;
     S.loaded = false;
     await fetch("/api/dashboard/recompute", { method: "POST" });
     poll();
