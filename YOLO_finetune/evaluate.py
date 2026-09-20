@@ -28,36 +28,64 @@ def thresholds_of(cfg):
     return sorted(set(e["sweep"]) | {e["conf"]})
 
 
-def _predict_patient(model, patient, cfg):
+def iter_slices(model, vols, zs, cfg, conf):
+    """Predict the given slices in batches; yield (z, expert mask, instance masks, scores)."""
     d, e = cfg["data"], cfg["evaluate"]
-    thresholds = thresholds_of(cfg)
-    vols = load_volumes(patient)
-    zs = brain_slices(vols["FLAIR"], d["min_fg_voxels"])
     seg = vols["SEG"] > 0
-    sweep = np.zeros((len(thresholds), 3), dtype=np.int64)  # inter, pred, gt per threshold
-    per_slice = {"z": zs, "gt": [], "pred": [], "inter": [], "conf": []}
-    k_conf = thresholds.index(e["conf"])
     for i in range(0, len(zs), e["batch"]):
         batch_z = zs[i:i + e["batch"]]
         # PIL images, not numpy: Ultralytics treats numpy input as BGR and would swap
         # the T1C and FLAIR channels relative to the PNGs the model trained on.
         imgs = [Image.fromarray(rgb_slice(vols, z, d["min_fg_voxels"])) for z in batch_z]
-        results = model.predict(imgs, conf=min(thresholds), imgsz=cfg["train"]["imgsz"],
+        results = model.predict(imgs, conf=conf, imgsz=cfg["train"]["imgsz"],
                                 retina_masks=True, verbose=False, device=cfg["train"]["device"])
         for z, r in zip(batch_z, results):
             gt = seg[:, :, z]
             masks = r.masks.data.cpu().numpy().astype(bool) if r.masks is not None else np.zeros((0, *gt.shape), bool)
             confs = r.boxes.conf.cpu().numpy() if r.boxes is not None else np.zeros(0)
-            for k, t in enumerate(thresholds):
-                keep = confs >= t
-                pred = masks[keep].any(axis=0) if keep.any() else np.zeros_like(gt)
-                inter = int(np.logical_and(pred, gt).sum())
-                sweep[k] += (inter, int(pred.sum()), int(gt.sum()))
-                if k == k_conf:
-                    per_slice["gt"].append(int(gt.sum()))
-                    per_slice["pred"].append(int(pred.sum()))
-                    per_slice["inter"].append(inter)
-            per_slice["conf"].append(round(float(confs.max()), 3) if confs.size else 0.0)
+            yield z, gt, masks, confs
+
+
+def patient_profile(model, patient, cfg, conf):
+    """One patient, slice by slice at one threshold: Dice plus expert / predicted pixels."""
+    vols = load_volumes(patient)
+    zs = brain_slices(vols["FLAIR"], cfg["data"]["min_fg_voxels"])
+    out = {"id": patient["id"], "conf": conf, "z": zs, "dice": [], "gt": [], "pred": [],
+           "inter": [], "score": []}
+    for _, gt, masks, confs in iter_slices(model, vols, zs, cfg, conf):
+        pred = masks.any(axis=0) if len(masks) else np.zeros_like(gt)
+        inter = int(np.logical_and(pred, gt).sum())
+        out["gt"].append(int(gt.sum()))
+        out["pred"].append(int(pred.sum()))
+        out["inter"].append(inter)
+        out["dice"].append(round(_dice(inter, int(pred.sum()), int(gt.sum())), 4))
+        out["score"].append(round(float(confs.max()), 3) if confs.size else 0.0)
+    tot_i, tot_p, tot_g = sum(out["inter"]), sum(out["pred"]), sum(out["gt"])
+    out["dice3d"] = round(_dice(tot_i, tot_p, tot_g), 4)
+    out["gt_total"] = tot_g
+    out["pred_total"] = tot_p
+    return out
+
+
+def _predict_patient(model, patient, cfg):
+    d, e = cfg["data"], cfg["evaluate"]
+    thresholds = thresholds_of(cfg)
+    vols = load_volumes(patient)
+    zs = brain_slices(vols["FLAIR"], d["min_fg_voxels"])
+    sweep = np.zeros((len(thresholds), 3), dtype=np.int64)  # inter, pred, gt per threshold
+    per_slice = {"z": zs, "gt": [], "pred": [], "inter": [], "conf": []}
+    k_conf = thresholds.index(e["conf"])
+    for _z, gt, masks, confs in iter_slices(model, vols, zs, cfg, min(thresholds)):
+        for k, t in enumerate(thresholds):
+            keep = confs >= t
+            pred = masks[keep].any(axis=0) if keep.any() else np.zeros_like(gt)
+            inter = int(np.logical_and(pred, gt).sum())
+            sweep[k] += (inter, int(pred.sum()), int(gt.sum()))
+            if k == k_conf:
+                per_slice["gt"].append(int(gt.sum()))
+                per_slice["pred"].append(int(pred.sum()))
+                per_slice["inter"].append(inter)
+        per_slice["conf"].append(round(float(confs.max()), 3) if confs.size else 0.0)
     return {"id": patient["id"], "sweep": sweep.tolist(), "slices": per_slice}
 
 

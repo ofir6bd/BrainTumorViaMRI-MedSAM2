@@ -15,6 +15,7 @@
     ov: null, runs: [], active: null, sel: null, run: null, runCache: {}, cmp: new Set(),
     group: "loss", split: "test", evalData: {}, patSort: { k: "dice", dir: 1 }, patQ: "", patRange: null,
     vPatient: null, vZ: null, vConf: null, logRun: null, logOffset: 0, logLines: [],
+    vModel: null, vSplit: null, vSlices: null, poolPatients: {}, profile: null,
   };
 
   const api = async (url, opt) => {
@@ -44,6 +45,8 @@
     if (S.split !== "test") q.set("split", S.split);
     if (S.group !== "loss") q.set("group", S.group);
     if (S.cmp.size) q.set("cmp", [...S.cmp].join(","));
+    if (S.vModel && S.vModel !== S.sel) q.set("model", S.vModel);
+    if (S.vSplit && S.vSplit !== S.split) q.set("pool", S.vSplit);
     if (S.vPatient) q.set("patient", S.vPatient);
     if (S.vZ != null) q.set("z", S.vZ);
     if (S.vConf != null) q.set("conf", S.vConf);
@@ -55,6 +58,8 @@
     S.split = q.get("split") === "val" ? "val" : "test";
     S.group = ["loss", "mask", "box", "lr"].includes(q.get("group")) ? q.get("group") : "loss";
     S.cmp = new Set((q.get("cmp") || "").split(",").filter(Boolean));
+    S.vModel = q.get("model") || null;
+    S.vSplit = q.get("pool") === "val" ? "val" : q.get("pool") === "test" ? "test" : null;
     S.vPatient = q.get("patient") || null;
     S.vZ = q.get("z") != null ? +q.get("z") : null;
     S.vConf = q.get("conf") != null ? +q.get("conf") : null;
@@ -397,7 +402,7 @@
       $("evalKpis").innerHTML = `<p class="empty">${msg}</p>`;
       ["sweepChart", "diceHist", "diceScatter", "sizeBars", "confusion", "patTable", "sweepNote"].forEach((id) => { $(id).innerHTML = ""; });
       $("patCount").textContent = "";
-      renderViewer(null);
+      renderViewer();
     };
     if (!sum) return clear(LIVE.includes(r.state) ? "The final check runs after training." : "This run has no final check yet.");
     const data = await evalData(S.split);
@@ -450,7 +455,7 @@
 
     S.evalRows = rows;
     renderPatTable(rows);
-    renderViewer(data);
+    renderViewer();
   }
 
   const PCOLS = [["id", "Patient", true], ["dice", "3D Dice"], ["gt_ml", "Real tumour (mL)"], ["pred_ml", "YOLO drew (mL)"],
@@ -518,102 +523,161 @@
   });
 
   // ------------------------------------------------------------------ prediction viewer
-  let viewerData = null;
-  function renderViewer(data) {
-    viewerData = data;
-    const sel = $("vPatient");
-    const on = !!data && S.run && S.run.has_best;
-    for (const id of ["vPatient", "vZ", "vConf", "vPeak"]) $(id).disabled = !on;
-    if (!on) {
-      sel.innerHTML = "";
-      $("vImg").removeAttribute("src");
-      $("vStatus").textContent = "Shown once the run has finished its final check.";
-      $("vStats").innerHTML = "";
-      $("vProfile").innerHTML = "";
-      return;
-    }
-    const ids = data.patients.map((p) => p.id).sort();
-    sel.innerHTML = ids.map((id) => `<option>${esc(id)}</option>`).join("");
-    if (!S.vPatient || !ids.includes(S.vPatient)) {
-      // default: the worst patient at the configured threshold — the most instructive one
-      S.vPatient = S.evalRows ? [...S.evalRows].sort((a, b) => a.dice - b.dice)[0].id : ids[0];
-      S.vZ = null;
-    }
-    if (S.vConf == null) S.vConf = S.run.eval[S.split].conf;
-    sel.value = S.vPatient;
-    $("vConf").value = S.vConf;
-    showSlice();
+  /* Pick any finished model, any pool, any patient; "Run this patient" sends every brain
+   * slice through that model and draws Dice (left scale) with the expert and predicted
+   * tumour pixels (right scale). */
+  function modelRuns() {
+    return S.runs.filter((r) => r.has_best);
   }
 
-  function currentPatient() {
-    return viewerData && viewerData.patients.find((p) => p.id === S.vPatient);
+  function renderViewer() {
+    const runs = modelRuns();
+    const on = runs.length > 0;
+    for (const id of ["vModel", "vSplit", "vPatient", "vZ", "vConf", "vPeak", "vRun"]) $(id).disabled = !on;
+    if (!on) {
+      $("vModel").innerHTML = "";
+      $("vPatient").innerHTML = "";
+      $("vImg").removeAttribute("src");
+      $("vStatus").textContent = "Shown once a run has a trained model.";
+      $("vStats").innerHTML = "";
+      $("vProfile").innerHTML = "";
+      $("vRunNote").textContent = "No trained model yet — start a run first.";
+      return;
+    }
+    if (!S.vModel || !runs.some((r) => r.id === S.vModel)) S.vModel = (S.sel && runs.some((r) => r.id === S.sel)) ? S.sel : runs[0].id;
+    if (!S.vSplit) S.vSplit = S.split;
+    if (S.vConf == null) S.vConf = (S.run && S.run.eval && S.run.eval[S.vSplit] ? S.run.eval[S.vSplit].conf : S.ov.config.evaluate.conf);
+    $("vModel").innerHTML = runs.map((r) => {
+      const score = r.test ? ` · test ${r.test.dice3d_mean.toFixed(3)}` : "";
+      return `<option value="${esc(r.id)}" ${r.id === S.vModel ? "selected" : ""}>${esc(r.id)} · ${esc(r.model)}${score}</option>`;
+    }).join("");
+    $("vSplit").value = S.vSplit;
+    $("vConf").value = S.vConf;
+    loadPatientList();
   }
+
+  async function loadPatientList() {
+    const key = S.vSplit;
+    if (!S.poolPatients[key]) {
+      S.poolPatients[key] = api(`${BASE}api/pool_patients?split=${key}`).then((d) => d.patients).catch(() => []);
+    }
+    const ids = await S.poolPatients[key];
+    if (!ids.length) return;
+    if (!S.vPatient || !ids.includes(S.vPatient)) {
+      // start on the worst patient of the current results — the most useful one to look at
+      const worst = S.evalRows && S.split === S.vSplit ? [...S.evalRows].sort((a, b) => a.dice - b.dice)[0] : null;
+      S.vPatient = worst && ids.includes(worst.id) ? worst.id : ids[0];
+      S.vZ = null;
+    }
+    $("vPatient").innerHTML = ids.map((id) => `<option ${id === S.vPatient ? "selected" : ""}>${esc(id)}</option>`).join("");
+    showSlice();
+    drawProfile();
+  }
+
+  const profileKey = () => `${S.vModel}|${S.vSplit}|${S.vPatient}|${S.vConf}`;
 
   let predT = null;
   function showSlice() {
-    const p = currentPatient();
-    if (!p) return;
-    const zs = p.slices.z;
-    if (S.vZ == null || !zs.includes(S.vZ)) {
-      let bi = 0;
-      p.slices.gt.forEach((g, i) => { if (g > p.slices.gt[bi]) bi = i; });
-      S.vZ = zs[bi];
-    }
-    const i = zs.indexOf(S.vZ);
-    $("vZ").min = 0;
-    $("vZ").max = zs.length - 1;
-    $("vZ").value = i;
-    $("vZl").textContent = `z = ${S.vZ}`;
+    if (!S.vModel || !S.vPatient) return;
     $("vConfL").textContent = S.vConf.toFixed(2);
     syncHash();
-    drawProfile(p);
     for (const tr of $("patTable").querySelectorAll("tr[data-id]")) tr.classList.toggle("sel", tr.dataset.id === S.vPatient);
     clearTimeout(predT);
     predT = setTimeout(async () => {
-      const q = `split=${S.split}&patient=${encodeURIComponent(S.vPatient)}&z=${S.vZ}&conf=${S.vConf}`;
+      const q = `split=${S.vSplit}&patient=${encodeURIComponent(S.vPatient)}` +
+        `${S.vZ == null ? "" : `&z=${S.vZ}`}&conf=${S.vConf}`;   // no z yet = server picks the first slice
       $("vStatus").textContent = "Asking YOLO about this slice…";
       const img = $("vImg");
       img.onload = () => { $("vStatus").textContent = ""; };
       img.onerror = () => { $("vStatus").textContent = "This slice could not be drawn."; };
-      img.src = `${BASE}api/runs/${encodeURIComponent(S.sel)}/predict.png?${q}`;
+      img.src = `${BASE}api/runs/${encodeURIComponent(S.vModel)}/predict.png?${q}`;
       img.alt = `${S.vPatient} slice ${S.vZ}: the picture YOLO sees, and its drawing next to the expert answer`;
       try {
-        const st = await api(`${BASE}api/runs/${encodeURIComponent(S.sel)}/predict.json?${q}`);
+        const st = await api(`${BASE}api/runs/${encodeURIComponent(S.vModel)}/predict.json?${q}`);
+        S.vSlices = st.brain_slices;
+        S.vZ = st.z;
+        const i = S.vSlices.indexOf(st.z);
+        $("vZ").min = 0;
+        $("vZ").max = S.vSlices.length - 1;
+        $("vZ").value = i < 0 ? 0 : i;
+        $("vZl").textContent = `z = ${st.z}`;
         $("vStats").innerHTML = [
           kpi("2D Dice on this slice", st.gt || st.pred ? st.dice.toFixed(3) : "–", st.gt || st.pred ? "overlap between the two masks" : "no tumour here, and YOLO drew nothing"),
           kpi("Expert tumour", `${st.gt.toLocaleString()} px`, "pixels marked by the expert"),
           kpi("YOLO drew", `${st.pred.toLocaleString()} px`, `${st.inter.toLocaleString()} px match the expert`),
           kpi("Shapes drawn", st.confs.length, st.confs.length ? `how sure: ${st.confs.join(", ")}` : `nothing was sure enough (needs ${S.vConf})`),
         ].join("");
+        drawProfile();
+        syncHash();
       } catch (err) {
         $("vStats").innerHTML = `<p class="err">${esc(err.message)}</p>`;
+        $("vStatus").textContent = "";
       }
     }, 120);
   }
 
-  function drawProfile(p) {
-    const s = p.slices;
-    const pts = s.z.map((z, i) => [z, s.gt[i] || s.pred[i] ? dice(s.inter[i], s.pred[i], s.gt[i]) : null]);
-    const area = s.z.map((z, i) => [z, s.gt[i] / Math.max(1, Math.max(...s.gt))]);
-    Charts.line($("vProfile"), { height: 200, xName: "slice", xLabel: "Axial slice number (bottom of the head → top)",
-      yLabel: "2D Dice / tumour size", yMin: 0, yMax: 1,
-      series: [{ name: "2D Dice on the slice", color: C[S.split], points: pts },
-               { name: "expert tumour size (scaled to 1)", color: "#5a5a78", dash: "4 3", points: area }],
-      markers: [{ x: S.vZ, label: `slice ${S.vZ}` }], onClick: (z) => { S.vZ = z; showSlice(); } });
+  async function runPatient() {
+    if (!S.vModel || !S.vPatient) return;
+    const key = profileKey();
+    $("vRun").disabled = true;
+    $("vRunNote").textContent = `Running ${S.vPatient} through ${S.vModel}, slice by slice…`;
+    try {
+      const d = await api(`${BASE}api/runs/${encodeURIComponent(S.vModel)}/profile.json?split=${S.vSplit}&patient=${encodeURIComponent(S.vPatient)}&conf=${S.vConf}`);
+      S.profile = { key, data: d };
+      $("vRunNote").innerHTML = `<b>${esc(S.vPatient)}</b> through <b>${esc(S.vModel)}</b> at threshold ${S.vConf}: ` +
+        `3D Dice <b>${d.dice3d.toFixed(4)}</b> · expert ${(d.gt_total / 1000).toFixed(1)} mL · YOLO ${(d.pred_total / 1000).toFixed(1)} mL · ${d.z.length} slices.`;
+      drawProfile();
+    } catch (err) {
+      $("vRunNote").innerHTML = `<span class="err">${esc(err.message)}</span>`;
+    } finally {
+      $("vRun").disabled = false;
+    }
+  }
+
+  function drawProfile() {
+    const box = $("vProfile");
+    const p = S.profile && S.profile.key === profileKey() ? S.profile.data : null;
+    if (!p) {
+      box.innerHTML = `<p class="empty">Press <b>Run this patient</b> to draw Dice and tumour pixels for every slice.</p>`;
+      return;
+    }
+    Charts.dualLine(box, {
+      height: 260, xName: "slice", xLabel: "Axial slice number (bottom of the head → top)",
+      leftLabel: "Dice on the slice", leftMin: 0, leftMax: 1, rightLabel: "Tumour pixels on the slice",
+      series: [
+        { name: "Dice", color: "#3987e5", points: p.z.map((z, i) => [z, p.dice[i]]) },
+        { name: "Expert tumour pixels", color: "#d95926", axis: "right", points: p.z.map((z, i) => [z, p.gt[i]]) },
+        { name: "YOLO tumour pixels", color: "#199e70", axis: "right", points: p.z.map((z, i) => [z, p.pred[i]]) },
+      ],
+      marker: { x: S.vZ, label: `slice ${S.vZ}` },
+      onClick: (z) => { S.vZ = z; showSlice(); },
+    });
   }
 
   function openViewer(id) {
     S.vPatient = id;
+    S.vSplit = S.split;
     S.vZ = null;
-    $("vPatient").value = id;
-    showSlice();
-    renderEval();
+    renderViewer();
     $("secViewer").scrollIntoView({ behavior: "smooth" });
   }
-  $("vPatient").addEventListener("change", (e) => { S.vPatient = e.target.value; S.vZ = null; showSlice(); });
-  $("vZ").addEventListener("input", (e) => { const p = currentPatient(); if (p) { S.vZ = p.slices.z[+e.target.value]; showSlice(); } });
-  $("vConf").addEventListener("input", (e) => { S.vConf = +(+e.target.value).toFixed(2); showSlice(); });
-  $("vPeak").addEventListener("click", () => { S.vZ = null; showSlice(); });
+  $("vModel").addEventListener("change", (e) => { S.vModel = e.target.value; S.vZ = null; showSlice(); drawProfile(); });
+  $("vSplit").addEventListener("change", (e) => { S.vSplit = e.target.value; S.vPatient = null; S.vZ = null; loadPatientList(); });
+  $("vPatient").addEventListener("change", (e) => { S.vPatient = e.target.value; S.vZ = null; showSlice(); drawProfile(); });
+  $("vZ").addEventListener("input", (e) => { if (S.vSlices) { S.vZ = S.vSlices[+e.target.value]; showSlice(); } });
+  $("vConf").addEventListener("input", (e) => { S.vConf = +(+e.target.value).toFixed(2); showSlice(); drawProfile(); });
+  $("vRun").addEventListener("click", runPatient);
+  $("vPeak").addEventListener("click", async () => {
+    const p = S.profile && S.profile.key === profileKey() ? S.profile.data : null;
+    if (!p) await runPatient();
+    const d = S.profile && S.profile.key === profileKey() ? S.profile.data : null;
+    if (!d) return;
+    let bi = 0;
+    d.gt.forEach((g, i) => { if (g > d.gt[bi]) bi = i; });
+    S.vZ = d.z[bi];
+    showSlice();
+  });
+
 
   // ------------------------------------------------------------------ plots
   function renderPlots() {
@@ -783,14 +847,13 @@
       e.preventDefault();
       $("patSearch").focus();
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-      const p = currentPatient();
-      if (!p) return;
-      const i = p.slices.z.indexOf(S.vZ) + (e.key === "ArrowRight" ? 1 : -1);
-      if (i >= 0 && i < p.slices.z.length) { e.preventDefault(); S.vZ = p.slices.z[i]; showSlice(); }
+      if (!S.vSlices) return;
+      const i = S.vSlices.indexOf(S.vZ) + (e.key === "ArrowRight" ? 1 : -1);
+      if (i >= 0 && i < S.vSlices.length) { e.preventDefault(); S.vZ = S.vSlices[i]; showSlice(); }
     } else if (e.key === "[" || e.key === "]") {
       const opts = [...$("vPatient").options].map((o) => o.value);
       const i = opts.indexOf(S.vPatient) + (e.key === "]" ? 1 : -1);
-      if (i >= 0 && i < opts.length) { S.vPatient = opts[i]; S.vZ = null; $("vPatient").value = opts[i]; showSlice(); }
+      if (i >= 0 && i < opts.length) { S.vPatient = opts[i]; S.vZ = null; $("vPatient").value = opts[i]; showSlice(); drawProfile(); }
     }
   });
 

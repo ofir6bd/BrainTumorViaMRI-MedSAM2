@@ -189,6 +189,105 @@
     return { move };
   }
 
+  /* Two-scale line chart: series with axis "left" (e.g. Dice 0–1) and axis "right"
+   * (e.g. pixel counts). Each axis is named and its ticks take the colour of the series
+   * that belong to it, so it is clear which line is read on which side.
+   * series: [{name, color, dash, axis, points:[[x,y],...]}]; marker: {x, label}. */
+  function dualLine(container, opt) {
+    const { svg, w, h } = root(container, opt.height || 260, opt.title);
+    const box = { L: 54, R: 60, T: 26, B: 40, w, h };
+    const left = opt.series.filter((s) => s.axis !== "right");
+    const right = opt.series.filter((s) => s.axis === "right");
+    legend(svg, box.L, 13, opt.series.map((s) => ({ name: s.name, color: s.color, dash: s.dash, line: true })));
+    const all = opt.series.flatMap((s) => s.points.filter((p) => p[1] != null && Number.isFinite(p[1])));
+    if (!all.length) {
+      txt(svg, w / 2, h / 2, opt.empty || "No data yet", { class: "ch-empty", "text-anchor": "middle" });
+      return;
+    }
+    const xs = all.map((p) => p[0]);
+    const x = scale(Math.min(...xs), Math.max(...xs), box.L, w - box.R);
+    const span = (ss, min0) => {
+      const v = ss.flatMap((s) => s.points.map((p) => p[1])).filter((q) => q != null && Number.isFinite(q));
+      return [min0 ? 0 : Math.min(...v, 0), Math.max(...v, min0 ? 1e-9 : 1) * 1.05];
+    };
+    const [lLo, lHi] = opt.leftMin != null ? [opt.leftMin, opt.leftMax] : span(left, true);
+    const [rLo, rHi] = span(right, true);
+    const yL = scale(lLo, lHi, h - box.B, box.T);
+    const yR = scale(rLo, rHi, h - box.B, box.T);
+    const leftColor = left.length ? left[0].color : INK.muted;
+    const rightColor = right.length ? right[0].color : INK.muted;
+    for (const t of ticks(lLo, lHi, 4)) {
+      el("line", { x1: box.L, x2: w - box.R, y1: yL(t), y2: yL(t), class: "ch-grid" }, svg);
+      txt(svg, box.L - 6, yL(t), (opt.leftFmt || fmt)(t), { class: "ch-tick", fill: leftColor, "text-anchor": "end", "dominant-baseline": "middle" });
+    }
+    if (right.length) {
+      for (const t of ticks(rLo, rHi, 4)) {
+        txt(svg, w - box.R + 8, yR(t), fmt(t), { class: "ch-tick", fill: rightColor, "dominant-baseline": "middle" });
+      }
+      txt(svg, w - 10, box.T + (h - box.B - box.T) / 2, opt.rightLabel || "",
+        { class: "ch-axis", fill: rightColor, "text-anchor": "middle", transform: `rotate(90 ${w - 10} ${box.T + (h - box.B - box.T) / 2})` });
+    }
+    const xMin = Math.min(...xs);
+    const xMax = Math.max(...xs);
+    const xTicks = xs.every(Number.isInteger)
+      ? [...new Set(ticks(xMin, xMax, 6).map(Math.round))]
+      : ticks(xMin, xMax, 6);
+    for (const t of xTicks) {
+      if (t < xMin || t > xMax) continue;
+      el("line", { x1: x(t), x2: x(t), y1: h - box.B, y2: h - box.B + 4, stroke: INK.base }, svg);
+      txt(svg, x(t), h - box.B + 16, fmt(t), { class: "ch-tick", "text-anchor": "middle" });
+    }
+    el("line", { x1: box.L, x2: w - box.R, y1: h - box.B, y2: h - box.B, stroke: INK.base }, svg);
+    txt(svg, box.L + (w - box.L - box.R) / 2, h - 4, opt.xLabel || "", { class: "ch-axis", "text-anchor": "middle" });
+    txt(svg, 12, box.T + (h - box.B - box.T) / 2, opt.leftLabel || "",
+      { class: "ch-axis", fill: leftColor, "text-anchor": "middle", transform: `rotate(-90 12 ${box.T + (h - box.B - box.T) / 2})` });
+    const yOf = (s) => (s.axis === "right" ? yR : yL);
+    for (const s of opt.series) {
+      const p = s.points.filter((q) => q[1] != null && Number.isFinite(q[1]));
+      if (!p.length) continue;
+      el("path", { d: p.map((q, i) => `${i ? "L" : "M"}${x(q[0]).toFixed(1)},${yOf(s)(q[1]).toFixed(1)}`).join(""),
+                   fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round",
+                   "stroke-linecap": "round", "stroke-dasharray": s.dash || null }, svg);
+    }
+    if (opt.marker && opt.marker.x != null) {
+      const mx = x(opt.marker.x);
+      el("line", { x1: mx, x2: mx, y1: box.T, y2: h - box.B, stroke: "#e24b4a", "stroke-width": 1.5, "stroke-dasharray": "5 4" }, svg);
+      if (opt.marker.label) txt(svg, mx + 5, box.T + 11, opt.marker.label, { class: "ch-tick" });
+    }
+    const cross = el("line", { y1: box.T, y2: h - box.B, stroke: INK.muted, visibility: "hidden" }, svg);
+    const dots = opt.series.map((s) => el("circle", { r: 4, fill: s.color, stroke: INK.surface, "stroke-width": 2, visibility: "hidden" }, svg));
+    const allX = [...new Set(xs)].sort((a, b) => a - b);
+    const nearest = (xv) => allX.reduce((b, v) => (Math.abs(v - xv) < Math.abs(b - xv) ? v : b), allX[0]);
+    const xAt = (e) => {
+      const r = svg.getBoundingClientRect();
+      return nearest(x.invert(((e.clientX - r.left) / r.width) * w));
+    };
+    const ov = el("rect", { x: box.L, y: box.T, width: w - box.L - box.R, height: h - box.T - box.B,
+                            fill: "transparent", class: opt.onClick ? "ch-dot" : "" }, svg);
+    ov.addEventListener("mousemove", (e) => {
+      const xn = xAt(e);
+      cross.setAttribute("x1", x(xn));
+      cross.setAttribute("x2", x(xn));
+      cross.setAttribute("visibility", "visible");
+      let html = `<div class="tt-title">${esc(opt.xName || "x")} ${fmt(xn)}</div>`;
+      opt.series.forEach((s, i) => {
+        const q = s.points.find((p) => p[0] === xn);
+        if (!q || q[1] == null) { dots[i].setAttribute("visibility", "hidden"); return; }
+        dots[i].setAttribute("cx", x(xn));
+        dots[i].setAttribute("cy", yOf(s)(q[1]));
+        dots[i].setAttribute("visibility", "visible");
+        html += row(s.color, s.name, fmt(q[1]), s.dash);
+      });
+      showTip(html + (opt.onClick ? `<div class="tt-muted">click to show this slice</div>` : ""), e);
+    });
+    ov.addEventListener("mouseleave", () => {
+      hideTip();
+      cross.setAttribute("visibility", "hidden");
+      dots.forEach((d) => d.setAttribute("visibility", "hidden"));
+    });
+    if (opt.onClick) ov.addEventListener("click", (e) => opt.onClick(xAt(e)));
+  }
+
   /* Histogram over [lo, hi] in `bins` equal bins; each bar shows its count on top.
    * markers: [{x, label, color}]. */
   function histogram(container, opt) {
@@ -313,5 +412,5 @@
     });
   }
 
-  window.Charts = { line, histogram, scatter, bars, fmt, esc, row, showTip, hideTip };
+  window.Charts = { line, dualLine, histogram, scatter, bars, fmt, esc, row, showTip, hideTip };
 })();

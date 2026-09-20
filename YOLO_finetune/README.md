@@ -72,9 +72,12 @@ Each run is `runs/<YYYYMMDD-HHMMSS>/`: `run_config.yaml` (its exact settings), `
 - **Evaluation** (val / test) — KPIs, threshold sweep, 3D Dice histogram (click a bar to filter
   the table), Dice vs tumour size, Dice by size bucket, slice-level confusion table, sortable
   patient table, per-patient CSV export.
-- **Prediction viewer** — runs `best.pt` on any slice now: the RGB input next to FLAIR with
-  found / missed / false tumour pixels, a confidence slider, and the patient's slice-by-slice
-  Dice (click to jump).
+- **See a slice** — pick **any finished model** (any run's `best.pt`), a pool (val / test) and a
+  patient, and run it now: the RGB input next to FLAIR with found / missed / false tumour pixels,
+  and a confidence slider. **Run this patient** sends every brain slice through that model
+  (a few seconds) and draws one chart with two scales — Dice per slice on the left (0–1), expert
+  and predicted tumour pixels on the right — plus that patient's 3D Dice. Click the chart to jump
+  to a slice. Results are cached per model / patient / threshold.
 - **Plots** — everything Ultralytics saved (PR curves, confusion matrix, batches).
 
 The URL keeps the view (run, split, patient, slice, threshold, compared runs) — **Copy link**.

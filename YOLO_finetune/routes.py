@@ -294,6 +294,7 @@ def api_gpu():
 # ---------------------------------------------------------------------------- prediction viewer
 _models = OrderedDict()
 _volumes = OrderedDict()
+_profiles = OrderedDict()   # (run, split, patient, conf) -> per-slice numbers
 
 
 def _cached(store, key, make, size):
@@ -305,23 +306,33 @@ def _cached(store, key, make, size):
     return store[key]
 
 
-def _predict(run_id, split, patient_id, z, conf):
-    d = run_dir(run_id)
-    weights = os.path.join(d, "train", "weights", "best.pt")
+def _model_of(run_id):
+    """The run's best checkpoint, loaded once and kept."""
+    weights = os.path.join(run_dir(run_id), "train", "weights", "best.pt")
     if not os.path.exists(weights):
-        abort(404)
-    cfg = run_config(run_id)
-    pool = cfg["data"][f"{split}_pool"]
-    patient = next((p for p in list_patients(pool) if p["id"] == patient_id), None)
+        abort(404, "This run has no trained model (best.pt) yet.")
+    from ultralytics import YOLO
+    return _cached(_models, weights, lambda: YOLO(weights), 2)
+
+
+def _patient_of(cfg, split, patient_id):
+    if split not in ("val", "test"):
+        abort(400, "split must be val or test")
+    patient = next((p for p in list_patients(cfg["data"][f"{split}_pool"]) if p["id"] == patient_id), None)
     if patient is None:
-        abort(404)
+        abort(404, "No such patient in that pool.")
+    return patient
+
+
+def _predict(run_id, split, patient_id, z, conf):
+    cfg = run_config(run_id)
+    patient = _patient_of(cfg, split, patient_id)
     vols = _cached(_volumes, patient["dir"], lambda: load_volumes(patient), 3)
     zs = brain_slices(vols["FLAIR"], cfg["data"]["min_fg_voxels"])
     z = min(zs, key=lambda v: abs(v - z)) if zs else z
     rgb = rgb_slice(vols, z, cfg["data"]["min_fg_voxels"])
 
-    from ultralytics import YOLO
-    model = _cached(_models, weights, lambda: YOLO(weights), 2)
+    model = _model_of(run_id)
     r = model.predict(Image.fromarray(rgb), conf=conf, imgsz=cfg["train"]["imgsz"],
                       retina_masks=True, verbose=False, device=cfg["train"]["device"])[0]
     gt = vols["SEG"][:, :, z] > 0
@@ -336,11 +347,40 @@ def _predict(run_id, split, patient_id, z, conf):
 
 
 def _args():
+    """split, patient, z, conf from the query; an empty z means "pick the first slice"."""
     try:
-        return (request.args["split"], request.args["patient"], int(request.args.get("z", 0)),
-                float(request.args.get("conf", 0.25)))
+        return (request.args["split"], request.args["patient"], int(request.args.get("z") or 0),
+                float(request.args.get("conf") or 0.25))
     except (KeyError, ValueError):
-        abort(400)
+        abort(400, "need split, patient, and numeric z / conf")
+
+
+@finetune_bp.route("/api/pool_patients")
+def api_pool_patients():
+    """Patient ids of a pool, so a patient can be picked before any evaluation exists."""
+    split = request.args.get("split", "test")
+    if split not in ("val", "test"):
+        abort(400, "split must be val or test")
+    cfg = load_config()
+    return jsonify({"split": split, "pool": cfg["data"][f"{split}_pool"],
+                    "patients": [p["id"] for p in list_patients(cfg["data"][f"{split}_pool"])]})
+
+
+@finetune_bp.route("/api/runs/<run_id>/profile.json")
+def api_profile(run_id):
+    """Run this run's model over every brain slice of one patient (a second or two)."""
+    from .evaluate import patient_profile
+
+    split = request.args.get("split", "test")
+    patient_id = request.args.get("patient", "")
+    try:
+        conf = float(request.args.get("conf", 0.25))
+    except ValueError:
+        abort(400, "conf must be a number")
+    cfg = run_config(run_id)
+    patient = _patient_of(cfg, split, patient_id)
+    key = (run_id, split, patient_id, round(conf, 3))
+    return jsonify(_cached(_profiles, key, lambda: patient_profile(_model_of(run_id), patient, cfg, conf), 12))
 
 
 @finetune_bp.route("/api/runs/<run_id>/predict.json")

@@ -242,17 +242,23 @@
           </div>
         </div>
         <div class="viewer-ctrls">
+          <label class="fld"><span>Fine-tuned model</span><select id="vModel" aria-label="Which trained model to use"></select></label>
+          <label class="fld"><span>Pool</span><select id="vSplit" aria-label="Which pool the patient comes from">
+            <option value="test">test</option><option value="val">val</option></select></label>
           <label class="fld"><span>Patient</span><select id="vPatient"></select></label>
           <label class="fld grow"><span>Slice <b id="vZl"></b></span><input type="range" id="vZ" min="0" max="0" value="0"></label>
           <label class="fld"><span>How sure YOLO must be <b id="vConfL"></b></span><input type="range" id="vConf" min="0.05" max="0.9" step="0.05" value="0.25"></label>
           <button type="button" id="vPeak">Biggest tumour slice</button>
+          <button type="button" id="vRun" class="primary">&#9654; Run this patient</button>
         </div>
+        <p class="note" id="vRunNote">Press <b>Run this patient</b> to send every slice of this patient through the chosen model and draw the chart below.</p>
         <div class="viewer">
           <div class="viewer-img"><img id="vImg" alt=""><p class="note" id="vStatus"></p></div>
           <div class="viewer-side">
             <div class="kpis small" id="vStats"></div>
             <h3>This patient, slice by slice</h3>
             <div id="vProfile"></div>
+            <p class="note">Blue = Dice on that slice (left side, 0 to 1). Orange = tumour pixels the expert marked, green = tumour pixels YOLO drew (right side). The red line is the slice shown above &mdash; click the chart to jump to another slice.</p>
           </div>
         </div>
       </section>
