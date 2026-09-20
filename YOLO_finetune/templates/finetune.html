@@ -84,6 +84,8 @@
           <label class="fld"><span>Patience <em>stop after this many rounds with no gain</em></span><input type="number" id="fPatience" required></label>
           <label class="fld"><span>Picture size <em>must be a multiple of 32</em></span><input type="number" id="fImgsz" step="32" required></label>
           <label class="fld"><span>Slices per step <em>batch</em></span><input type="number" id="fBatch" required></label>
+          <label class="fld"><span>Smallest tumour piece <em>pixels; smaller pieces are not marked (min_mask_area)</em></span><input type="number" id="fMinMask" required></label>
+          <label class="fld"><span>Least brain on a slice <em>pixels; emptier slices are skipped (min_fg_voxels)</em></span><input type="number" id="fMinFg" required></label>
           <label class="fld chk"><input type="checkbox" id="fSmoke"> <span>Quick test <em>2 patients per pool, 2 rounds &mdash; checks that everything works, takes about a minute</em></span></label>
           <p class="estimate" id="estimate"></p>
           <p class="form-err" id="formErr" role="alert"></p>

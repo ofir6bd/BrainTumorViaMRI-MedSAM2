@@ -84,8 +84,16 @@
     $("fPatience").value = cfg.train.patience;
     $("fImgsz").value = cfg.train.imgsz;
     $("fBatch").value = cfg.train.batch;
+    $("fMinMask").value = cfg.data.min_mask_area;
+    $("fMinFg").value = cfg.data.min_fg_voxels;
     $("fSmoke").checked = false;
     updateEstimate();
+  }
+
+  // Changing what goes into a picture means a new set of pictures, not the cached one.
+  function rebuilds() {
+    return S.ov && (+$("fMinMask").value !== S.ov.config.data.min_mask_area
+                    || +$("fMinFg").value !== S.ov.config.data.min_fg_voxels);
   }
 
   function updateEstimate() {
@@ -94,7 +102,8 @@
     const smoke = $("fSmoke").checked;
     const n = (k) => (smoke ? Math.min(2, p[k]) : p[k]);
     $("estimate").innerHTML = `Trains on <b>${n("train")}</b> patients of <code>${esc(S.ov.config.data.train_pool)}</code>, picks the best epoch on <b>${n("val")}</b> of <code>${esc(S.ov.config.data.val_pool)}</code>, then scores val and <b>${n("test")}</b> of <code>${esc(S.ov.config.data.test_pool)}</code>. ` +
-      (smoke ? "Smoke test: 2 epochs." : `Up to <b>${esc($("fEpochs").value)}</b> epochs, stopping early after <b>${esc($("fPatience").value)}</b> without improvement.`);
+      (smoke ? "Smoke test: 2 epochs." : `Up to <b>${esc($("fEpochs").value)}</b> epochs, stopping early after <b>${esc($("fPatience").value)}</b> without improvement.`) +
+      (rebuilds() ? " <b>The pictures will be built again</b> (a few minutes), because you changed what goes into them." : "");
   }
 
   async function loadOverview() {
@@ -105,7 +114,8 @@
     S.active = ov.active;
     if (first) {
       $("fModel").innerHTML = ov.models.map((m) => `<option>${esc(m)}</option>`).join("");
-      for (const [key, id] of [["train.epochs", "fEpochs"], ["train.patience", "fPatience"], ["train.imgsz", "fImgsz"], ["train.batch", "fBatch"]]) {
+      for (const [key, id] of [["train.epochs", "fEpochs"], ["train.patience", "fPatience"], ["train.imgsz", "fImgsz"],
+                               ["train.batch", "fBatch"], ["data.min_mask_area", "fMinMask"], ["data.min_fg_voxels", "fMinFg"]]) {
         $(id).min = ov.editable[key].min;
         $(id).max = ov.editable[key].max;
       }
@@ -131,7 +141,8 @@
     const body = {
       model: $("fModel").value, smoke: $("fSmoke").checked,
       overrides: { "train.epochs": +$("fEpochs").value, "train.patience": +$("fPatience").value,
-                   "train.imgsz": +$("fImgsz").value, "train.batch": +$("fBatch").value },
+                   "train.imgsz": +$("fImgsz").value, "train.batch": +$("fBatch").value,
+                   "data.min_mask_area": +$("fMinMask").value, "data.min_fg_voxels": +$("fMinFg").value },
     };
     if (body.overrides["train.imgsz"] % 32) {
       $("formErr").textContent = "Image size must be a multiple of 32 (e.g. 480, 512, 640).";

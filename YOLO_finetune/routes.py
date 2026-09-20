@@ -30,7 +30,9 @@ MODELS = ["yolo11n-seg.pt", "yolo11s-seg.pt", "yolo11m-seg.pt", "yolo11l-seg.pt"
           "yolo26m-seg.pt"]
 # Settings a run may override from the UI: (type, min, max).
 EDITABLE = {"train.epochs": (int, 1, 1000), "train.patience": (int, 0, 1000),
-            "train.imgsz": (int, 64, 2048), "train.batch": (int, 1, 256)}
+            "train.imgsz": (int, 64, 2048), "train.batch": (int, 1, 256),
+            # changing either of these builds a new set of pictures (they are in the dataset key)
+            "data.min_mask_area": (int, 0, 5000), "data.min_fg_voxels": (int, 0, 50000)}
 LIVE = ("queued", "running")
 OVERLAY = {"tp": (12, 163, 12), "fn": (250, 178, 25), "fp": (208, 59, 59)}  # found / missed / false
 
