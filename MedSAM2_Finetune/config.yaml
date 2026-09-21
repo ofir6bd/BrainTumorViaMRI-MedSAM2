@@ -1,0 +1,63 @@
+# MedSAM2_Finetune — teach MedSAM2 to turn a YOLO guess into a clean tumour outline.
+#
+# One training sample = one axial slice. The prompt MedSAM2 is given is YOLO's own
+# per-voxel probability for that slice; the expert segmentation is only ever the target
+# of the loss, never a prompt. The UI shows this file as-is and a run may override the
+# keys listed in routes.EDITABLE (the run keeps its own copy in runs/<run>/run_config.yaml).
+
+model:
+  checkpoint: MedSAM2_latest.pt          # read from MedSAM2/checkpoints/ (never written to)
+  config: configs/sam2.1_hiera_t512.yaml # the vendored SAM2 config that matches it
+  image_size: 512                        # what that config was trained at
+
+prompt:
+  yolo_run: ""            # which YOLO_finetune run makes the prompts ("" = the best-scoring one)
+  variant: max            # max | max_weighted | conf_filtered | binary | box | none
+  yolo_conf: 0.05         # blobs below this confidence are never produced
+  score_min: 0.25         # conf_filtered / box: drop blobs whose confidence is below this
+  logit_scale: 8.0        # multiply YOLO's logits before handing them to MedSAM2.
+                          #   YOLO's logits reach about +-5.5; SAM2's mask prompt was trained on a
+                          #   wider scale, so it barely reacts to them raw. Measured on 4 val
+                          #   patients with the untrained checkpoint: scale 1 -> 0.379 Dice,
+                          #   2 -> 0.627, 4 -> 0.726, 8 -> 0.757, 12 -> 0.760 (the prompt itself
+                          #   scores 0.819). 8 is where it stops mattering.
+  empty_logit: -8.0       # what a slice YOLO left empty is prompted with (a confident "nothing")
+
+data:
+  train_pool: medsam2_train   # pools are keys of the project config.yaml -> paths
+  val_pool: medsam2_val       #   YOLO trained on yolo_*, so it has never seen these patients
+  test_pool: test
+  min_fg_voxels: 100          # a slice needs this much brain to be used at all
+  max_train_patients: 300     # patients per epoch from train_pool (null = all 721)
+  val_patients: 60            # patients used for the after-every-round check (null = all)
+  neg_fraction: 0.3           # share of the no-tumour slices to keep as training samples
+  max_slices_per_patient: null  # null = every brain slice that survives neg_fraction
+
+train:
+  epochs: 20
+  patience: 5                 # stop after this many rounds without a better val Dice
+  batch: 4                    # slices per step (a 512 SAM2 step is heavy)
+  accum: 2                    # gradient accumulation: the effective batch is batch * accum
+  lr: 1.0e-4                  # AdamW, for everything that is unfrozen except the image encoder
+  vision_lr: 1.0e-5           # lower rate for the image encoder, used only when unfreeze = all
+  weight_decay: 0.01
+  unfreeze: decoder+prompt    # decoder | decoder+prompt | all
+  dice_weight: 1.0            # loss = dice_weight * Dice loss + bce_weight * BCE
+  bce_weight: 1.0
+  iou_weight: 0.05            # keeps SAM2's own quality head honest
+  obj_weight: 0.1             # teaches its object head "is there any tumour on this slice"
+  fliplr: 0.5                 # left-right flip, applied to frame, prompt and target together
+  amp: true                   # bfloat16 mixed precision
+  workers: 4
+  seed: 42
+  device: 0                   # the RTX 5090
+
+evaluate:
+  mask_threshold: 0.0         # MedSAM2's output is a logit map; > this is tumour (0.0 = p > 0.5)
+  use_obj_score: false        # a slice whose object head says "nothing here" is left empty.
+                              #   Off by default: before training, SAM2's object head says "nothing"
+                              #   on almost every brain slice (0 of 138 on the first val patient),
+                              #   which would report 0.0 and make the best-round choice meaningless.
+                              #   Turn it on once train.obj_weight has had rounds to teach it.
+  sweep: [-4, -3, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4]   # thresholds tried on val and test
+  batch: 8                    # slices per forward pass while evaluating

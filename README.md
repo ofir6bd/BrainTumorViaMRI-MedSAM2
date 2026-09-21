@@ -42,6 +42,7 @@ BrainTumorViaMRI-MedSAM2/
 │   ├── templates/index.html
 │   └── static/             #   app.js (shell), dashboard.js, style.css
 ├── YOLO_finetune/          # YOLO11m-seg fine-tuning + its page at /finetune/ (see its README.md)
+├── MedSAM2_Finetune/       # MedSAM2 fine-tuned on YOLO prompts + its page at /medsam2/ (see its README.md)
 ├── data/                   # all INPUTS (git-ignored)
 │   ├── raw/                # downloaded BraTS archives
 │   ├── dataset/            # patient folders in yolo_train/ yolo_val/ medsam2_train/ medsam2_val/ test/
@@ -107,6 +108,9 @@ one server; switch between them in the sidebar:
 - **Analytics** (`/`) — below.
 - **YOLO_finetune** (`/finetune/`) — start, follow and analyse YOLO11m-seg fine-tune runs; see
   `YOLO_finetune/README.md`.
+- **MedSAM2_Finetune** (`/medsam2/`) — fine-tune MedSAM2 on YOLO's per-voxel probability as its
+  prompt, and see, patient by patient, whether it improved YOLO's guess; see
+  `MedSAM2_Finetune/README.md`.
 
 **Analytics** is a dashboard over every patient's real tumour statistics (WT/TC and
 per-label volumes, % of brain, tumour slices, connected parts, extent, location, side). They are

@@ -14,9 +14,10 @@ from flask import Flask, jsonify, send_file, abort, render_template, request
 
 from dataset_stats import StatsStore
 
-# Repo root on sys.path so sibling packages (YOLO_finetune) import as packages.
+# Repo root on sys.path so sibling packages (YOLO_finetune, MedSAM2_Finetune) import as packages.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from YOLO_finetune.routes import finetune_bp  # noqa: E402
+from MedSAM2_Finetune.routes import medsam2_bp  # noqa: E402
 
 with open("config.yaml", "r") as _f:
     _CFG = yaml.safe_load(_f)
@@ -50,6 +51,7 @@ app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.register_blueprint(finetune_bp)  # the YOLO_finetune page, at /finetune/
+app.register_blueprint(medsam2_bp)   # the MedSAM2_Finetune page, at /medsam2/
 
 
 def _pool_of(root):

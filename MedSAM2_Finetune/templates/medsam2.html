@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MedSAM2_Finetune</title>
+  <!-- The look and the chart kit are shared with the YOLO_finetune page on purpose: one
+       design, one copy of the code. This folder adds only what is new. -->
+  <link rel="stylesheet" href="{{ url_for('finetune.static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('medsam2.static', filename='style.css') }}">
+</head>
+<body data-base="{{ url_for('medsam2.index') }}">
+  <nav class="apps" aria-label="Pages">
+    <span class="apps-brand">BraTS 2024</span>
+    <a href="/">Analytics</a>
+    <a href="{{ url_for('finetune.index') }}">YOLO_finetune</a>
+    <a href="{{ url_for('medsam2.index') }}" aria-current="page">MedSAM2_Finetune</a>
+  </nav>
+  <header class="top">
+    <div>
+      <h1>MedSAM2_Finetune</h1>
+      <p class="sub" id="topSub">Loading&hellip;</p>
+    </div>
+    <div class="gpu" id="gpu" title="How busy the graphics card is right now (updated every 3 seconds)"></div>
+  </header>
+
+  <nav class="jump" aria-label="Sections">
+    <a href="#secHow">How it works</a><a href="#secStart">Start</a><a href="#secLive">Live run</a>
+    <a href="#secRuns">Runs</a><a href="#secCurves">Training charts</a><a href="#secEval">Results</a>
+    <a href="#secHelp">Did it help?</a><a href="#secPatient">One patient</a><a href="#secViewer">See a slice</a>
+    <a href="#secWhen">When does it help?</a>
+    <span class="jump-keys"><kbd>&larr;</kbd><kbd>&rarr;</kbd> next slice &middot; <kbd>[</kbd><kbd>]</kbd> next patient</span>
+  </nav>
+
+  <main class="wrap">
+    <!-- ================= HOW IT WORKS ================= -->
+    <section class="card" id="secHow">
+      <div class="card-head">
+        <h2>How this fine-tune works</h2>
+        <p class="card-sub">YOLO makes a rough guess; MedSAM2 is taught to turn that guess into a clean outline.</p>
+      </div>
+      <ol class="how">
+        <li>
+          <b>YOLO looks at the slice first.</b>
+          Every axial slice that shows brain becomes the same colour picture YOLO was trained on:
+          <span class="ch r">red = T1C</span>, <span class="ch g">green = T2</span>,
+          <span class="ch b">blue = FLAIR</span>. A fine-tuned YOLO (you choose which run) draws
+          its tumour blobs on it.
+        </li>
+        <li>
+          <b>We keep the part YOLO normally throws away.</b>
+          YOLO gives two things: a <b>confidence score for each blob</b>, and — underneath —
+          a <b>probability for every single pixel</b>. Normally only "probability above 0.5"
+          survives. We keep the soft number, because that is what MedSAM2 wants to be told.
+        </li>
+        <li>
+          <b>That map is handed to MedSAM2 as its prompt.</b>
+          MedSAM2 is a "segment anything" model: it needs someone to point at the thing.
+          Here the pointing is YOLO's probability map — a picture of how sure YOLO is,
+          pixel by pixel. You can choose <em>which</em> map (see <b>Prompt style</b> below).
+        </li>
+        <li>
+          <b>The expert mask is only the answer sheet.</b>
+          MedSAM2 draws its outline, and that outline is compared with the expert
+          segmentation (all tumour labels together = whole tumour). The difference is used to
+          correct MedSAM2 a little. The expert mask is <em>never</em> shown to the model as a
+          prompt — otherwise it would just learn to copy a perfect hint it will never have.
+        </li>
+        <li>
+          <b>Every round we check, and we compare against YOLO.</b>
+          After each round MedSAM2 is checked on patients it never trains on. At the end both
+          models are scored on the same test patients, patient by patient, so the real question
+          gets a real answer: <b>did MedSAM2 make YOLO's guess better or worse?</b>
+        </li>
+      </ol>
+      <p class="note" id="howNote"></p>
+    </section>
+
+    <!-- ================= START ================= -->
+    <section class="card" id="secStart">
+      <div class="card-head">
+        <h2>Start a fine-tune</h2>
+        <p class="card-sub">Change anything here before you start. The run keeps its own copy of these settings.</p>
+      </div>
+      <div class="start-grid">
+        <form class="start-form" id="startForm" autocomplete="off">
+          <p class="card-sub">Prompt &mdash; where the hint comes from</p>
+          <label class="fld">Which YOLO makes the hint <em>(prompt.yolo_run)</em>
+            <select id="fYoloRun"></select></label>
+          <label class="fld">Prompt style <em>(prompt.variant)</em>
+            <select id="fVariant"></select></label>
+          <label class="fld">Lowest YOLO confidence kept <em>(prompt.yolo_conf)</em>
+            <input id="fYoloConf" type="number" step="any" min="0.005" max="0.9"></label>
+          <label class="fld">Blob must score at least <em>(prompt.score_min)</em>
+            <input id="fScoreMin" type="number" step="any" min="0" max="0.95"></label>
+          <label class="fld">How loud the hint is <em>(prompt.logit_scale)</em>
+            <input id="fLogitScale" type="number" step="any" min="0.05" max="20"></label>
+          <label class="fld">"Nothing here" value <em>(prompt.empty_logit)</em>
+            <input id="fEmptyLogit" type="number" step="any" min="-30" max="0"></label>
+          <p class="note" id="variantNote"></p>
+
+          <p class="card-sub">Data &mdash; who it learns from</p>
+          <label class="fld">Patients per round <em>(data.max_train_patients)</em>
+            <input id="fMaxTrain" type="number" step="1" min="1" placeholder="all"></label>
+          <label class="fld">Patients in the round check <em>(data.val_patients)</em>
+            <input id="fValPatients" type="number" step="1" min="1" placeholder="all"></label>
+          <label class="fld">Share of empty slices kept <em>(data.neg_fraction)</em>
+            <input id="fNegFraction" type="number" step="any" min="0" max="1"></label>
+          <label class="fld">Least brain on a slice <em>(data.min_fg_voxels)</em>
+            <input id="fMinFg" type="number" step="10" min="0" max="50000"></label>
+
+          <p class="card-sub">Training &mdash; how it learns</p>
+          <label class="fld">Starting checkpoint <em>(model.checkpoint)</em>
+            <select id="fCheckpoint"></select></label>
+          <label class="fld">Which weights may change <em>(train.unfreeze)</em>
+            <select id="fUnfreeze"></select></label>
+          <label class="fld">Rounds <em>(train.epochs)</em>
+            <input id="fEpochs" type="number" step="1" min="1" max="500"></label>
+          <label class="fld">Stop after N quiet rounds <em>(train.patience)</em>
+            <input id="fPatience" type="number" step="1" min="0" max="500"></label>
+          <label class="fld">Slices per step <em>(train.batch)</em>
+            <input id="fBatch" type="number" step="1" min="1" max="64"></label>
+          <label class="fld">Steps added up before a correction <em>(train.accum)</em>
+            <input id="fAccum" type="number" step="1" min="1" max="64"></label>
+          <label class="fld">Learning rate <em>(train.lr)</em>
+            <input id="fLr" type="number" step="any" min="0.0000001" max="0.01"></label>
+          <label class="fld">Image-encoder learning rate <em>(train.vision_lr)</em>
+            <input id="fVisionLr" type="number" step="any" min="0.00000001" max="0.001"></label>
+          <label class="fld">Overlap weight <em>(train.dice_weight)</em>
+            <input id="fDiceW" type="number" step="any" min="0" max="10"></label>
+          <label class="fld">Pixel weight <em>(train.bce_weight)</em>
+            <input id="fBceW" type="number" step="any" min="0" max="10"></label>
+          <label class="fld">Left-right flip chance <em>(train.fliplr)</em>
+            <input id="fFliplr" type="number" step="any" min="0" max="1"></label>
+          <label class="fld">Reader processes <em>(train.workers)</em>
+            <input id="fWorkers" type="number" step="1" min="0" max="16"></label>
+
+          <p class="estimate" id="startEstimate"></p>
+          <p class="form-err" id="startErr"></p>
+          <div class="start-btns">
+            <button class="primary big" id="btnStart" type="submit">&#9654; Start fine-tune</button>
+            <button id="btnSmoke" type="button" title="2 patients, 1 round — checks the whole chain works">Quick check</button>
+            <button id="btnReset" type="button">Reset to file</button>
+          </div>
+        </form>
+        <div>
+          <div class="config-head">
+            <h3>config.yaml</h3>
+            <span class="note">What a run starts from when you change nothing.</span>
+          </div>
+          <pre class="yaml" id="cfgText">Loading&hellip;</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= LIVE ================= -->
+    <section class="card" id="secLive">
+      <div class="card-head">
+        <h2>What is running now <span class="badge" id="liveId"></span></h2>
+        <div class="btns">
+          <button class="danger" id="btnStop" type="button">&#9632; Stop</button>
+          <button id="btnResume" type="button">&#9654; Continue</button>
+          <button id="btnRescore" type="button" title="Score the best checkpoint on the whole val and test pools again">&#8635; Score again</button>
+        </div>
+      </div>
+      <p class="sub" id="liveSub">No run yet.</p>
+      <ol class="stepper" id="stepper"></ol>
+      <div class="live-kpis" id="liveKpis"></div>
+      <div class="log-head">
+        <label class="tog">Log <input id="logFilter" type="search" placeholder="Show only lines with&hellip;"></label>
+        <label class="tog"><input id="logFollow" type="checkbox" checked> follow the end</label>
+      </div>
+      <pre class="log" id="log">(nothing yet)</pre>
+    </section>
+
+    <!-- ================= RUNS ================= -->
+    <section class="card" id="secRuns">
+      <div class="card-head">
+        <h2>Runs</h2>
+        <p class="card-sub">Click a run to see its results below. Tick up to 3 to draw their curves together.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="tbl" id="runsTbl"><thead></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <!-- ================= TRAINING CURVES ================= -->
+    <section class="card" id="secCurves">
+      <div class="card-head">
+        <h2>Training charts</h2>
+        <p class="card-sub">One point per round. Lower loss is better; higher check score is better.</p>
+      </div>
+      <div class="curve-grid" id="curves"></div>
+    </section>
+
+    <!-- ================= RESULTS ================= -->
+    <section class="card" id="secEval">
+      <div class="card-head">
+        <h2>Results <span class="badge" id="evalRunId"></span></h2>
+        <p class="card-sub">Measured on whole patients, at the slice's own size.</p>
+      </div>
+      <div class="kpis" id="evalKpis"></div>
+      <div class="curve-grid">
+        <div>
+          <h3>Score at every cut-off</h3>
+          <p class="note">MedSAM2's answer is a confidence per pixel. This is the score when
+            "tumour" means "above this line". The cut-off is chosen on the check pool, never on the test pool.</p>
+          <div id="chSweep"></div>
+        </div>
+        <div>
+          <h3>Slice by slice: did it spot the tumour at all?</h3>
+          <p class="note">Every brain slice of every test patient, counted once.</p>
+          <div id="confusion"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= DID IT HELP ================= -->
+    <section class="card" id="secHelp">
+      <div class="card-head">
+        <h2>Did MedSAM2 help?</h2>
+        <p class="card-sub">Every dot is one patient, scored twice: once by YOLO alone, once after MedSAM2.</p>
+        <div class="btns">
+          <label class="tog">Pool
+            <select id="helpSplit"><option value="test">test</option><option value="val">check (val)</option></select>
+          </label>
+          <button id="btnCsv" type="button">Download the table (CSV)</button>
+        </div>
+      </div>
+      <div class="curve-grid">
+        <div>
+          <h3>YOLO alone vs YOLO + MedSAM2</h3>
+          <p class="note">Above the grey line, MedSAM2 improved that patient. Below it, it made things worse.
+            Click a dot to open that patient.</p>
+          <div id="chPaired"></div>
+        </div>
+        <div>
+          <h3>How much it changed</h3>
+          <p class="note">The difference per patient (MedSAM2 minus YOLO). Bars right of zero are gains.</p>
+          <div id="chDelta"></div>
+        </div>
+      </div>
+      <div class="two">
+        <div>
+          <h3>Helped the most</h3>
+          <div class="table-wrap"><table class="tbl" id="bestTbl"><thead></thead><tbody></tbody></table></div>
+        </div>
+        <div>
+          <h3>Hurt the most</h3>
+          <div class="table-wrap"><table class="tbl" id="worstTbl"><thead></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= ONE PATIENT ================= -->
+    <section class="card" id="secPatient">
+      <div class="card-head">
+        <h2>One patient, slice by slice</h2>
+        <p class="card-sub">Runs the chosen checkpoint over every brain slice of one patient (a few seconds).</p>
+      </div>
+      <div class="viewer-ctrls">
+        <label class="fld">Checkpoint <select id="pWhich">
+          <option value="best.pt">best round</option><option value="last.pt">latest round</option></select></label>
+        <label class="fld">Pool <select id="pSplit">
+          <option value="test">test</option><option value="val">check (val)</option><option value="train">train</option></select></label>
+        <label class="fld grow">Patient <select id="pPatient"></select></label>
+        <button class="primary" id="btnProfile" type="button">&#9654; Run this patient</button>
+      </div>
+      <div id="chProfile"></div>
+      <p class="note" id="profileNote"></p>
+    </section>
+
+    <!-- ================= SLICE VIEWER ================= -->
+    <section class="card" id="secViewer">
+      <div class="card-head">
+        <h2>See a slice</h2>
+        <p class="card-sub">The frame, the hint YOLO gave, and what each model made of it.</p>
+      </div>
+      <div class="viewer-ctrls">
+        <label class="fld grow">Slice <input id="zRange" type="range" min="0" max="0" value="0">
+          <b id="zLabel">&mdash;</b></label>
+        <label class="tog"><input type="checkbox" class="panel" value="frame" checked> frame</label>
+        <label class="tog"><input type="checkbox" class="panel" value="prompt" checked> YOLO hint</label>
+        <label class="tog"><input type="checkbox" class="panel" value="yolo" checked> YOLO mask</label>
+        <label class="tog"><input type="checkbox" class="panel" value="medsam2" checked> MedSAM2</label>
+      </div>
+      <div class="viewer">
+        <div class="viewer-img"><img id="sliceImg" alt="Slice panels"></div>
+        <div class="viewer-side" id="sliceSide"></div>
+      </div>
+      <p class="note">Colours on the mask panels: <span style="color:#0ca30c">green = found</span>,
+        <span style="color:#fab219">orange = missed</span>, <span style="color:#d03b3b">red = drawn but no tumour</span>.
+        On the hint panel, blue is "probably nothing" and red is "almost certainly tumour".</p>
+    </section>
+
+    <!-- ================= WHEN DOES IT HELP ================= -->
+    <section class="card" id="secWhen">
+      <div class="card-head">
+        <h2>When does it help?</h2>
+        <p class="card-sub">The same patients, sorted by what might explain the gain.</p>
+      </div>
+      <div class="curve-grid">
+        <div>
+          <h3>Gain vs how big the tumour is</h3>
+          <div id="chBySize"></div>
+        </div>
+        <div>
+          <h3>Gain vs how sure YOLO was</h3>
+          <div id="chByConf"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('finetune.static', filename='charts.js') }}"></script>
+  <script src="{{ url_for('medsam2.static', filename='medsam2.js') }}"></script>
+</body>
+</html>
