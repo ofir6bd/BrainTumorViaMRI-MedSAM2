@@ -177,8 +177,11 @@
          ${st.error ? `<span class="err">${esc(st.error)}</span>` : ""}`
       : "No run yet.";
     const at = STAGES.findIndex(([k]) => k === (st.stage || "prompts"));
+    const finished = st.state === "done";
     $("stepper").innerHTML = STAGES.map(([key, label], i) => {
-      let pctDone = i < at ? 100 : i > at ? 0 : 50;
+      // A finished run has every stage behind it, including "Done" itself — without this the
+      // last bar sits at the half-way default, because no branch below fills it in.
+      let pctDone = finished ? 100 : i < at ? 100 : i > at ? 0 : 50;
       let sub = "";
       if (key === "prompts" && st.prompt_total) {
         pctDone = i === at ? (100 * st.prompt_done) / st.prompt_total : pctDone;
@@ -191,7 +194,8 @@
         sub = `${st.eval_done} of ${st.eval_total} patients (${esc(st.eval_split || "")})`;
       }
       const bad = st.state === "failed" || st.state === "interrupted";
-      return `<li class="${i === at ? (bad ? "bad" : "cur") : i < at ? "done" : ""}"><b>${esc(label)}</b>
+      const cls = bad && i === at ? "bad" : finished || i < at ? "done" : i === at ? "cur" : "";
+      return `<li class="${cls}"><b>${esc(label)}</b>
         <div class="step-bar"><i style="width:${Math.max(0, Math.min(100, pctDone))}%"></i></div>
         <em>${esc(sub)}</em></li>`;
     }).join("");
