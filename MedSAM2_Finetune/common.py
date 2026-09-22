@@ -43,7 +43,8 @@ PROMPT_VARIANTS = {
 }
 UNFREEZE = {
     "decoder": "mask decoder only (fastest, fewest weights changed)",
-    "decoder+prompt": "mask decoder and prompt encoder (learns how to read the YOLO prompt)",
+    "decoder+prompt": "mask decoder and prompt encoder (how it reads the YOLO prompt)",
+    "decoder+prompt+memory": "and the memory, which carries the answer between slices",
     "all": "everything, including the image encoder (slowest, needs the most memory)",
 }
 
@@ -117,17 +118,6 @@ def import_sam2():
         sys.path.insert(0, MEDSAM2_DIR)
     from sam2.build_sam import build_sam2  # noqa: E402
     return build_sam2
-
-
-def build_model(cfg, device="cuda"):
-    """A SAM2Base built from the vendored config and one of the MedSAM2 checkpoints."""
-    build_sam2 = import_sam2()
-    ckpt = os.path.join(CHECKPOINTS_DIR, cfg["model"]["checkpoint"])
-    if not os.path.exists(ckpt):
-        raise FileNotFoundError(f"no checkpoint at {ckpt}")
-    model = build_sam2(cfg["model"]["config"], ckpt, device=device, mode="train")
-    model.directly_add_no_mem_embed = True  # single slices: there is no memory to attend to
-    return model
 
 
 # ------------------------------------------------------------------ small numeric helpers

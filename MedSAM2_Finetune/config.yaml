@@ -1,9 +1,11 @@
-# MedSAM2_Finetune — teach MedSAM2 to turn a YOLO guess into a clean tumour outline.
+# MedSAM2_Finetune — teach MedSAM2 to turn a YOLO guess into a clean tumour outline,
+# the way SAM2 is meant to be used: the stack of slices is a *video*.
 #
-# One training sample = one axial slice. The prompt MedSAM2 is given is YOLO's own
-# per-voxel probability for that slice; the expert segmentation is only ever the target
-# of the loss, never a prompt. The UI shows this file as-is and a run may override the
-# keys listed in routes.EDITABLE (the run keeps its own copy in runs/<run>/run_config.yaml).
+# A few slices (the anchors) get a prompt built from YOLO's per-voxel probability; the rest
+# of the volume is reached by propagating through SAM2's memory, forwards and backwards.
+# The expert segmentation is only ever the target of the loss, never a prompt.
+# The UI shows this file as-is and a run may override the keys listed in routes.EDITABLE
+# (the run keeps its own copy in runs/<run>/run_config.yaml).
 
 model:
   checkpoint: MedSAM2_latest.pt          # read from MedSAM2/checkpoints/ (never written to)
@@ -23,26 +25,52 @@ prompt:
                           #   scores 0.819). 8 is where it stops mattering.
   empty_logit: -8.0       # what a slice YOLO left empty is prompted with (a confident "nothing")
 
+anchors:                  # which slices are prompted; everything else is reached by memory
+  pick: yolo_peak         # yolo_peak | yolo_score | spread | expert_peak
+                          #   yolo_peak  = most confident tumour area (area x score) — the automatic
+                          #                stand-in for "the slice a radiologist would start on"
+                          #   yolo_score = highest single blob score
+                          #   spread     = evenly spaced over the slices YOLO marked
+                          #   expert_peak= the ground truth's biggest slice (ORACLE, upper bound only)
+  count: 1                # anchors the first round starts from
+  min_gap: 5              # slices that must separate two anchors
+
+hitl:                     # extra anchors added round by round (the loop 05_infer_multibbox_hitl had)
+  rounds: 3               # 1 = no extra anchors. Each round is a full forward+backward pass.
+  min_improvement: 0.005  # stop when a round changes less than this
+  target_dice: 0.95       # expert source only: stop once this Dice is reached
+  source: yolo            # yolo   = the next anchor is where the prediction disagrees most with
+                          #          YOLO. Fully automatic; the reported score stays honest.
+                          # expert = the next anchor comes from the ground truth, exactly like the
+                          #          old 05_infer_multibbox_hitl.py. This is an ORACLE: the score it
+                          #          produces is an upper bound, not a result. Clearly marked as such.
+
 data:
   train_pool: medsam2_train   # pools are keys of the project config.yaml -> paths
   val_pool: medsam2_val       #   YOLO trained on yolo_*, so it has never seen these patients
   test_pool: test
   min_fg_voxels: 100          # a slice needs this much brain to be used at all
-  max_train_patients: 300     # patients per epoch from train_pool (null = all 721)
-  val_patients: 60            # patients used for the after-every-round check (null = all)
-  neg_fraction: 0.3           # share of the no-tumour slices to keep as training samples
-  max_slices_per_patient: null  # null = every brain slice that survives neg_fraction
+  max_train_patients: 300     # patients per round from train_pool (null = all 721)
+  val_patients: 40            # patients in the after-every-round check (null = all).
+                              #   A check is a full propagation per patient, so keep it small.
+  clips_per_patient: 4        # training clips taken from each patient each round
+  tumour_clip_fraction: 0.8   # share of those clips that must contain tumour
+
+video:
+  num_frames: 8               # slices in a training clip: the anchor plus 7 propagated ones
+  reverse_fraction: 0.5       # share of clips fed in descending z, so the model also learns to
+                              #   propagate backwards — which is what inference does below the anchor
+  batch: 1                    # clips per step (a clip is already num_frames forward passes)
 
 train:
   epochs: 20
   patience: 5                 # stop after this many rounds without a better val Dice
-  batch: 4                    # slices per step (a 512 SAM2 step is heavy)
-  accum: 2                    # gradient accumulation: the effective batch is batch * accum
+  accum: 4                    # clips added up before a correction (effective batch = batch * accum)
   lr: 1.0e-4                  # AdamW, for everything that is unfrozen except the image encoder
   vision_lr: 1.0e-5           # lower rate for the image encoder, used only when unfreeze = all
   weight_decay: 0.01
-  unfreeze: decoder+prompt    # decoder | decoder+prompt | all
-  dice_weight: 1.0            # loss = dice_weight * Dice loss + bce_weight * BCE
+  unfreeze: decoder+prompt+memory   # decoder | decoder+prompt | decoder+prompt+memory | all
+  dice_weight: 1.0            # loss = dice_weight * Dice loss + bce_weight * BCE, over every frame
   bce_weight: 1.0
   iou_weight: 0.05            # keeps SAM2's own quality head honest
   obj_weight: 0.1             # teaches its object head "is there any tumour on this slice"
@@ -53,11 +81,8 @@ train:
   device: 0                   # the RTX 5090
 
 evaluate:
-  mask_threshold: 0.0         # MedSAM2's output is a logit map; > this is tumour (0.0 = p > 0.5)
+  mask_threshold: 0.0         # the propagated output is a logit map; > this is tumour (0 = p > 0.5)
   use_obj_score: false        # a slice whose object head says "nothing here" is left empty.
-                              #   Off by default: before training, SAM2's object head says "nothing"
-                              #   on almost every brain slice (0 of 138 on the first val patient),
-                              #   which would report 0.0 and make the best-round choice meaningless.
-                              #   Turn it on once train.obj_weight has had rounds to teach it.
+                              #   Off by default: measured on the 2D run it moved 3D Dice by +0.0001
+                              #   while costing sensitivity — the false alarms are confident, not leaks.
   sweep: [-4, -3, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4]   # thresholds tried on val and test
-  batch: 8                    # slices per forward pass while evaluating

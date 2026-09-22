@@ -27,7 +27,8 @@
   <nav class="jump" aria-label="Sections">
     <a href="#secHow">How it works</a><a href="#secStart">Start</a><a href="#secLive">Live run</a>
     <a href="#secRuns">Runs</a><a href="#secCurves">Training charts</a><a href="#secEval">Results</a>
-    <a href="#secHelp">Did it help?</a><a href="#secPatient">One patient</a><a href="#secViewer">See a slice</a>
+    <a href="#secRounds">Rounds</a><a href="#secHelp">Did it help?</a>
+    <a href="#secPatient">One patient</a><a href="#secViewer">See a slice</a>
     <a href="#secWhen">When does it help?</a>
     <span class="jump-keys"><kbd>&larr;</kbd><kbd>&rarr;</kbd> next slice &middot; <kbd>[</kbd><kbd>]</kbd> next patient</span>
   </nav>
@@ -37,43 +38,52 @@
     <section class="card" id="secHow">
       <div class="card-head">
         <h2>How this fine-tune works</h2>
-        <p class="card-sub">YOLO makes a rough guess; MedSAM2 is taught to turn that guess into a clean outline.</p>
+        <p class="card-sub">The stack of slices is treated as a video: a few slices are pointed at,
+          and the answer travels through the rest.</p>
       </div>
       <ol class="how">
         <li>
-          <b>YOLO looks at the slice first.</b>
+          <b>YOLO looks at the slices first.</b>
           Every axial slice that shows brain becomes the same colour picture YOLO was trained on:
           <span class="ch r">red = T1C</span>, <span class="ch g">green = T2</span>,
-          <span class="ch b">blue = FLAIR</span>. A fine-tuned YOLO (you choose which run) draws
-          its tumour blobs on it.
+          <span class="ch b">blue = FLAIR</span>. A fine-tuned YOLO (you choose which run) gives
+          a <b>confidence score per blob</b> and, underneath, a <b>probability for every pixel</b>.
+          We keep the second one — the part YOLO normally throws away.
         </li>
         <li>
-          <b>We keep the part YOLO normally throws away.</b>
-          YOLO gives two things: a <b>confidence score for each blob</b>, and — underneath —
-          a <b>probability for every single pixel</b>. Normally only "probability above 0.5"
-          survives. We keep the soft number, because that is what MedSAM2 wants to be told.
+          <b>A few slices get pointed at: the anchors.</b>
+          MedSAM2 does not need a hint on every slice. One slice — the one where YOLO is most
+          sure — is prompted with YOLO's probability map. That is the automatic stand-in for
+          the radiologist who would otherwise draw a box there.
         </li>
         <li>
-          <b>That map is handed to MedSAM2 as its prompt.</b>
-          MedSAM2 is a "segment anything" model: it needs someone to point at the thing.
-          Here the pointing is YOLO's probability map — a picture of how sure YOLO is,
-          pixel by pixel. You can choose <em>which</em> map (see <b>Prompt style</b> below).
+          <b>The answer travels through the volume.</b>
+          From the anchor the prediction is carried <b>up</b> through the stack and then
+          <b>down</b> again, using SAM2's memory: each slice sees what the model decided on the
+          slices before it. Nobody prompts those slices — they are reached, not told.
+        </li>
+        <li>
+          <b>Then a correction round: HITL.</b>
+          After a pass we look for the slice where the result disagrees most with the hint,
+          make that slice a new anchor too, and run the whole thing again. This repeats up to
+          <b data-cfg="hitl.rounds"></b> times, or until the answer stops changing — the same
+          loop the older hand-prompted pipeline used, with YOLO in the human's place.
         </li>
         <li>
           <b>The expert mask is only the answer sheet.</b>
-          MedSAM2 draws its outline, and that outline is compared with the expert
-          segmentation (all tumour labels together = whole tumour). The difference is used to
-          correct MedSAM2 a little. The expert mask is <em>never</em> shown to the model as a
-          prompt — otherwise it would just learn to copy a perfect hint it will never have.
+          Training works on short clips — the anchor plus the slices after it — and the loss
+          compares <em>every</em> frame of the clip with the expert segmentation, including the
+          ones nobody prompted. The expert mask is never shown to the model as a prompt.
         </li>
         <li>
           <b>Every round we check, and we compare against YOLO.</b>
-          After each round MedSAM2 is checked on patients it never trains on. At the end both
-          models are scored on the same test patients, patient by patient, so the real question
-          gets a real answer: <b>did MedSAM2 make YOLO's guess better or worse?</b>
+          The check is the real thing: a full forward-and-backward pass per patient. At the end
+          both models are scored on the same test patients, so the real question gets a real
+          answer: <b>did MedSAM2 make YOLO's guess better or worse?</b>
         </li>
       </ol>
       <p class="note" id="howNote"></p>
+      <p class="note warn hidden" id="oracleNote"></p>
     </section>
 
     <!-- ================= START ================= -->
@@ -99,15 +109,45 @@
             <input id="fEmptyLogit" type="number" step="any" min="-30" max="0"></label>
           <p class="note" id="variantNote"></p>
 
+          <p class="card-sub">Anchors &mdash; which slices are pointed at</p>
+          <label class="fld">How the first anchor is chosen <em>(anchors.pick)</em>
+            <select id="fAnchorPick"></select></label>
+          <label class="fld">How many to start with <em>(anchors.count)</em>
+            <input id="fAnchorCount" type="number" step="1" min="1" max="20"></label>
+          <label class="fld">Slices between anchors <em>(anchors.min_gap)</em>
+            <input id="fAnchorGap" type="number" step="1" min="1" max="60"></label>
+          <p class="note" id="anchorNote"></p>
+
+          <p class="card-sub">Correction rounds (HITL)</p>
+          <label class="fld">Who picks the next anchor <em>(hitl.source)</em>
+            <select id="fHitlSource"></select></label>
+          <label class="fld">Rounds at most <em>(hitl.rounds)</em>
+            <input id="fHitlRounds" type="number" step="1" min="1" max="10"></label>
+          <label class="fld">Stop when a round changes less than <em>(hitl.min_improvement)</em>
+            <input id="fHitlMin" type="number" step="any" min="0" max="0.5"></label>
+          <label class="fld">Good enough (expert only) <em>(hitl.target_dice)</em>
+            <input id="fHitlTarget" type="number" step="any" min="0.5" max="1"></label>
+          <p class="note" id="hitlNote"></p>
+
           <p class="card-sub">Data &mdash; who it learns from</p>
           <label class="fld">Patients per round <em>(data.max_train_patients)</em>
             <input id="fMaxTrain" type="number" step="1" min="1" placeholder="all"></label>
           <label class="fld">Patients in the round check <em>(data.val_patients)</em>
             <input id="fValPatients" type="number" step="1" min="1" placeholder="all"></label>
-          <label class="fld">Share of empty slices kept <em>(data.neg_fraction)</em>
-            <input id="fNegFraction" type="number" step="any" min="0" max="1"></label>
+          <label class="fld">Clips per patient <em>(data.clips_per_patient)</em>
+            <input id="fClips" type="number" step="1" min="1" max="64"></label>
+          <label class="fld">Share of clips with tumour <em>(data.tumour_clip_fraction)</em>
+            <input id="fTumourClips" type="number" step="any" min="0" max="1"></label>
           <label class="fld">Least brain on a slice <em>(data.min_fg_voxels)</em>
             <input id="fMinFg" type="number" step="10" min="0" max="50000"></label>
+
+          <p class="card-sub">Clips &mdash; how far the answer has to travel</p>
+          <label class="fld">Slices in a clip <em>(video.num_frames)</em>
+            <input id="fNumFrames" type="number" step="1" min="2" max="32"></label>
+          <label class="fld">Share read backwards <em>(video.reverse_fraction)</em>
+            <input id="fReverse" type="number" step="any" min="0" max="1"></label>
+          <label class="fld">Clips per step <em>(video.batch)</em>
+            <input id="fVideoBatch" type="number" step="1" min="1" max="8"></label>
 
           <p class="card-sub">Training &mdash; how it learns</p>
           <label class="fld">Starting checkpoint <em>(model.checkpoint)</em>
@@ -118,9 +158,7 @@
             <input id="fEpochs" type="number" step="1" min="1" max="500"></label>
           <label class="fld">Stop after N quiet rounds <em>(train.patience)</em>
             <input id="fPatience" type="number" step="1" min="0" max="500"></label>
-          <label class="fld">Slices per step <em>(train.batch)</em>
-            <input id="fBatch" type="number" step="1" min="1" max="64"></label>
-          <label class="fld">Steps added up before a correction <em>(train.accum)</em>
+          <label class="fld">Clips added up before a correction <em>(train.accum)</em>
             <input id="fAccum" type="number" step="1" min="1" max="64"></label>
           <label class="fld">Learning rate <em>(train.lr)</em>
             <input id="fLr" type="number" step="any" min="0.0000001" max="0.01"></label>
@@ -215,6 +253,27 @@
       </div>
     </section>
 
+    <!-- ================= HITL ROUNDS ================= -->
+    <section class="card" id="secRounds">
+      <div class="card-head">
+        <h2>What the correction rounds did</h2>
+        <p class="card-sub">Round 1 is the first anchor alone. Each later round added one more anchor
+          and propagated the whole volume again.</p>
+      </div>
+      <div class="curve-grid">
+        <div>
+          <h3>Score after each round</h3>
+          <p class="note">Averaged over the patients that were still running at that round —
+            a patient stops as soon as its answer settles.</p>
+          <div id="chRounds"></div>
+        </div>
+        <div>
+          <h3>How many anchors each patient ended up with</h3>
+          <div id="chAnchors"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- ================= DID IT HELP ================= -->
     <section class="card" id="secHelp">
       <div class="card-head">
@@ -256,7 +315,7 @@
     <section class="card" id="secPatient">
       <div class="card-head">
         <h2>One patient, slice by slice</h2>
-        <p class="card-sub">Runs the chosen checkpoint over every brain slice of one patient (a few seconds).</p>
+        <p class="card-sub">Propagates the whole volume with the chosen checkpoint (a few seconds).</p>
       </div>
       <div class="viewer-ctrls">
         <label class="fld">Checkpoint <select id="pWhich">
@@ -268,6 +327,9 @@
       </div>
       <div id="chProfile"></div>
       <p class="note" id="profileNote"></p>
+      <div class="table-wrap" id="roundsWrap">
+        <table class="tbl" id="roundsTbl"><thead></thead><tbody></tbody></table>
+      </div>
     </section>
 
     <!-- ================= SLICE VIEWER ================= -->
@@ -305,8 +367,8 @@
           <div id="chBySize"></div>
         </div>
         <div>
-          <h3>Gain vs how sure YOLO was</h3>
-          <div id="chByConf"></div>
+          <h3>Gain vs how many anchors it needed</h3>
+          <div id="chByAnchors"></div>
         </div>
       </div>
     </section>

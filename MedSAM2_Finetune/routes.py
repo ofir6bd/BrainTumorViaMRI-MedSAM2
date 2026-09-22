@@ -37,14 +37,24 @@ EDITABLE = {
     "prompt.score_min": ("float", 0.0, 0.95),
     "prompt.logit_scale": ("float", 0.05, 20.0),
     "prompt.empty_logit": ("float", -30.0, 0.0),
+    "anchors.pick": ("choice", "anchor_rules"),
+    "anchors.count": ("int", 1, 20),
+    "anchors.min_gap": ("int", 1, 60),
+    "hitl.rounds": ("int", 1, 10),
+    "hitl.min_improvement": ("float", 0.0, 0.5),
+    "hitl.target_dice": ("float", 0.5, 1.0),
+    "hitl.source": ("choice", "hitl_sources"),
     "model.checkpoint": ("choice", "checkpoints"),
     "data.max_train_patients": ("int?", 1, 5000),
     "data.val_patients": ("int?", 1, 5000),
-    "data.neg_fraction": ("float", 0.0, 1.0),
+    "data.clips_per_patient": ("int", 1, 64),
+    "data.tumour_clip_fraction": ("float", 0.0, 1.0),
     "data.min_fg_voxels": ("int", 0, 50000),
+    "video.num_frames": ("int", 2, 32),
+    "video.reverse_fraction": ("float", 0.0, 1.0),
+    "video.batch": ("int", 1, 8),
     "train.epochs": ("int", 1, 500),
     "train.patience": ("int", 0, 500),
-    "train.batch": ("int", 1, 64),
     "train.accum": ("int", 1, 64),
     "train.lr": ("float", 1e-7, 1e-2),
     "train.vision_lr": ("float", 1e-8, 1e-3),
@@ -57,7 +67,16 @@ EDITABLE = {
     "train.workers": ("int", 0, 16),
     "evaluate.mask_threshold": ("float", -10.0, 10.0),
 }
-# Changing any of these makes a different prompt cache, which has to be built before training.
+ANCHOR_RULES = {
+    "yolo_peak": "the slice where YOLO is most sure and the tumour looks biggest",
+    "yolo_score": "the slice with YOLO's single highest-scoring blob",
+    "spread": "evenly spaced over the slices YOLO marked",
+    "expert_peak": "the expert mask's biggest slice — ORACLE, an upper bound, not a result",
+}
+HITL_SOURCES = {
+    "yolo": "the next anchor goes where the prediction disagrees most with YOLO (automatic)",
+    "expert": "the next anchor comes from the expert mask — ORACLE, like the old 05_infer script",
+}
 REBUILDS = ("prompt.yolo_run", "prompt.yolo_conf", "prompt.score_min", "data.min_fg_voxels")
 
 medsam2_bp = Blueprint("medsam2", __name__, url_prefix="/medsam2", template_folder="templates",
@@ -136,6 +155,9 @@ def run_summary(run_id):
         "checkpoint": cfg["model"]["checkpoint"], "variant": cfg["prompt"]["variant"],
         "yolo_run": st.get("yolo_run") or cfg["prompt"]["yolo_run"] or "(best)",
         "unfreeze": cfg["train"]["unfreeze"], "epochs_cfg": cfg["train"]["epochs"],
+        "anchors": cfg.get("anchors", {}).get("pick"), "rounds": cfg.get("hitl", {}).get("rounds"),
+        "hitl_source": cfg.get("hitl", {}).get("source"),
+        "oracle": bool(ev.get("oracle")) if ev else None,
         "state": st.get("state"), "stage": st.get("stage"), "epoch": st.get("epoch"),
         "epochs": st.get("epochs"), "started": st.get("started"), "finished": st.get("finished"),
         "error": st.get("error"), "epochs_done": len(res.get("epoch", [])),
@@ -170,6 +192,7 @@ def spawn(rdir, *extra):
 def _choices():
     return {"yolo_runs": [r["id"] for r in yolo_runs()] + [""],
             "variants": list(PROMPT_VARIANTS), "unfreeze": list(UNFREEZE),
+            "anchor_rules": list(ANCHOR_RULES), "hitl_sources": list(HITL_SOURCES),
             "checkpoints": checkpoints()}
 
 
@@ -194,6 +217,7 @@ def api_overview():
                     else {"kind": v[0], "min": v[1], "max": v[2]}) for k, v in EDITABLE.items()}
     return jsonify({"config_text": text, "config": cfg, "editable": editable, "rebuilds": REBUILDS,
                     "variants": PROMPT_VARIANTS, "unfreeze": UNFREEZE, "pools": pools,
+                    "anchor_rules": ANCHOR_RULES, "hitl_sources": HITL_SOURCES,
                     "yolo_runs": yolo_runs(), "checkpoints": checkpoints(),
                     "active": active_run(), "runs": [run_summary(r) for r in run_ids()]})
 
@@ -359,7 +383,7 @@ def api_pool_patients():
 # ---------------------------------------------------------------------------- slice viewer
 _models = OrderedDict()
 _entries = OrderedDict()
-_profiles = OrderedDict()
+_runs = OrderedDict()      # (run, patient, which) -> one propagation, reused by every panel
 
 
 def _cached(store, key, make, size):
@@ -383,8 +407,7 @@ def _model_of(run_id, which="best.pt"):
     if not os.path.exists(os.path.join(d, "weights", which)):
         abort(404, f"This run has no {which} yet.")
     cfg = run_config(run_id)
-    key = (d, which)
-    return _cached(_models, key, lambda: load_run_model(d, cfg, _device(cfg), which)[0], 1)
+    return _cached(_models, (d, which), lambda: load_run_model(d, cfg, _device(cfg), which)[0], 1)
 
 
 def _entry_of(run_id, patient_id):
@@ -405,20 +428,38 @@ def _entry_of(run_id, patient_id):
     return _cached(_entries, (run_id, patient_id), lambda: load_prompt(cfg, patient_id), 2)
 
 
+def _prediction(run_id, patient_id, which="best.pt"):
+    """Propagate this patient once (a few seconds) and keep the result for every panel."""
+    from .evaluate import run_patient
+
+    if which not in ("best.pt", "last.pt"):
+        abort(400, "which must be best.pt or last.pt")
+    cfg = run_config(run_id)
+    entry = _entry_of(run_id, patient_id)
+    key = (run_id, patient_id, which)
+    return entry, _cached(_runs, key, lambda: run_patient(
+        _model_of(run_id, which), cfg, patient_id, _device(cfg), entry), 2)
+
+
+def _mask_at(cfg, out, k):
+    """The MedSAM2 mask on one slice, from the propagated logits."""
+    m = out["logits"][k] > float(cfg["evaluate"]["mask_threshold"])
+    if cfg["evaluate"]["use_obj_score"] and out["objs"][k] <= 0:
+        m = np.zeros_like(m)
+    return m
+
+
 @medsam2_bp.route("/api/runs/<run_id>/profile.json")
 def api_profile(run_id):
-    """Run this run's model over every brain slice of one patient (a few seconds)."""
+    """Propagate one patient through this run's model and chart it slice by slice."""
     from .evaluate import patient_profile
 
     patient_id = request.args.get("patient", "")
     which = request.args.get("which", "best.pt")
-    if which not in ("best.pt", "last.pt"):
-        abort(400, "which must be best.pt or last.pt")
     cfg = run_config(run_id)
-    _entry_of(run_id, patient_id)          # makes sure the prompt cache exists
-    key = (run_id, patient_id, which)
-    return jsonify(_cached(_profiles, key, lambda: patient_profile(
-        _model_of(run_id, which), cfg, patient_id, _device(cfg)), 8))
+    entry, out = _prediction(run_id, patient_id, which)
+    return jsonify(patient_profile(_model_of(run_id, which), cfg, patient_id,
+                                   _device(cfg), entry, out))
 
 
 def _heat(prob, base):
@@ -434,22 +475,24 @@ def _heat(prob, base):
     return (base * (1 - alpha) + colour * alpha).astype(np.uint8)
 
 
+def _slice_index(entry, z):
+    zs = [int(v) for v in entry["z"]]
+    try:
+        z = int(z or zs[0])
+    except ValueError:
+        abort(400, "z must be a whole number")
+    return zs, int(np.argmin([abs(v - z) for v in zs]))
+
+
 @medsam2_bp.route("/api/runs/<run_id>/slice.png")
 def api_slice_png(run_id):
     """Panels for one slice: the frame, YOLO's probability, and what MedSAM2 made of it."""
-    from .evaluate import predict_slices
-
     patient_id = request.args.get("patient", "")
     which = request.args.get("which", "best.pt")
     panels = (request.args.get("panels") or "frame,prompt,medsam2,yolo").split(",")
-    entry = _entry_of(run_id, patient_id)
     cfg = run_config(run_id)
-    zs = [int(v) for v in entry["z"]]
-    try:
-        z = int(request.args.get("z") or zs[0])
-    except ValueError:
-        abort(400, "z must be a whole number")
-    k = int(np.argmin([abs(v - z) for v in zs]))
+    entry, out = _prediction(run_id, patient_id, which)
+    zs, k = _slice_index(entry, request.args.get("z"))
 
     rgb = entry["rgb"][k]
     gt = entry["gt"][k] > 0
@@ -462,14 +505,7 @@ def api_slice_png(run_id):
         elif name == "prompt":
             pics.append(_heat(entry["prob"][k], flair))
         elif name in ("yolo", "medsam2"):
-            if name == "medsam2":
-                logits, objs = predict_slices(_model_of(run_id, which), entry, cfg,
-                                              _device(cfg), [k])
-                mask = logits[0] > float(cfg["evaluate"]["mask_threshold"])
-                if cfg["evaluate"]["use_obj_score"] and objs[0] <= 0:
-                    mask = np.zeros_like(mask)
-            else:
-                mask = yolo
+            mask = _mask_at(cfg, out, k) if name == "medsam2" else yolo
             base = flair.copy()
             for key, m in (("tp", gt & mask), ("fn", gt & ~mask), ("fp", mask & ~gt)):
                 base[m] = base[m] * 0.35 + np.array(OVERLAY[key]) * 0.65
@@ -494,28 +530,22 @@ def api_slice_png(run_id):
 def api_slice_json(run_id):
     """The numbers under the picture, for one slice."""
     from .common import dice
-    from .evaluate import predict_slices
 
     patient_id = request.args.get("patient", "")
     which = request.args.get("which", "best.pt")
-    entry = _entry_of(run_id, patient_id)
     cfg = run_config(run_id)
-    zs = [int(v) for v in entry["z"]]
-    try:
-        z = int(request.args.get("z") or zs[0])
-    except ValueError:
-        abort(400, "z must be a whole number")
-    k = int(np.argmin([abs(v - z) for v in zs]))
+    entry, out = _prediction(run_id, patient_id, which)
+    zs, k = _slice_index(entry, request.args.get("z"))
     gt = entry["gt"][k] > 0
     yolo = entry["prob_f"][k] > 127
-    logits, objs = predict_slices(_model_of(run_id, which), entry, cfg, _device(cfg), [k])
-    mask = logits[0] > float(cfg["evaluate"]["mask_threshold"])
-    if cfg["evaluate"]["use_obj_score"] and objs[0] <= 0:
-        mask = np.zeros_like(mask)
+    mask = _mask_at(cfg, out, k)
     stat = lambda m: {"px": int(m.sum()), "inter": int((m & gt).sum()),      # noqa: E731
                       "dice": round(dice(int((m & gt).sum()), int(m.sum()), int(gt.sum())), 4)}
     return jsonify({"z": zs[k], "brain_slices": zs, "gt": int(gt.sum()),
                     "yolo": stat(yolo), "medsam2": stat(mask),
-                    "obj_score": round(float(objs[0]), 3),
+                    "obj_score": round(float(out["objs"][k]), 3),
                     "yolo_score": round(float(entry["scores"][k]), 3),
-                    "blobs": int(entry["nblobs"][k])})
+                    "blobs": int(entry["nblobs"][k]),
+                    "is_anchor": k in out["anchors"],
+                    "anchor_z": [int(entry["z"][a]) for a in out["anchors"]],
+                    "rounds": out["rounds"]})

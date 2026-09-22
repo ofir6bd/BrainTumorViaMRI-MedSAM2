@@ -1,12 +1,14 @@
-"""Training samples: one axial slice each, read straight from the prompt cache.
+"""Training samples: short clips of consecutive slices, read from the prompt cache.
 
-A sample is (frame, YOLO prompt, expert mask). All three come from the same patient file,
-so training never opens a NIfTI and never re-runs YOLO.
+A sample is one clip — the **anchor** slice plus the `video.num_frames - 1` slices after it.
+Only the anchor is prompted (with YOLO's map); the rest are what the model has to reach
+through memory, and they are exactly where the loss has something to teach.
 
-Slices are handed out patient by patient (shuffled inside each patient, patients shuffled
-every round). That keeps one patient's file hot in memory while its slices are used, and
-costs nothing in correctness: SAM2 normalises per sample (LayerNorm), so a batch drawn
-from one patient is not a batch-statistics problem the way it would be with BatchNorm.
+Half the clips (`video.reverse_fraction`) are fed in descending z. To the model that is
+still "first frame, then the next ones", so it learns to carry a prediction in both
+directions — which is what the two propagation passes do at inference.
+
+Clips are drawn patient by patient so each cache file is read once.
 """
 from collections import OrderedDict
 
@@ -15,42 +17,56 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
+from . import anchors as anchor_rules
 from .common import to_model_image
 from .yolo_prompts import load_prompt, prompt_logits
 
 
-def sample_slices(cfg, patients, seed=0, train=True):
-    """Which slices to use: every tumour slice, plus a share of the empty ones.
+def sample_clips(cfg, patients, seed=0):
+    """Which clips to train on: (patient id, first slice index, step).
 
-    Empty slices are what teach "draw nothing here", so they are kept — but all of them
-    would swamp the tumour ones, hence `neg_fraction`. Evaluation always uses every brain
-    slice, so the reported 3D Dice is over the whole patient.
+    `step` is +1 or -1 — a clip read backwards is the same slices in the other order.
+    Most clips start on a slice YOLO is confident about, because that is what an anchor
+    looks like at inference; the rest start anywhere, so empty stretches are seen too.
     """
-    d = cfg["data"]
+    d, v = cfg["data"], cfg["video"]
     rng = np.random.default_rng(seed)
+    n_frames = v["num_frames"]
     items = []
     for p in patients:
-        entry = load_prompt(cfg, p["id"], keys=("z", "gt_px"))
-        idx = np.arange(len(entry["z"]))
-        if not train:
-            items += [(p["id"], int(i)) for i in idx]
+        entry = load_prompt(cfg, p["id"], keys=("z", "gt_px", "prob", "scores"))
+        n = len(entry["z"])
+        if n < n_frames:
             continue
-        pos = idx[entry["gt_px"] > 0]
-        neg = idx[entry["gt_px"] == 0]
-        take = int(round(len(neg) * float(d["neg_fraction"])))
-        chosen = np.concatenate([pos, rng.choice(neg, size=take, replace=False)]) if take else pos
-        if d.get("max_slices_per_patient") and len(chosen) > d["max_slices_per_patient"]:
-            chosen = rng.choice(chosen, size=d["max_slices_per_patient"], replace=False)
-        items += [(p["id"], int(i)) for i in sorted(chosen.tolist())]
+        strength = anchor_rules.strength(entry, cfg)
+        strong = np.nonzero(strength > 0)[0]
+        want = int(d["clips_per_patient"])
+        n_tumour = int(round(want * float(d["tumour_clip_fraction"])))
+        starts = []
+        if len(strong):
+            weights = strength[strong] / strength[strong].sum()
+            starts += list(rng.choice(strong, size=min(n_tumour, len(strong) * 3),
+                                      replace=True, p=weights))
+        starts += list(rng.integers(0, n, size=want - len(starts)))
+        for start in starts[:want]:
+            step = -1 if rng.random() < float(v["reverse_fraction"]) else 1
+            start = int(start)
+            # keep the whole clip inside the volume, in the direction it is read
+            if step == 1:
+                start = min(start, n - n_frames)
+            else:
+                start = max(start, n_frames - 1)
+            items.append((p["id"], start, step))
     return items
 
 
-class SliceDataset(Dataset):
+class ClipDataset(Dataset):
     def __init__(self, cfg, items, train=True, cache_size=2):
         self.cfg = cfg
         self.items = items
         self.train = train
         self.size = cfg["model"]["image_size"]
+        self.n_frames = cfg["video"]["num_frames"]
         self.cache_size = cache_size
         self._store = OrderedDict()
 
@@ -66,44 +82,53 @@ class SliceDataset(Dataset):
         return self._store[patient_id]
 
     def __getitem__(self, i):
-        patient_id, k = self.items[i]
+        patient_id, start, step = self.items[i]
         entry = self._entry(patient_id)
-        rgb = entry["rgb"][k]
-        gt = entry["gt"][k]
-        prompt = prompt_logits(entry, self.cfg, k)[0]
+        idx = [start + step * k for k in range(self.n_frames)]
+        rgb = entry["rgb"][idx]
+        gt = entry["gt"][idx]
+        prompt = prompt_logits(entry, self.cfg, idx[0])[0]        # the anchor is frame 0
 
         if self.train and np.random.rand() < float(self.cfg["train"]["fliplr"]):
             # axis 0 of these arrays is the left-right axis of the head, so a flip here is
-            # a plausible brain; tumours occur on both sides.
-            rgb, gt, prompt = rgb[::-1], gt[::-1], prompt[::-1]
+            # still a plausible brain; tumours occur on both sides.
+            rgb, gt, prompt = rgb[:, ::-1], gt[:, ::-1], prompt[::-1]
 
         size = self.size
-        image = to_model_image(np.ascontiguousarray(rgb), size)
-        gt_t = torch.from_numpy(np.ascontiguousarray(gt)).float()[None, None]
-        gt_t = F.interpolate(gt_t, size=(size, size), mode="nearest")[0]
-        pr_t = torch.from_numpy(np.ascontiguousarray(prompt)).float()[None, None]
-        pr_t = F.interpolate(pr_t, size=(size, size), mode="bilinear", align_corners=False)[0]
-        return {"image": image, "prompt": pr_t, "gt": gt_t,
-                "patient": patient_id, "k": k, "z": int(entry["z"][k])}
+        images = torch.stack([to_model_image(np.ascontiguousarray(f), size) for f in rgb])
+        masks = F.interpolate(torch.from_numpy(np.ascontiguousarray(gt)).float()[:, None],
+                              size=(size, size), mode="nearest")[:, 0] > 0.5
+        pr = torch.from_numpy(np.ascontiguousarray(prompt)).float()[None, None]
+        pr = F.interpolate(pr, size=(size, size), mode="bilinear", align_corners=False)[0]
+        return {"images": images, "masks": masks, "prompt": pr,
+                "patient": patient_id, "z": [int(entry["z"][k]) for k in idx]}
 
 
 def collate(batch):
-    out = {k: torch.stack([b[k] for b in batch]) for k in ("image", "prompt", "gt")}
-    out["patient"] = [b["patient"] for b in batch]
-    out["z"] = [b["z"] for b in batch]
-    return out
+    """Into the shapes the vendored tracking code expects: frames first, then clips."""
+    images = torch.stack([b["images"] for b in batch], dim=1)        # [T, B, 3, S, S]
+    masks = torch.stack([b["masks"] for b in batch], dim=1)          # [T, B, S, S]
+    prompts = torch.stack([b["prompt"] for b in batch])[None]        # [1, B, 1, S, S]
+    t, b = images.shape[0], images.shape[1]
+    obj_to_frame_idx = torch.stack([
+        torch.arange(t)[:, None].expand(t, b),                       # frame index
+        torch.arange(b)[None, :].expand(t, b),                       # clip index
+    ], dim=-1)
+    return {"images": images, "masks": masks, "prompts": prompts,
+            "obj_to_frame_idx": obj_to_frame_idx,
+            "patient": [b["patient"] for b in batch], "z": [b["z"] for b in batch]}
 
 
 class PatientShuffle(torch.utils.data.Sampler):
-    """Shuffle patients each round, and the slices inside each patient, but keep a
-    patient's slices together so its file is read once."""
+    """Shuffle patients each round, and the clips inside each patient, but keep a patient's
+    clips together so its cache file is read once."""
 
     def __init__(self, items, seed=0):
         self.items = items
         self.seed = seed
         self.epoch = 0
         self.groups = OrderedDict()
-        for i, (patient_id, _) in enumerate(items):
+        for i, (patient_id, _start, _step) in enumerate(items):
             self.groups.setdefault(patient_id, []).append(i)
 
     def set_epoch(self, epoch):

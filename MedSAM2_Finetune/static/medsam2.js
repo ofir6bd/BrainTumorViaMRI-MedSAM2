@@ -51,11 +51,18 @@
   const FIELDS = {
     "prompt.yolo_run": "fYoloRun", "prompt.variant": "fVariant", "prompt.yolo_conf": "fYoloConf",
     "prompt.score_min": "fScoreMin", "prompt.logit_scale": "fLogitScale",
-    "prompt.empty_logit": "fEmptyLogit", "model.checkpoint": "fCheckpoint",
+    "prompt.empty_logit": "fEmptyLogit",
+    "anchors.pick": "fAnchorPick", "anchors.count": "fAnchorCount", "anchors.min_gap": "fAnchorGap",
+    "hitl.source": "fHitlSource", "hitl.rounds": "fHitlRounds",
+    "hitl.min_improvement": "fHitlMin", "hitl.target_dice": "fHitlTarget",
+    "model.checkpoint": "fCheckpoint",
     "data.max_train_patients": "fMaxTrain", "data.val_patients": "fValPatients",
-    "data.neg_fraction": "fNegFraction", "data.min_fg_voxels": "fMinFg",
+    "data.clips_per_patient": "fClips", "data.tumour_clip_fraction": "fTumourClips",
+    "data.min_fg_voxels": "fMinFg",
+    "video.num_frames": "fNumFrames", "video.reverse_fraction": "fReverse",
+    "video.batch": "fVideoBatch",
     "train.unfreeze": "fUnfreeze", "train.epochs": "fEpochs", "train.patience": "fPatience",
-    "train.batch": "fBatch", "train.accum": "fAccum", "train.lr": "fLr",
+    "train.accum": "fAccum", "train.lr": "fLr",
     "train.vision_lr": "fVisionLr", "train.dice_weight": "fDiceW", "train.bce_weight": "fBceW",
     "train.fliplr": "fFliplr", "train.workers": "fWorkers",
   };
@@ -69,10 +76,14 @@
     runs.unshift({ value: "", label: "best scoring run (automatic)" });
     fillSelect($("fYoloRun"), runs);
     fillSelect($("fVariant"), Object.keys(ov.variants).map((k) => ({ value: k, label: k })));
+    // the automatic choices first; the two that read the expert mask go last
+    const autoFirst = (o) => Object.keys(o).sort((x, y) => x.includes("expert") - y.includes("expert"));
+    fillSelect($("fAnchorPick"), autoFirst(ov.anchor_rules).map((k) => ({ value: k, label: k })));
+    fillSelect($("fHitlSource"), autoFirst(ov.hitl_sources).map((k) => ({ value: k, label: k })));
     fillSelect($("fCheckpoint"), ov.checkpoints.map((k) => ({ value: k, label: k })));
     fillSelect($("fUnfreeze"), Object.keys(ov.unfreeze).map((k) => ({ value: k, label: k })));
     resetForm();
-    $("fVariant").addEventListener("change", showVariantNote);
+    ["fVariant", "fAnchorPick", "fHitlSource"].forEach((id) => $(id).addEventListener("change", showVariantNote));
     Object.values(FIELDS).forEach((id) => $(id).addEventListener("change", showEstimate));
     showVariantNote();
   }
@@ -91,7 +102,19 @@
   function showVariantNote() {
     const ov = S.overview;
     const v = $("fVariant").value;
+    const a = $("fAnchorPick").value;
+    const h = $("fHitlSource").value;
     $("variantNote").innerHTML = `<b>${esc(v)}</b> — ${esc(ov.variants[v] || "")}`;
+    $("anchorNote").innerHTML = `<b>${esc(a)}</b> — ${esc(ov.anchor_rules[a] || "")}`;
+    $("hitlNote").innerHTML = `<b>${esc(h)}</b> — ${esc(ov.hitl_sources[h] || "")}`;
+    const oracle = a === "expert_peak" || h === "expert";
+    $("oracleNote").classList.toggle("hidden", !oracle);
+    $("oracleNote").innerHTML = oracle
+      ? "<b>This will be an ORACLE run.</b> The anchors are chosen by reading the expert mask, "
+        + "the way the old hand-prompted pipeline did. The score it produces is an upper bound — "
+        + "what MedSAM2 could reach if someone always pointed at the right slice — not a result "
+        + "you can compare with an automatic run."
+      : "";
   }
   function showEstimate() {
     const ov = S.overview;
@@ -102,7 +125,11 @@
     }).map(([key]) => key);
     const rebuild = changed.filter((k) => ov.rebuilds.includes(k));
     const n = Number($("fMaxTrain").value || ov.pools.train || 0);
-    const parts = [`About <b>${n}</b> patients per round; the hint for each patient is worked out once and kept.`];
+    const clips = n * Number($("fClips").value || 1);
+    const checks = Number($("fValPatients").value || ov.pools.val || 0);
+    const parts = [`About <b>${n}</b> patients per round = <b>${clips}</b> clips of
+      ${esc($("fNumFrames").value)} slices. The check after each round propagates
+      <b>${checks}</b> whole patients, so it is the slow part.`];
     if (rebuild.length) {
       parts.push(`<b>The hints will be worked out again</b> (you changed ${rebuild.map(esc).join(", ")}) —
         that is a YOLO pass over every slice of every patient used, which takes a while the first time.`);
@@ -128,6 +155,8 @@
     ["variant", "Prompt style", (r) => esc(r.variant)],
     ["yolo_run", "From YOLO", (r) => `<code>${esc(r.yolo_run)}</code>`],
     ["unfreeze", "Weights changed", (r) => esc(r.unfreeze)],
+    ["anchors", "Anchors", (r) => `${esc(r.anchors || "—")}${r.oracle ? ' <span class="badge oracle">oracle</span>' : ""}`],
+    ["hitl", "Rounds", (r) => `${r.rounds || "—"} <span class="dim">${esc(r.hitl_source || "")}</span>`],
     ["rounds", "Rounds", (r) => `${r.epochs_done}/${r.epochs_cfg}`, true],
     ["best", "Best check score", (r) => (r.best ? `${f4(r.best.val_dice3d)} <span class="dim">@${r.best.epoch}</span>` : "—"), true],
     ["test", "Test 3D Dice", (r) => (r.test ? `<b>${f4(r.test.dice3d_mean)}</b>` : "—"), true],
@@ -212,7 +241,7 @@
     if (st.loss != null) k.push(["Loss now", f4(st.loss), "lower is better"]);
     if (st.best_val_dice3d != null) k.push(["Best check score", f4(st.best_val_dice3d), "3D Dice on the check pool"]);
     if (st.since_best != null) k.push(["Rounds since the best", st.since_best, `stops at ${run.config ? run.config.train.patience : "—"}`]);
-    if (st.train_slices) k.push(["Slices per round", st.train_slices.toLocaleString(), `${st.train_patients} patients`]);
+    if (st.train_clips) k.push(["Clips per round", st.train_clips.toLocaleString(), `${st.train_patients} patients`]);
     $("liveKpis").innerHTML = k.map(([l, v, s]) => kpi(l, v, s)).join("");
     $("btnStop").disabled = !live;
     $("btnResume").disabled = !run || live || !run.has_last;
@@ -296,7 +325,14 @@
       kpi("Found a tumour slice", pct(test.sensitivity), "of slices with tumour"),
       kpi("Left empty slices empty", pct(test.specificity), "of slices without tumour"),
       kpi("Cut-off used", test.threshold, `best here: ${test.best_threshold}${ev.val ? ` · best on check: ${ev.val.best_threshold}` : ""}`),
+      kpi("Anchors per patient", f2(test.anchors_mean), `${f2(test.rounds_mean)} correction rounds`),
     ].join("");
+    if (test.oracle) {
+      kp.insertAdjacentHTML("afterbegin",
+        '<p class="err" style="grid-column:1/-1;margin:0 0 8px">These numbers are from an '
+        + '<b>oracle</b> run: the anchors were chosen by reading the expert mask. Treat them as an '
+        + 'upper bound, not as a result.</p>');
+    }
 
     const series = [{ name: "test", color: COL.medsam2, points: test.sweep.map((s) => [s.threshold, s.dice3d_mean]) }];
     if (ev.val) series.push({ name: "check (val)", color: COL.val, dash: "4 3",
@@ -316,6 +352,25 @@
         <td class="ok">${d.tn.toLocaleString()}<em>correctly empty</em></td></tr></table>`;
   }
 
+  /* ------------------------------------------------------------------ HITL rounds */
+  function renderRounds() {
+    const ev = S.run && S.run.eval;
+    const part = ev && ev[S.split];
+    $("chRounds").innerHTML = "";
+    $("chAnchors").innerHTML = "";
+    if (!part || !part.by_round) return;
+    Charts.line($("chRounds"), {
+      height: 260, xLabel: "Correction round", yLabel: "Mean 3D Dice",
+      series: [{ name: "3D Dice", color: COL.medsam2,
+                 points: part.by_round.map((r) => [r.round, r.dice3d_mean]) }],
+      markers: part.by_round.map((r) => ({ x: r.round, label: `${r.patients} pt` })),
+    });
+    Charts.histogram($("chAnchors"), {
+      values: (part.patient_scores || []).map((r) => r.anchors), bins: 10, height: 260,
+      xLabel: "Anchors used", yLabel: "Patients", color: COL.val,
+    });
+  }
+
   /* ------------------------------------------------------------------ did it help */
   function scores() {
     const ev = S.run && S.run.eval;
@@ -332,7 +387,7 @@
       paired.innerHTML = '<p class="dim">Nothing scored on this pool yet.</p>';
       $("bestTbl").querySelector("tbody").innerHTML = "";
       $("worstTbl").querySelector("tbody").innerHTML = "";
-      $("chBySize").innerHTML = $("chByConf").innerHTML = "";
+      $("chBySize").innerHTML = $("chByAnchors").innerHTML = "";
       return;
     }
     // The grey "no change" line: points where MedSAM2 scored exactly what YOLO scored.
@@ -365,7 +420,7 @@
     table($("bestTbl"), sorted.slice(0, 10));
     table($("worstTbl"), sorted.slice(-10).reverse());
 
-    $("chBySize").innerHTML = $("chByConf").innerHTML = "";
+    $("chBySize").innerHTML = $("chByAnchors").innerHTML = "";
     Charts.scatter($("chBySize"), {
       points: rows.filter((r) => r.gt_total > 0).map((r) => ({
         x: r.gt_total, y: r.delta, color: r.delta >= 0 ? COL.gain : COL.loss,
@@ -373,20 +428,23 @@
               ${Charts.row(COL.gt, "tumour voxels", r.gt_total.toLocaleString())}` })),
       logX: true, height: 260, xLabel: "Tumour size (voxels, log scale)", yLabel: "Change in 3D Dice",
     });
-    Charts.scatter($("chByConf"), {
+    Charts.scatter($("chByAnchors"), {
       points: rows.map((r) => ({
-        x: r.score_mean, y: r.delta, color: r.delta >= 0 ? COL.gain : COL.loss,
-        tip: `<div class="tt-title">${esc(r.id)}</div>${Charts.row(COL.yolo, "mean YOLO score", f2(r.score_mean))}
+        x: r.anchors, y: r.delta, color: r.delta >= 0 ? COL.gain : COL.loss,
+        tip: `<div class="tt-title">${esc(r.id)}</div>${Charts.row(COL.val, "anchors", r.anchors)}
+              ${Charts.row(COL.yolo, "rounds", r.rounds)}
               ${Charts.row(COL.medsam2, "change", f4(r.delta))}` })),
-      height: 260, xLabel: "Average YOLO confidence over the patient's slices", yLabel: "Change in 3D Dice",
+      height: 260, xLabel: "Anchors the patient ended up with", yLabel: "Change in 3D Dice",
     });
   }
 
   function downloadCsv() {
     const rows = scores();
     if (!rows.length) return;
-    const head = ["patient", "yolo_dice3d", "medsam2_dice3d", "delta", "gt_voxels", "mean_yolo_score"];
-    const body = rows.map((r) => [r.id, r.yolo_dice3d, r.dice3d, r.delta, r.gt_total, r.score_mean].join(","));
+    const head = ["patient", "yolo_dice3d", "medsam2_dice3d", "delta", "gt_voxels",
+                  "mean_yolo_score", "anchors", "rounds"];
+    const body = rows.map((r) => [r.id, r.yolo_dice3d, r.dice3d, r.delta, r.gt_total,
+                                  r.score_mean, r.anchors, r.rounds].join(","));
     const blob = new Blob([[head.join(","), ...body].join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -443,10 +501,24 @@
       ],
       marker: S.slice ? S.slice.z : null,
       onClick: (x) => loadSlice(Math.round(x)),
+      markers: (p.anchor_z || []).map((z, i) => ({ x: z, label: i ? `anchor ${i + 1}` : "anchor" })),
     });
+    renderRoundsTable(p);
     $("profileNote").innerHTML = `<b>${esc(p.id)}</b> — 3D Dice: MedSAM2 <b>${f4(p.dice3d)}</b>,
       YOLO ${f4(p.yolo_dice3d)} (${deltaCell(p.delta)}). ${p.stored ? "From the stored results of the last scoring pass."
       : "Worked out just now on the graphics card."} Click the chart to jump to a slice.`;
+  }
+
+  function renderRoundsTable(p) {
+    const el = $("roundsTbl");
+    const rounds = p.rounds || [];
+    el.querySelector("thead").innerHTML = `<tr><th>Round</th><th>Anchor slices (z)</th>
+      <th class="num">3D Dice</th><th class="num">Same as the round before</th></tr>`;
+    el.querySelector("tbody").innerHTML = rounds.map((r) => `<tr>
+      <td>${r.round}</td><td><code>${(r.z || []).join(", ")}</code></td>
+      <td class="num">${f4(r.dice3d)}</td>
+      <td class="num">${r.same_as_previous == null ? "—" : f4(r.same_as_previous)}</td></tr>`).join("");
+    $("roundsWrap").classList.toggle("hidden", !rounds.length);
   }
 
   /* ------------------------------------------------------------------ slice viewer */
@@ -473,6 +545,8 @@
       kpi("YOLO alone", `${f4(info.yolo.dice)}`, `${info.yolo.px.toLocaleString()} px drawn · ${info.yolo.inter.toLocaleString()} right`),
       kpi("YOLO's best blob score", f2(info.yolo_score), `${info.blobs} blob(s)`),
       kpi("MedSAM2 “is there tumour”", f2(info.obj_score), "above 0 means yes"),
+      kpi("This slice", info.is_anchor ? "is an anchor" : "was reached by memory",
+          `anchors at z = ${(info.anchor_z || []).join(", ")}`),
     ].join("");
     if (S.profile) drawProfile(S.profile);
   }
@@ -506,6 +580,7 @@
     S.run = await api(`/api/runs/${S.runId}`).catch(() => null);
     renderLive(S.run);
     renderEval(S.run);
+    renderRounds();
     renderHelp();
     drawCurves();
     await pullLog(true);
@@ -517,11 +592,16 @@
       <b>${S.overview.pools.val}</b> check · <b>${S.overview.pools.test}</b> test patients ·
       ${S.overview.yolo_runs.length} YOLO run(s) available · ${S.overview.runs.length} fine-tune(s) here`;
     $("cfgText").innerHTML = highlightYaml(S.overview.config_text);
+    const c = S.overview.config;
     $("howNote").innerHTML = `Right now: prompts come from YOLO run
-      <code>${esc(S.overview.config.prompt.yolo_run || "the best scoring one")}</code>,
-      style <b>${esc(S.overview.config.prompt.variant)}</b>; MedSAM2 starts from
-      <code>${esc(S.overview.config.model.checkpoint)}</code> and only
-      <b>${esc(S.overview.config.train.unfreeze)}</b> may change.`;
+      <code>${esc(c.prompt.yolo_run || "the best scoring one")}</code>, style
+      <b>${esc(c.prompt.variant)}</b>; the first <b>${c.anchors.count}</b> anchor(s) are chosen by
+      <b>${esc(c.anchors.pick)}</b>, then up to <b>${c.hitl.rounds}</b> correction round(s) from
+      <b>${esc(c.hitl.source)}</b>; MedSAM2 starts from <code>${esc(c.model.checkpoint)}</code> and
+      only <b>${esc(c.train.unfreeze)}</b> may change.`;
+    document.querySelectorAll("[data-cfg]").forEach((el) => {
+      el.textContent = el.dataset.cfg.split(".").reduce((n, k) => (n == null ? n : n[k]), c);
+    });
     renderRuns();
     if (!S.runId && S.overview.runs.length) S.runId = S.overview.active || S.overview.runs[0].id;
   }
@@ -551,7 +631,7 @@
     $("btnResume").addEventListener("click", () => act("resume"));
     $("btnRescore").addEventListener("click", () => act("evaluate"));
     $("btnCsv").addEventListener("click", downloadCsv);
-    $("helpSplit").addEventListener("change", () => { S.split = $("helpSplit").value; writeHash(); renderHelp(); });
+    $("helpSplit").addEventListener("change", () => { S.split = $("helpSplit").value; writeHash(); renderRounds(); renderHelp(); });
     $("pSplit").addEventListener("change", () => loadPatients());
     $("pPatient").addEventListener("change", () => { S.patient = $("pPatient").value; writeHash(); });
     $("btnProfile").addEventListener("click", runProfile);
@@ -609,7 +689,7 @@
     renderLive(run);
     if (nowLive) await pullLog(false);
     if (run.epochs_done !== rounds) drawCurves();
-    if (wasLive && !nowLive) { renderEval(run); renderHelp(); await refresh(); }
+    if (wasLive && !nowLive) { renderEval(run); renderRounds(); renderHelp(); await refresh(); }
   }
 
   async function gpu() {

@@ -1,4 +1,4 @@
-"""Run one MedSAM2 fine-tune: build the YOLO prompts -> train on slices -> score val + test.
+"""Run one MedSAM2 fine-tune: build the YOLO prompts -> train on clips -> score val + test.
 
 From the repo root:
 
@@ -8,6 +8,11 @@ From the repo root:
     python -m MedSAM2_Finetune.train --run <dir>               # run a prepared folder (the page does this)
     python -m MedSAM2_Finetune.train --run <dir> --resume      # continue from its last.pt
     python -m MedSAM2_Finetune.train --run <dir> --evaluate-only
+
+Training works on clips: the anchor slice is prompted with YOLO's map and the rest of the
+clip is reached through SAM2's memory, which is exactly what inference does over a whole
+volume. The after-every-round check runs the real thing — a full forward + backward
+propagation per patient — so the score that picks the best round is the score we report.
 
 Each run lives in runs/<YYYYMMDD-HHMMSS>/: run_config.yaml (the exact settings), status.json
 (progress, read by the page), results.csv (one row per round), weights/ and eval/.
@@ -24,13 +29,13 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from .common import RUNS_DIR, build_model, load_config, read_json, write_json
-from .dataset import PatientShuffle, SliceDataset, collate, sample_slices
-from .evaluate import evaluate, quick_dice
-from .model import SliceSAM2, losses, param_groups
+from .common import RUNS_DIR, list_patients, load_config, read_json, write_json
+from .dataset import ClipDataset, PatientShuffle, collate, sample_clips
+from .evaluate import build_predictor, evaluate, quick_dice
+from .model import Clips, build_train_model, losses, param_groups
 
 SMOKE = {"max_train_patients": 2, "val_patients": 2, "epochs": 1, "max_patients": 2}
-CSV_COLUMNS = ["epoch", "time", "loss", "dice", "bce", "iou", "obj", "val_dice3d", "lr", "samples"]
+CSV_COLUMNS = ["epoch", "time", "loss", "dice", "bce", "iou", "obj", "val_dice3d", "lr", "clips"]
 
 
 class Status:
@@ -68,7 +73,6 @@ def new_run(overrides=(), smoke=False):
     if smoke:
         cfg["data"]["max_train_patients"] = SMOKE["max_train_patients"]
         cfg["data"]["val_patients"] = SMOKE["val_patients"]
-        cfg["data"]["neg_fraction"] = 0.2
         cfg["train"]["epochs"] = SMOKE["epochs"]
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = os.path.join(RUNS_DIR, run_id)
@@ -82,8 +86,6 @@ def new_run(overrides=(), smoke=False):
 
 
 def _pools(cfg):
-    from .common import list_patients
-
     d = cfg["data"]
     train = list_patients(d["train_pool"])
     val = list_patients(d["val_pool"])
@@ -113,24 +115,26 @@ def _save(path, model, optimizer, cfg, epoch, val_dice3d):
 
 
 def train(run_dir, cfg, status, resume=False):
-    """The fine-tune itself: slices in, mask logits out, Dice + BCE against the expert mask."""
+    """The fine-tune itself: clips in, per-frame mask logits out, Dice + BCE on every frame."""
     t = cfg["train"]
     device = f"cuda:{t['device']}" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(t["seed"])
     np.random.seed(t["seed"])
 
     train_patients, val_patients = _pools(cfg)
-    items = sample_slices(cfg, train_patients, seed=t["seed"], train=True)
+    items = sample_clips(cfg, train_patients, seed=t["seed"])
     status.update(train_patients=len(train_patients), val_patients=len(val_patients),
-                  train_slices=len(items))
-    print(f"[train] {len(items)} slices from {len(train_patients)} patients; "
-          f"checking on {len(val_patients)} val patients", flush=True)
+                  train_clips=len(items))
+    print(f"[train] {len(items)} clips of {cfg['video']['num_frames']} slices from "
+          f"{len(train_patients)} patients; checking on {len(val_patients)} val patients", flush=True)
 
-    model = SliceSAM2(build_model(cfg, device=device)).to(device)
+    model = build_train_model(cfg, device=device)
     optimizer = torch.optim.AdamW(param_groups(model, cfg), weight_decay=float(t["weight_decay"]))
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print(f"[train] training {trainable/1e6:.1f}M of {total/1e6:.1f}M weights ({t['unfreeze']})", flush=True)
+    # the checker is the real inference path, kept alongside and re-synced every round
+    checker, _ = build_predictor(cfg, device=device)
 
     weights_dir = os.path.join(run_dir, "weights")
     os.makedirs(weights_dir, exist_ok=True)
@@ -146,7 +150,7 @@ def train(run_dir, cfg, status, resume=False):
         print(f"[train] resuming after round {start_epoch}", flush=True)
 
     sampler = PatientShuffle(items, seed=t["seed"])
-    loader = DataLoader(SliceDataset(cfg, items, train=True), batch_size=t["batch"],
+    loader = DataLoader(ClipDataset(cfg, items, train=True), batch_size=cfg["video"]["batch"],
                         sampler=sampler, num_workers=t["workers"], collate_fn=collate,
                         pin_memory=True, drop_last=False,
                         persistent_workers=bool(t["workers"]))
@@ -161,12 +165,11 @@ def train(run_dir, cfg, status, resume=False):
         sums, n, seen, t0, last_report = {}, 0, 0, time.time(), 0.0
         optimizer.zero_grad(set_to_none=True)
         for step, batch in enumerate(loader):
-            image = batch["image"].to(device, non_blocking=True)
-            prompt = batch["prompt"].to(device, non_blocking=True)
-            gt = batch["gt"].to(device, non_blocking=True)
+            clips = Clips(batch["images"], batch["masks"], batch["obj_to_frame_idx"]).to(device)
+            prompts = batch["prompts"].to(device, non_blocking=True)
             with amp:
-                logits, ious, obj = model(image, prompt)
-            loss, parts = losses(logits.float(), ious, obj, gt, cfg)
+                outputs = model(clips, prompts, anchors=[0])
+            loss, parts = losses(outputs, clips, cfg)
             (loss / t["accum"]).backward()
             if (step + 1) % t["accum"] == 0:
                 torch.nn.utils.clip_grad_norm_([p for p in model.parameters() if p.requires_grad], 1.0)
@@ -175,7 +178,7 @@ def train(run_dir, cfg, status, resume=False):
             for k, v in parts.items():
                 sums[k] = sums.get(k, 0.0) + v
             n += 1
-            seen += len(batch["z"])
+            seen += len(batch["patient"])
             if time.time() - last_report > 2:   # no need to hit the disk every step
                 last_report = time.time()
                 status.update(epoch=epoch + 1, epochs=t["epochs"], batch=step + 1,
@@ -185,9 +188,10 @@ def train(run_dir, cfg, status, resume=False):
         scheduler.step()
 
         model.eval()
-        val_dice3d = quick_dice(model, cfg, val_patients, device=device)
+        checker.load_state_dict(model.sam2.state_dict())
+        val_dice3d = quick_dice(checker, cfg, val_patients, device=device)
         row = {"epoch": epoch + 1, "time": round(time.time() - t0, 1), "val_dice3d": round(val_dice3d, 4),
-               "lr": optimizer.param_groups[0]["lr"], "samples": seen,
+               "lr": optimizer.param_groups[0]["lr"], "clips": seen,
                **{k: round(v / max(n, 1), 4) for k, v in sums.items()}}
         _append_csv(os.path.join(run_dir, "results.csv"), row)
         _save(last_path, model, optimizer, cfg, epoch + 1, val_dice3d)
@@ -207,6 +211,8 @@ def train(run_dir, cfg, status, resume=False):
         if t["patience"] and since_best >= t["patience"]:
             print(f"[train] no better round for {since_best} rounds — stopping early", flush=True)
             break
+    del checker
+    torch.cuda.empty_cache()
     return best_path
 
 
@@ -222,8 +228,9 @@ def run(run_dir, resume=False, evaluate_only=False):
     try:
         chosen = yolo_run(cfg["prompt"]["yolo_run"])
         status.update(yolo_run=chosen["id"], prompt_key=prompt_key(cfg))
-        print(f"[prompts] YOLO run {chosen['id']} ({chosen['which']}), variant {cfg['prompt']['variant']}",
-              flush=True)
+        print(f"[prompts] YOLO run {chosen['id']} ({chosen['which']}), variant {cfg['prompt']['variant']}; "
+              f"anchors {cfg['anchors']['pick']} x{cfg['anchors']['count']}, "
+              f"HITL {cfg['hitl']['rounds']} round(s) from {cfg['hitl']['source']}", flush=True)
         if not evaluate_only:
             train_patients, val_patients = _pools(cfg)
             ensure_cache(cfg, train_patients + val_patients,
