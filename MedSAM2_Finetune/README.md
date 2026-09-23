@@ -74,7 +74,7 @@ They are deliberately the same shape, at different scale.
 
 |  | training | inference |
 |---|---|---|
-| unit | a **clip**: `video.num_frames` consecutive slices | the **whole volume** |
+| unit | a **clip**: `video.num_frames` consecutive slices, **drawn again every round** | the **whole volume** |
 | anchors | frame 0 of the clip | `anchors.count`, then one per HITL round |
 | direction | forward; `video.reverse_fraction` of clips are fed in descending z, which is how backwards propagation is learned | forward from the lowest anchor, backward from the highest |
 | prompts | YOLO's map on the anchor | the same, on every anchor |
@@ -113,7 +113,19 @@ positive prompt. Without that rule the loop picked slices where the prediction h
 YOLO had not, prompted them with a confident "nothing", and the memory carried that erasure
 into the neighbours — round 2 scored below round 1 on three of four patients.
 
-### Two defaults that were measured, not guessed
+### Three defaults that were measured, not guessed
+
+- **`model.use_mask_input_as_output_without_sam: false`** — SAM2 short-circuits any slice that
+  has a mask prompt and hands the prompt back as the answer, which is right for a mask a
+  person drew and wrong for a YOLO guess. With it on the anchors were never segmented at all:
+  on BraTS-GLI-00008-101 z=70 the output was the prompt pixel for pixel (99.8% identical,
+  1721 px of which 1183 lay outside the head) and scored 0.33 Dice where YOLO's own mask
+  scored 0.76. A checkpoint trained with it *on* cannot simply be re-scored with it off — its
+  decoder has never had to segment an anchor frame (mask prompt, no memory behind it) and
+  returns empty masks; measured 0.7424 -> 0.6970 on that patient. It needs a retrain.
+- **`train.memory_lr: 1.0e-5`** — the memory carries the answer between slices, so it takes
+  smaller steps than the decoder. Both published works that train it at all agree: SurgSAM-2
+  uses 2e-4 / 2e-5 (10x), Medical SAM 2 uses 1e-4 / 1e-8 (10,000x).
 
 - **`prompt.logit_scale: 8.0`** — YOLO's logits reach about ±5.5; SAM2's mask prompt was
   trained on a wider scale and barely reacts to them raw. On four val patients with the

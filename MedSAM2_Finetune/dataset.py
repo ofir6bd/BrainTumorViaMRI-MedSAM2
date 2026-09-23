@@ -22,23 +22,39 @@ from .common import to_model_image
 from .yolo_prompts import load_prompt, prompt_logits
 
 
-def sample_clips(cfg, patients, seed=0):
+def clip_sources(cfg, patients):
+    """Read each patient's cache once: how many slices it has, and how good an anchor each
+    slice would make. Kept in memory so the clips can be drawn again every round without
+    touching the disk — the arrays are a few hundred floats per patient."""
+    n_frames = cfg["video"]["num_frames"]
+    out = []
+    for p in patients:
+        entry = load_prompt(cfg, p["id"], keys=("z", "gt_px", "prob", "scores"))
+        if len(entry["z"]) < n_frames:
+            continue
+        out.append({"id": p["id"], "n": len(entry["z"]),
+                    "strength": anchor_rules.strength(entry, cfg)})
+    return out
+
+
+def sample_clips(cfg, sources, seed=0):
     """Which clips to train on: (patient id, first slice index, step).
 
     `step` is +1 or -1 — a clip read backwards is the same slices in the other order.
     Most clips start on a slice YOLO is confident about, because that is what an anchor
     looks like at inference; the rest start anywhere, so empty stretches are seen too.
+
+    Called again with a new seed every round. Drawing the clips once and reusing them would
+    show the model the same ~1,200 positions over and over, when a 300-patient pool holds
+    tens of thousands of them.
     """
     d, v = cfg["data"], cfg["video"]
     rng = np.random.default_rng(seed)
     n_frames = v["num_frames"]
     items = []
-    for p in patients:
-        entry = load_prompt(cfg, p["id"], keys=("z", "gt_px", "prob", "scores"))
-        n = len(entry["z"])
-        if n < n_frames:
-            continue
-        strength = anchor_rules.strength(entry, cfg)
+    for src in sources:
+        n = src["n"]
+        strength = src["strength"]
         strong = np.nonzero(strength > 0)[0]
         want = int(d["clips_per_patient"])
         n_tumour = int(round(want * float(d["tumour_clip_fraction"])))
@@ -56,7 +72,7 @@ def sample_clips(cfg, patients, seed=0):
                 start = min(start, n - n_frames)
             else:
                 start = max(start, n_frames - 1)
-            items.append((p["id"], start, step))
+            items.append((src["id"], start, step))
     return items
 
 
@@ -120,25 +136,22 @@ def collate(batch):
 
 
 class PatientShuffle(torch.utils.data.Sampler):
-    """Shuffle patients each round, and the clips inside each patient, but keep a patient's
-    clips together so its cache file is read once."""
+    """Shuffle the patients, and the clips inside each patient, but keep a patient's clips
+    together so its cache file is read once. A new one is built every round with a new seed,
+    alongside the freshly drawn clips."""
 
     def __init__(self, items, seed=0):
         self.items = items
         self.seed = seed
-        self.epoch = 0
         self.groups = OrderedDict()
         for i, (patient_id, _start, _step) in enumerate(items):
             self.groups.setdefault(patient_id, []).append(i)
-
-    def set_epoch(self, epoch):
-        self.epoch = epoch
 
     def __len__(self):
         return len(self.items)
 
     def __iter__(self):
-        rng = np.random.default_rng(self.seed + self.epoch)
+        rng = np.random.default_rng(self.seed)
         keys = list(self.groups)
         rng.shuffle(keys)
         for key in keys:

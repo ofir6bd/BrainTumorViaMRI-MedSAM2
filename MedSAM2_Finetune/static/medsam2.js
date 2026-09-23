@@ -61,7 +61,7 @@
     "video.num_frames": "fNumFrames", "video.reverse_fraction": "fReverse",
     "video.batch": "fVideoBatch",
     "train.unfreeze": "fUnfreeze", "train.epochs": "fEpochs", "train.patience": "fPatience",
-    "train.accum": "fAccum", "train.lr": "fLr",
+    "train.accum": "fAccum", "train.lr": "fLr", "train.memory_lr": "fMemoryLr",
     "train.vision_lr": "fVisionLr", "train.dice_weight": "fDiceW", "train.bce_weight": "fBceW",
     "train.fliplr": "fFliplr", "train.workers": "fWorkers",
   };

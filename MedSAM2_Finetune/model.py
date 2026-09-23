@@ -23,7 +23,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .common import import_sam2
+from .common import import_sam2, mask_prompt_override
 
 LOGIT_CLAMP = 30.0  # keeps BCE finite if the decoder ever produces an extreme logit
 
@@ -78,6 +78,7 @@ def build_train_model(cfg, device="cuda"):
             "++model.prob_to_use_box_input_for_train=0.0",
             "++model.num_init_cond_frames_for_train=1",
             "++model.rand_init_cond_frames_for_train=false",
+            *mask_prompt_override(cfg),
         ])
     return VideoSAM2(model)
 
@@ -136,15 +137,26 @@ def set_trainable(model, unfreeze):
 
 
 def param_groups(model, cfg):
-    """Two learning rates: the image encoder is big and pre-trained, so it moves slower."""
+    """Three learning rates, because the three parts tolerate very different step sizes.
+
+    The memory is the delicate one: it carries the answer between slices, so a large update
+    there disturbs every slice nobody prompted. Both published works that train it at all
+    move it far more slowly than the decoder — SurgSAM-2 by 10x (2e-4 vs 2e-5), Medical SAM 2
+    by 10,000x (1e-4 vs 1e-8). `memory_lr` defaults to `lr` if a run's config predates it.
+    """
     t = cfg["train"]
+    sam2 = model.sam2
     set_trainable(model, t["unfreeze"])
-    encoder = {id(p) for p in model.sam2.image_encoder.parameters()}
-    head, vision = [], []
+    encoder = {id(p) for p in sam2.image_encoder.parameters()}
+    memory = {id(p) for m in (sam2.memory_attention, sam2.memory_encoder) for p in m.parameters()}
+    head, mem, vision = [], [], []
     for p in model.parameters():
-        if p.requires_grad:
-            (vision if id(p) in encoder else head).append(p)
+        if not p.requires_grad:
+            continue
+        (vision if id(p) in encoder else mem if id(p) in memory else head).append(p)
     out = [{"params": head, "lr": float(t["lr"])}]
+    if mem:
+        out.append({"params": mem, "lr": float(t.get("memory_lr", t["lr"]))})
     if vision:
         out.append({"params": vision, "lr": float(t["vision_lr"])})
     return out

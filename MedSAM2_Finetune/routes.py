@@ -55,6 +55,7 @@ EDITABLE = {
     "train.patience": ("int", 0, 500),
     "train.accum": ("int", 1, 64),
     "train.lr": ("float", 1e-7, 1e-2),
+    "train.memory_lr": ("float", 1e-9, 1e-2),
     "train.vision_lr": ("float", 1e-8, 1e-3),
     "train.unfreeze": ("choice", "unfreeze"),
     "train.dice_weight": ("float", 0.0, 10.0),

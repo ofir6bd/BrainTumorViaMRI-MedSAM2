@@ -30,7 +30,7 @@ import yaml
 from torch.utils.data import DataLoader
 
 from .common import RUNS_DIR, list_patients, load_config, read_json, write_json
-from .dataset import ClipDataset, PatientShuffle, collate, sample_clips
+from .dataset import ClipDataset, PatientShuffle, clip_sources, collate, sample_clips
 from .evaluate import build_predictor, evaluate, quick_dice
 from .model import Clips, build_train_model, losses, param_groups
 
@@ -122,11 +122,13 @@ def train(run_dir, cfg, status, resume=False):
     np.random.seed(t["seed"])
 
     train_patients, val_patients = _pools(cfg)
-    items = sample_clips(cfg, train_patients, seed=t["seed"])
+    sources = clip_sources(cfg, train_patients)
+    per_round = sum(min(cfg["data"]["clips_per_patient"], s["n"]) for s in sources)
     status.update(train_patients=len(train_patients), val_patients=len(val_patients),
-                  train_clips=len(items))
-    print(f"[train] {len(items)} clips of {cfg['video']['num_frames']} slices from "
-          f"{len(train_patients)} patients; checking on {len(val_patients)} val patients", flush=True)
+                  train_clips=per_round)
+    print(f"[train] ~{per_round} clips of {cfg['video']['num_frames']} slices per round, drawn "
+          f"fresh each round from {len(sources)} patients; checking on {len(val_patients)} val "
+          f"patients", flush=True)
 
     model = build_train_model(cfg, device=device)
     optimizer = torch.optim.AdamW(param_groups(model, cfg), weight_decay=float(t["weight_decay"]))
@@ -149,18 +151,18 @@ def train(run_dir, cfg, status, resume=False):
         best = float(read_json(os.path.join(run_dir, "best.json"), {}).get("val_dice3d", -1.0))
         print(f"[train] resuming after round {start_epoch}", flush=True)
 
-    sampler = PatientShuffle(items, seed=t["seed"])
-    loader = DataLoader(ClipDataset(cfg, items, train=True), batch_size=cfg["video"]["batch"],
-                        sampler=sampler, num_workers=t["workers"], collate_fn=collate,
-                        pin_memory=True, drop_last=False,
-                        persistent_workers=bool(t["workers"]))
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, t["epochs"]))
     for _ in range(start_epoch):
         scheduler.step()
     amp = torch.autocast("cuda", dtype=torch.bfloat16, enabled=bool(t["amp"]) and device != "cpu")
 
     for epoch in range(start_epoch, t["epochs"]):
-        sampler.set_epoch(epoch)
+        # New clips every round (see dataset.sample_clips): same patients, different windows.
+        items = sample_clips(cfg, sources, seed=t["seed"] + epoch)
+        loader = DataLoader(ClipDataset(cfg, items, train=True), batch_size=cfg["video"]["batch"],
+                            sampler=PatientShuffle(items, seed=t["seed"] + epoch),
+                            num_workers=t["workers"], collate_fn=collate, pin_memory=True,
+                            drop_last=False)
         model.train()
         sums, n, seen, t0, last_report = {}, 0, 0, time.time(), 0.0
         optimizer.zero_grad(set_to_none=True)

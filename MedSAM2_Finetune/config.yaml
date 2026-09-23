@@ -11,6 +11,18 @@ model:
   checkpoint: MedSAM2_latest.pt          # read from MedSAM2/checkpoints/ (never written to)
   config: configs/sam2.1_hiera_t512.yaml # the vendored SAM2 config that matches it
   image_size: 512                        # what that config was trained at
+  use_mask_input_as_output_without_sam: false
+                          # SAM2's own config turns this ON. It means "if a slice was given a
+                          # mask prompt, hand that mask straight back as the answer, without
+                          # running the prompt encoder or the mask decoder" — which is right
+                          # when a person drew the mask, because then the prompt IS the truth.
+                          # Ours is a YOLO guess, so with it on the anchor slices were never
+                          # segmented at all: measured on BraTS-GLI-00008-101 z=70, the output
+                          # was the prompt pixel-for-pixel (99.8% identical, 1721 px of which
+                          # 1183 were outside the head) and the anchor scored 0.33 Dice while
+                          # YOLO's own mask scored 0.76. Off = the anchor is segmented like
+                          # every other slice. Runs made before 2026-09-23 have no such key
+                          # and replay with SAM2's default (on), the way they actually ran.
 
 prompt:
   yolo_run: ""            # which YOLO_finetune run makes the prompts ("" = the best-scoring one)
@@ -59,10 +71,16 @@ video:
   batch: 1                    # clips per step (a clip is already num_frames forward passes)
 
 train:
-  epochs: 20
-  patience: 5                 # stop after this many rounds without a better val Dice
+  epochs: 30                  # the first run's loss was still falling and its best check was
+                              #   round 19 of 20, with the cosine schedule already at lr 0
+  patience: 8                 # the 40-patient check wanders by about +-0.01, so rounds within
+                              #   a point of each other are noise: do not stop on it
   accum: 4                    # clips added up before a correction (effective batch = batch * accum)
-  lr: 1.0e-4                  # AdamW, for everything that is unfrozen except the image encoder
+  lr: 1.0e-4                  # AdamW, for the mask decoder and the prompt encoder
+  memory_lr: 1.0e-5           # the memory moves 10x slower: it carries the answer between
+                              #   slices, so a big step there disturbs every slice nobody
+                              #   prompted. SurgSAM-2 uses exactly this ratio (2e-4 / 2e-5);
+                              #   Medical SAM 2 goes further still (1e-4 / 1e-8).
   vision_lr: 1.0e-5           # lower rate for the image encoder, used only when unfreeze = all
   weight_decay: 0.01
   unfreeze: decoder+prompt+memory   # decoder | decoder+prompt | decoder+prompt+memory | all

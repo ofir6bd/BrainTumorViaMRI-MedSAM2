@@ -108,6 +108,19 @@ def yolo_run(run_id=""):
 
 
 # ------------------------------------------------------------------ the vendored sam2 package
+def mask_prompt_override(cfg):
+    """The Hydra override that decides whether a prompted slice is actually segmented.
+
+    SAM2's config sets `use_mask_input_as_output_without_sam: true`, which short-circuits any
+    slice that has a mask prompt: the prompt is returned as the answer and neither the prompt
+    encoder nor the mask decoder runs. That is right when a person drew the mask and wrong
+    when it is a YOLO guess. Returned as a list so a caller can splat it into the override
+    list; a run whose config predates the key keeps SAM2's default, so it replays as it ran.
+    """
+    on = cfg["model"].get("use_mask_input_as_output_without_sam", True)
+    return [f"++model.use_mask_input_as_output_without_sam={str(bool(on)).lower()}"]
+
+
 def import_sam2():
     """Import the vendored sam2 package without installing or changing it.
 

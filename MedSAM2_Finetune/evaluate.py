@@ -24,8 +24,8 @@ import numpy as np
 import torch
 
 from . import anchors as anchor_rules
-from .common import (CHECKPOINTS_DIR, dice, import_sam2, list_patients, read_json, to_model_image,
-                     write_json)
+from .common import (CHECKPOINTS_DIR, dice, import_sam2, list_patients, mask_prompt_override,
+                     read_json, to_model_image, write_json)
 from .yolo_prompts import load_prompt
 
 
@@ -45,7 +45,9 @@ def build_predictor(cfg, device="cuda", weights=None):
     npz.tqdm = lambda iterable, *a, **kw: iterable
 
     ckpt = os.path.join(CHECKPOINTS_DIR, cfg["model"]["checkpoint"])
-    predictor = build_sam2_video_predictor_npz(cfg["model"]["config"], ckpt, device=device)
+    predictor = build_sam2_video_predictor_npz(
+        cfg["model"]["config"], ckpt, device=device,
+        hydra_overrides_extra=mask_prompt_override(cfg))
     if weights:
         state = torch.load(weights, map_location="cpu", weights_only=False)
         missing, unexpected = predictor.load_state_dict(state["model"], strict=False)
@@ -276,7 +278,8 @@ def scoring_settings(cfg):
     """Everything that changes what a scoring pass produces."""
     return {"prompt": cfg["prompt"], "anchors": cfg["anchors"], "hitl": cfg["hitl"],
             "evaluate": cfg["evaluate"], "image_size": cfg["model"]["image_size"],
-            "min_fg_voxels": cfg["data"]["min_fg_voxels"]}
+            "min_fg_voxels": cfg["data"]["min_fg_voxels"],
+            "mask_shortcut": cfg["model"].get("use_mask_input_as_output_without_sam", True)}
 
 
 def _already_scored(path, cfg, patients, weights):
