@@ -25,7 +25,7 @@
   const secs = (s) => (s == null ? "—" : s < 90 ? `${Math.round(s)} s`
     : s < 5400 ? `${Math.floor(s / 60)} min ${Math.round(s % 60)} s` : `${(s / 3600).toFixed(1)} h`);
   const COL = { medsam2: "#3987e5", yolo: "#e0803c", gt: "#8fe08f", gain: "#2fa84f", loss: "#d03b3b",
-                muted: "#7f7f9c", val: "#9085e9" };
+                muted: "#7f7f9c", val: "#9085e9", anchor: "#c08bff" };
 
   const S = {           // everything the page knows, in one place
     overview: null, runId: null, run: null, compare: new Set(), split: "test",
@@ -142,8 +142,8 @@
     ["yolo_run", "From YOLO", (r) => `<code>${esc(r.yolo_run)}</code>`],
     ["unfreeze", "Weights changed", (r) => esc(r.unfreeze)],
     ["anchors", "Anchors", (r) => esc(r.anchors || "—")],
-    ["hitl", "Rounds", (r) => `${r.rounds || "—"}`],
-    ["rounds", "Rounds", (r) => `${r.epochs_done}/${r.epochs_cfg}`, true],
+    ["hitl", "HITL rounds", (r) => `${r.rounds || "—"}`],
+    ["rounds", "Training rounds", (r) => `${r.epochs_done}/${r.epochs_cfg}`, true],
     ["best", "Best check score", (r) => (r.best ? `${f4(r.best.val_dice3d)} <span class="dim">@${r.best.epoch}</span>` : "—"), true],
     ["test", "Test 3D Dice", (r) => (r.test ? `<b>${f4(r.test.dice3d_mean)}</b>` : "—"), true],
     ["yolo", "YOLO alone", (r) => (r.test ? f4(r.test.yolo_dice3d_mean) : "—"), true],
@@ -481,12 +481,13 @@
       ],
       marker: S.slice ? S.slice.z : null,
       onClick: (x) => loadSlice(Math.round(x)),
-      markers: (p.anchor_z || []).map((z, i) => ({ x: z, label: i ? `anchor ${i + 1}` : "anchor" })),
+      markers: (p.anchor_z || []).map((z, i) => ({ x: z, label: `anchor ${i + 1}`, color: COL.anchor })),
     });
     renderRoundsTable(p);
     $("profileNote").innerHTML = `<b>${esc(p.id)}</b> — 3D Dice: MedSAM2 <b>${f4(p.dice3d)}</b>,
       YOLO ${f4(p.yolo_dice3d)} (${deltaCell(p.delta)}). ${p.stored ? "From the stored results of the last scoring pass."
-      : "Worked out just now on the graphics card."} Click the chart to jump to a slice.`;
+      : "Worked out just now on the graphics card."} The dashed purple lines are the slices that
+      were prompted (the anchors); everything else was reached by memory. Click the chart to jump to a slice.`;
   }
 
   function renderRoundsTable(p) {

@@ -241,6 +241,15 @@
     txt(svg, box.L + (w - box.L - box.R) / 2, h - 4, opt.xLabel || "", { class: "ch-axis", "text-anchor": "middle" });
     txt(svg, 12, box.T + (h - box.B - box.T) / 2, opt.leftLabel || "",
       { class: "ch-axis", fill: leftColor, "text-anchor": "middle", transform: `rotate(-90 12 ${box.T + (h - box.B - box.T) / 2})` });
+    // Vertical markers, drawn before the series so the data stays on top. Labels alternate
+    // height so markers a few x apart do not write over each other.
+    (opt.markers || []).forEach((m, i) => {
+      if (m.x == null || m.x < xMin || m.x > xMax) return;
+      const mx = x(m.x);
+      el("line", { x1: mx, x2: mx, y1: box.T, y2: h - box.B, stroke: m.color || INK.muted,
+                   "stroke-dasharray": "3 3" }, svg);
+      if (m.label) txt(svg, mx + 4, box.T + 10 + (i % 2) * 11, m.label, { class: "ch-tick", fill: m.color || null });
+    });
     const yOf = (s) => (s.axis === "right" ? yR : yL);
     for (const s of opt.series) {
       const p = s.points.filter((q) => q[1] != null && Number.isFinite(q[1]));
