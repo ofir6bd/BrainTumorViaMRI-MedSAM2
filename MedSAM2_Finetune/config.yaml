@@ -36,6 +36,13 @@ prompt:
                           #   2 -> 0.627, 4 -> 0.726, 8 -> 0.757, 12 -> 0.760 (the prompt itself
                           #   scores 0.819). 8 is where it stops mattering.
   empty_logit: -8.0       # what a slice YOLO left empty is prompted with (a confident "nothing")
+  clip_to_head: true      # silence the prompt where the frame has no head in it. At yolo_conf
+                          #   0.05 YOLO sometimes returns a near-random box: on
+                          #   BraTS-GLI-00008-101 z=70 a 0.050 blob covered 1669 px, 1184 of
+                          #   them outside the skull. A voxel counts as head if any channel is
+                          #   non-zero, which excludes 4 of 734,193 expert tumour voxels over
+                          #   10 val patients. Read at prompt time, so changing it needs no
+                          #   cache rebuild.
 
 anchors:                  # which slices are prompted; everything else is reached by memory
   pick: yolo_peak         # yolo_peak | yolo_score | spread
