@@ -123,11 +123,9 @@
             <small class="hint">What a slice with no hint is told. More negative is a firmer &ldquo;nothing here&rdquo;.</small></label>
           <p class="note" id="variantNote"></p>
 
-          <label class="fld">How the first anchor is chosen <em>(anchors.pick)</em>
-            <select id="fAnchorPick"></select>
-            <small class="hint">Picks the slice to point at when running &mdash; and where training clips start from.</small></label>
-          <p class="note" id="anchorNote"></p>
-          <p class="note">Two safeguards are always on, with no box of their own: the hint is
+          <p class="note">The first slice to point at is always the one where YOLO is most sure
+            and the tumour looks biggest &mdash; when running, and for where training clips start.
+            Two safeguards are always on, with no box of their own: the hint is
             <b>silenced outside the head</b> (YOLO sometimes returns a near-random box at the very
             bottom of its score list), and a slice that gets a hint is still <b>segmented by
             MedSAM2</b> rather than having the hint handed straight back as the answer.</p>

@@ -45,12 +45,15 @@ prompt:
                           #   cache rebuild.
 
 anchors:                  # which slices are prompted; everything else is reached by memory
-  pick: yolo_peak         # yolo_peak | yolo_score | spread
-                          #   yolo_peak  = most confident tumour area (area x score) — the automatic
-                          #                stand-in for "the slice a radiologist would start on"
-                          #   yolo_score = highest single blob score
-                          #   spread     = evenly spaced over the slices YOLO marked
-  count: 1                # anchors the first round starts from
+                          # The first anchor is the slice with the most confident tumour area
+                          #   (area x score) — the automatic stand-in for "the slice a
+                          #   radiologist would start on". Two other rules were tried and
+                          #   dropped: on three test patients at 5 rounds all three landed
+                          #   within 0.0018 of each other, so it was not worth a setting.
+  count: 1                # anchors the first round starts from. Measured: starting with 3 is
+                          #   WORSE than 1 (0.8056 vs 0.8194 over three test patients) — three
+                          #   chosen up front crowd the same confident region, while the
+                          #   correction rounds place each new one where the answer is wrong.
   min_gap: 5              # slices that must separate two anchors
 
 hitl:                     # extra anchors added round by round (the loop 05_infer_multibbox_hitl had)

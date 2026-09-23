@@ -52,7 +52,7 @@
     "prompt.yolo_run": "fYoloRun", "prompt.variant": "fVariant", "prompt.yolo_conf": "fYoloConf",
     "prompt.score_min": "fScoreMin", "prompt.logit_scale": "fLogitScale",
     "prompt.empty_logit": "fEmptyLogit",
-    "anchors.pick": "fAnchorPick", "anchors.count": "fAnchorCount", "anchors.min_gap": "fAnchorGap",
+    "anchors.count": "fAnchorCount", "anchors.min_gap": "fAnchorGap",
     "hitl.rounds": "fHitlRounds",
     "model.checkpoint": "fCheckpoint",
     "data.max_train_patients": "fMaxTrain", "data.val_patients": "fValPatients",
@@ -76,11 +76,10 @@
     runs.unshift({ value: "", label: "best scoring run (automatic)" });
     fillSelect($("fYoloRun"), runs);
     fillSelect($("fVariant"), Object.keys(ov.variants).map((k) => ({ value: k, label: k })));
-    fillSelect($("fAnchorPick"), Object.keys(ov.anchor_rules).map((k) => ({ value: k, label: k })));
     fillSelect($("fCheckpoint"), ov.checkpoints.map((k) => ({ value: k, label: k })));
     fillSelect($("fUnfreeze"), Object.keys(ov.unfreeze).map((k) => ({ value: k, label: k })));
     resetForm();
-    ["fVariant", "fAnchorPick"].forEach((id) => $(id).addEventListener("change", showVariantNote));
+    $("fVariant").addEventListener("change", showVariantNote);
     Object.values(FIELDS).forEach((id) => $(id).addEventListener("change", showEstimate));
     showVariantNote();
   }
@@ -99,9 +98,7 @@
   function showVariantNote() {
     const ov = S.overview;
     const v = $("fVariant").value;
-    const a = $("fAnchorPick").value;
     $("variantNote").innerHTML = `<b>${esc(v)}</b> — ${esc(ov.variants[v] || "")}`;
-    $("anchorNote").innerHTML = `<b>${esc(a)}</b> — ${esc(ov.anchor_rules[a] || "")}`;
   }
   function showEstimate() {
     const ov = S.overview;
@@ -142,7 +139,6 @@
     ["variant", "Prompt style", (r) => esc(r.variant)],
     ["yolo_run", "From YOLO", (r) => `<code>${esc(r.yolo_run)}</code>`],
     ["unfreeze", "Weights changed", (r) => esc(r.unfreeze)],
-    ["anchors", "Anchors", (r) => esc(r.anchors || "—")],
     ["hitl", "HITL rounds", (r) => `${r.rounds || "—"}`],
     ["rounds", "Training rounds", (r) => `${r.epochs_done}/${r.epochs_cfg}`, true],
     ["best", "Best check score", (r) => (r.best ? `${f4(r.best.val_dice3d)} <span class="dim">@${r.best.epoch}</span>` : "—"), true],
@@ -589,7 +585,7 @@
     $("howNote").innerHTML = `Right now: prompts come from YOLO run
       <code>${esc(c.prompt.yolo_run || "the best scoring one")}</code>, style
       <b>${esc(c.prompt.variant)}</b>; the first <b>${c.anchors.count}</b> anchor(s) are chosen by
-      <b>${esc(c.anchors.pick)}</b>, then up to <b>${c.hitl.rounds}</b> correction round(s);
+      the most confident slice, then up to <b>${c.hitl.rounds}</b> correction round(s);
       MedSAM2 starts from <code>${esc(c.model.checkpoint)}</code> and
       only <b>${esc(c.train.unfreeze)}</b> may change.`;
     document.querySelectorAll("[data-cfg]").forEach((el) => {

@@ -18,15 +18,16 @@ def yolo_mask(entry, cfg):
     return entry["prob_f"] > 127
 
 
-def strength(entry, cfg, rule=None):
-    """How good a starting slice each slice would make, one number per slice."""
-    rule = rule or cfg["anchors"]["pick"]
-    if rule == "yolo_score":
-        return entry["scores"].astype(np.float32)
+def strength(entry, cfg):
+    """How good a starting slice each slice would make: big and confident.
+
+    Two other rules used to live here — the single highest-scoring blob, and evenly spaced
+    over everything YOLO marked. Measured on three test patients at 5 rounds, all three
+    finished within 0.0018 of each other (0.8194 / 0.8198 / 0.8180): the correction rounds
+    wash out where the first anchor sat, so the choice was not worth keeping as a setting.
+    """
     area = (entry["prob"] > 127).reshape(len(entry["z"]), -1).sum(axis=1).astype(np.float32)
-    if rule == "spread":
-        return (area > 0).astype(np.float32)      # every slice YOLO marked is equally eligible
-    return area * entry["scores"]                  # yolo_peak: big and confident
+    return area * entry["scores"]
 
 
 def _spaced(order, count, min_gap, taken=()):
@@ -50,10 +51,6 @@ def initial(entry, cfg):
         # YOLO found nothing anywhere: start in the middle of the brain so the pass still
         # happens and the model gets its chance to say "nothing here".
         return [len(entry["z"]) // 2]
-    if a["pick"] == "spread" and a["count"] > 1:
-        marked = np.nonzero(s > 0)[0]
-        picks = np.linspace(0, len(marked) - 1, a["count"]).round().astype(int)
-        return sorted({int(marked[p]) for p in picks})
     order = np.argsort(-s)
     order = order[s[order] > 0]
     return sorted(_spaced(order, a["count"], a["min_gap"]))

@@ -37,7 +37,6 @@ EDITABLE = {
     "prompt.score_min": ("float", 0.0, 0.95),
     "prompt.logit_scale": ("float", 0.05, 20.0),
     "prompt.empty_logit": ("float", -30.0, 0.0),
-    "anchors.pick": ("choice", "anchor_rules"),
     "anchors.count": ("int", 1, 20),
     "anchors.min_gap": ("int", 1, 60),
     "hitl.rounds": ("int", 1, 40),
@@ -64,11 +63,6 @@ EDITABLE = {
     "train.fliplr": ("float", 0.0, 1.0),
     "train.workers": ("int", 0, 16),
     "evaluate.mask_threshold": ("float", -10.0, 10.0),
-}
-ANCHOR_RULES = {
-    "yolo_peak": "the slice where YOLO is most sure and the tumour looks biggest",
-    "yolo_score": "the slice with YOLO's single highest-scoring blob",
-    "spread": "evenly spaced over the slices YOLO marked",
 }
 REBUILDS = ("prompt.yolo_run", "prompt.yolo_conf", "prompt.score_min", "data.min_fg_voxels")
 
@@ -148,7 +142,7 @@ def run_summary(run_id):
         "checkpoint": cfg["model"]["checkpoint"], "variant": cfg["prompt"]["variant"],
         "yolo_run": st.get("yolo_run") or cfg["prompt"]["yolo_run"] or "(best)",
         "unfreeze": cfg["train"]["unfreeze"], "epochs_cfg": cfg["train"]["epochs"],
-        "anchors": cfg.get("anchors", {}).get("pick"), "rounds": cfg.get("hitl", {}).get("rounds"),
+        "anchors": cfg.get("anchors", {}).get("count"), "rounds": cfg.get("hitl", {}).get("rounds"),
         "state": st.get("state"), "stage": st.get("stage"), "epoch": st.get("epoch"),
         "epochs": st.get("epochs"), "started": st.get("started"), "finished": st.get("finished"),
         "error": st.get("error"), "epochs_done": len(res.get("epoch", [])),
@@ -183,7 +177,6 @@ def spawn(rdir, *extra):
 def _choices():
     return {"yolo_runs": [r["id"] for r in yolo_runs()] + [""],
             "variants": list(PROMPT_VARIANTS), "unfreeze": list(UNFREEZE),
-            "anchor_rules": list(ANCHOR_RULES),
             "checkpoints": checkpoints()}
 
 
@@ -206,7 +199,6 @@ def api_overview():
                     else {"kind": v[0], "min": v[1], "max": v[2]}) for k, v in EDITABLE.items()}
     return jsonify({"config": cfg, "editable": editable, "rebuilds": REBUILDS,
                     "variants": PROMPT_VARIANTS, "unfreeze": UNFREEZE, "pools": pools,
-                    "anchor_rules": ANCHOR_RULES,
                     "yolo_runs": yolo_runs(), "checkpoints": checkpoints(),
                     "active": active_run(), "runs": [run_summary(r) for r in run_ids()]})
 
