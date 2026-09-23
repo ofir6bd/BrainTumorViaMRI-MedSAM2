@@ -24,7 +24,8 @@ import numpy as np
 import torch
 
 from . import anchors as anchor_rules
-from .common import CHECKPOINTS_DIR, dice, import_sam2, list_patients, to_model_image, write_json
+from .common import (CHECKPOINTS_DIR, dice, import_sam2, list_patients, read_json, to_model_image,
+                     write_json)
 from .yolo_prompts import load_prompt
 
 
@@ -271,11 +272,37 @@ def summarise(records, cfg):
     }
 
 
+def scoring_settings(cfg):
+    """Everything that changes what a scoring pass produces."""
+    return {"prompt": cfg["prompt"], "anchors": cfg["anchors"], "hitl": cfg["hitl"],
+            "evaluate": cfg["evaluate"], "image_size": cfg["model"]["image_size"],
+            "min_fg_voxels": cfg["data"]["min_fg_voxels"]}
+
+
+def _already_scored(path, cfg, patients, weights):
+    """A finished `<split>.json` this run can keep instead of scoring the pool again.
+
+    Scoring a pool takes far longer than training a round, and a machine that goes down
+    half way through should not cost the half that was already done. Reused only when the
+    file covers the whole pool, was written *after* the checkpoint it is scoring, and its
+    stored settings still match — so retraining or changing an anchor rule re-scores.
+    """
+    data = read_json(path)
+    if not data or data.get("settings") != scoring_settings(cfg):
+        return None
+    if len(data.get("patients") or []) != len(patients):
+        return None
+    if not os.path.exists(weights) or os.path.getmtime(path) < os.path.getmtime(weights):
+        return None
+    return data["patients"]
+
+
 def evaluate(run_dir, cfg, out_dir, splits=("val", "test"), max_patients=None, progress=None,
              log=print, device="cuda", predictor=None, which="best.pt"):
     """Score `which` checkpoint on the given pools; writes <split>.json and summary.json."""
     from .yolo_prompts import ensure_cache
 
+    weights = os.path.join(run_dir, "weights", which)
     if predictor is None:
         predictor, state = load_run_model(run_dir, cfg, device, which)
         log(f"[eval] {which} from round {state.get('epoch')}")
@@ -291,14 +318,20 @@ def evaluate(run_dir, cfg, out_dir, splits=("val", "test"), max_patients=None, p
     summary = {"created": datetime.now().isoformat(timespec="seconds"), "which": which,
                "threshold": float(cfg["evaluate"]["mask_threshold"])}
     for split, patients in todo.items():
-        records = []
-        for p in patients:
-            records.append(patient_record(predictor, cfg, p["id"], device))
-            done += 1
-            if progress:
-                progress(done, total, split)
-        write_json(os.path.join(out_dir, f"{split}.json"),
-                   {"thresholds": thresholds_of(cfg), "patients": records})
+        path = os.path.join(out_dir, f"{split}.json")
+        records = _already_scored(path, cfg, patients, weights)
+        if records is not None:
+            log(f"[eval] {split}: keeping the {len(records)} patients already scored")
+            done += len(patients)
+        else:
+            records = []
+            for p in patients:
+                records.append(patient_record(predictor, cfg, p["id"], device))
+                done += 1
+                if progress:
+                    progress(done, total, split)
+            write_json(path, {"thresholds": thresholds_of(cfg), "patients": records,
+                              "settings": scoring_settings(cfg)})
         summary[split] = summarise(records, cfg)
         s = summary[split]
         log(f"[eval] {split}: MedSAM2 3D Dice {s['dice3d_mean']:.4f} (median {s['dice3d_median']:.4f}) "
