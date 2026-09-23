@@ -22,8 +22,8 @@ from PIL import Image
 from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from werkzeug.exceptions import HTTPException
 
-from .common import (CONFIG_PATH, PROMPT_VARIANTS, ROOT, RUNS_DIR, UNFREEZE, checkpoints,
-                     list_patients, load_config, read_json, write_json, yolo_runs)
+from .common import (PROMPT_VARIANTS, ROOT, RUNS_DIR, UNFREEZE, checkpoints, list_patients,
+                     load_config, read_json, write_json, yolo_runs)
 from .train import new_run
 
 LIVE = ("queued", "running")
@@ -195,8 +195,6 @@ def index():
 
 @medsam2_bp.route("/api/overview")
 def api_overview():
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        text = f.read()
     cfg = load_config()
     pools = {}
     for k in ("train", "val", "test"):
@@ -206,7 +204,7 @@ def api_overview():
             pools[k] = None
     editable = {k: ({"kind": v[0], "choices": _choices()[v[1]]} if v[0] == "choice"
                     else {"kind": v[0], "min": v[1], "max": v[2]}) for k, v in EDITABLE.items()}
-    return jsonify({"config_text": text, "config": cfg, "editable": editable, "rebuilds": REBUILDS,
+    return jsonify({"config": cfg, "editable": editable, "rebuilds": REBUILDS,
                     "variants": PROMPT_VARIANTS, "unfreeze": UNFREEZE, "pools": pools,
                     "anchor_rules": ANCHOR_RULES,
                     "yolo_runs": yolo_runs(), "checkpoints": checkpoints(),
@@ -252,14 +250,12 @@ def api_start():
 def api_run(run_id):
     d = run_dir(run_id)
     st = status_of(run_id)
-    with open(os.path.join(d, "run_config.yaml"), "r", encoding="utf-8") as f:
-        cfg_text = f.read()
     prompt_meta = None
     if st.get("prompt_key"):
         prompt_meta = read_json(os.path.join(ROOT, "MedSAM2_Finetune", "cache",
                                              st["prompt_key"], "meta.json"))
     return jsonify({**run_summary(run_id), "status": st, "config": run_config(run_id),
-                    "config_text": cfg_text, "results": results(run_id), "prompt": prompt_meta,
+                    "results": results(run_id), "prompt": prompt_meta,
                     "eval": read_json(os.path.join(d, "eval", "summary.json"))})
 
 

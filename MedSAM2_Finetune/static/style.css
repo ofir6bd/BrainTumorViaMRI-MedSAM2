@@ -9,8 +9,9 @@
    text ("best scoring run (automatic)"). A plain `1fr 1fr` refuses to go below the widest
    field's own content, so the form grew past its grid cell and slid under the config
    panel. `minmax(0, 1fr)` lets both columns shrink, and the controls follow the cell. */
-.start-grid { grid-template-columns: minmax(0, 440px) minmax(0, 1fr); }
-.start-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-width: 0; }
+/* no config panel beside it any more: the fields flow across the whole card, so a long
+   form stays short enough to read without endless scrolling */
+.start-form { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); min-width: 0; }
 .start-form select,
 .start-form input { width: 100%; min-width: 0; }
 .fld { min-width: 0; overflow-wrap: anywhere; }
@@ -20,7 +21,6 @@
 .start-form > .card-sub:first-child { margin-top: 0; }
 .start-form > .note { grid-column: 1 / -1; margin: 0; }
 
-@media (max-width: 900px) { .start-grid { grid-template-columns: minmax(0, 1fr); } }
 
 /* the slice viewer shows up to four panels side by side */
 .viewer-img img { max-height: 70vh; object-fit: contain; }

@@ -91,8 +91,7 @@
         <h2>Start a fine-tune</h2>
         <p class="card-sub">Change anything here before you start. The run keeps its own copy of these settings.</p>
       </div>
-      <div class="start-grid">
-        <form class="start-form" id="startForm" autocomplete="off">
+      <form class="start-form" id="startForm" autocomplete="off">
 
           <p class="band">Shared <span class="band-tag both">used when learning <em>and</em> when running</span></p>
 
@@ -128,6 +127,10 @@
             <select id="fAnchorPick"></select>
             <small class="hint">Picks the slice to point at when running &mdash; and where training clips start from.</small></label>
           <p class="note" id="anchorNote"></p>
+          <p class="note">Two safeguards are always on, with no box of their own: the hint is
+            <b>silenced outside the head</b> (YOLO sometimes returns a near-random box at the very
+            bottom of its score list), and a slice that gets a hint is still <b>segmented by
+            MedSAM2</b> rather than having the hint handed straight back as the answer.</p>
 
           <p class="band">Training only <span class="band-tag train">how it learns</span></p>
 
@@ -218,14 +221,6 @@
             <button id="btnReset" type="button">Reset to file</button>
           </div>
         </form>
-        <div>
-          <div class="config-head">
-            <h3>config.yaml</h3>
-            <span class="note">What a run starts from when you change nothing.</span>
-          </div>
-          <pre class="yaml" id="cfgText">Loading&hellip;</pre>
-        </div>
-      </div>
     </section>
 
     <!-- ================= LIVE ================= -->

@@ -585,7 +585,6 @@
     $("topSub").innerHTML = `Pools: <b>${S.overview.pools.train}</b> train ·
       <b>${S.overview.pools.val}</b> check · <b>${S.overview.pools.test}</b> test patients ·
       ${S.overview.yolo_runs.length} YOLO run(s) available · ${S.overview.runs.length} fine-tune(s) here`;
-    $("cfgText").innerHTML = highlightYaml(S.overview.config_text);
     const c = S.overview.config;
     $("howNote").innerHTML = `Right now: prompts come from YOLO run
       <code>${esc(c.prompt.yolo_run || "the best scoring one")}</code>, style
@@ -598,17 +597,6 @@
     });
     renderRuns();
     if (!S.runId && S.overview.runs.length) S.runId = S.overview.active || S.overview.runs[0].id;
-  }
-
-  function highlightYaml(text) {
-    // Only & < > are escaped here, never quotes: the usual `&#34;` escape contains a `#`,
-    // which the comment rule below would then treat as the start of a YAML comment and
-    // tear the entity in half (`yolo_run: ""` came out as a stray `&`).
-    const safe = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return safe(text).split("\n").map((line) => line
-      .replace(/^(\s*)([\w.]+)(:)/, '$1<span class="y-k">$2</span>$3')
-      .replace(/(:\s)([^#]+)/, (m, a, b) => `${a}<span class="y-v">${b}</span>`)
-      .replace(/(#.*)$/, '<span class="y-c">$1</span>')).join("\n");
   }
 
   async function boot() {
