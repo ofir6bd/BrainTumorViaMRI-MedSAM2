@@ -100,20 +100,18 @@ change the cache; switching variant, anchors or HITL settings costs no rebuild.
 ## Anchors and HITL
 
 `anchors.pick` chooses the first anchor: `yolo_peak` (biggest confident area — the automatic
-stand-in for the slice a radiologist would start on), `yolo_score`, `spread`, or
-`expert_peak`. `hitl.source` chooses who adds the next one:
+stand-in for the slice a radiologist would start on), `yolo_score` or `spread`. Each HITL
+round then adds the anchor where the prediction disagrees most with **YOLO's** mask.
 
-- **`yolo`** (default) — the next anchor goes where the prediction disagrees most with
-  YOLO's mask. Fully automatic; the reported score stays honest.
-- **`expert`** — the next anchor comes from the expert mask, exactly like the old
-  `maunal_code/05_infer_multibbox_hitl.py`. This is an **oracle**: it reads the answer sheet,
-  so its score is an upper bound, not a result. Runs like that are labelled `oracle` in the
-  summary, the runs table and the results panel.
+**Nothing in the anchor or HITL logic ever reads the expert mask.** The old
+`maunal_code/05_infer_multibbox_hitl.py` chose its anchors from the ground truth, which makes
+its Dice an upper bound rather than a result; that mode is deliberately absent here, so every
+score this folder produces is one the pipeline could reproduce on a new patient.
 
-A new anchor is only ever placed on a slice where the reference **has** tumour, so it is
-always a positive prompt. Without that rule the loop picked slices where the prediction had
-drawn and the reference had not, prompted them with a confident "nothing", and the memory
-carried that erasure into the neighbours — round 2 scored below round 1.
+A new anchor is only ever placed on a slice where YOLO **found** something, so it is always a
+positive prompt. Without that rule the loop picked slices where the prediction had drawn and
+YOLO had not, prompted them with a confident "nothing", and the memory carried that erasure
+into the neighbours — round 2 scored below round 1 on three of four patients.
 
 ### Two defaults that were measured, not guessed
 

@@ -42,8 +42,6 @@ EDITABLE = {
     "anchors.min_gap": ("int", 1, 60),
     "hitl.rounds": ("int", 1, 10),
     "hitl.min_improvement": ("float", 0.0, 0.5),
-    "hitl.target_dice": ("float", 0.5, 1.0),
-    "hitl.source": ("choice", "hitl_sources"),
     "model.checkpoint": ("choice", "checkpoints"),
     "data.max_train_patients": ("int?", 1, 5000),
     "data.val_patients": ("int?", 1, 5000),
@@ -71,11 +69,6 @@ ANCHOR_RULES = {
     "yolo_peak": "the slice where YOLO is most sure and the tumour looks biggest",
     "yolo_score": "the slice with YOLO's single highest-scoring blob",
     "spread": "evenly spaced over the slices YOLO marked",
-    "expert_peak": "the expert mask's biggest slice — ORACLE, an upper bound, not a result",
-}
-HITL_SOURCES = {
-    "yolo": "the next anchor goes where the prediction disagrees most with YOLO (automatic)",
-    "expert": "the next anchor comes from the expert mask — ORACLE, like the old 05_infer script",
 }
 REBUILDS = ("prompt.yolo_run", "prompt.yolo_conf", "prompt.score_min", "data.min_fg_voxels")
 
@@ -156,8 +149,6 @@ def run_summary(run_id):
         "yolo_run": st.get("yolo_run") or cfg["prompt"]["yolo_run"] or "(best)",
         "unfreeze": cfg["train"]["unfreeze"], "epochs_cfg": cfg["train"]["epochs"],
         "anchors": cfg.get("anchors", {}).get("pick"), "rounds": cfg.get("hitl", {}).get("rounds"),
-        "hitl_source": cfg.get("hitl", {}).get("source"),
-        "oracle": bool(ev.get("oracle")) if ev else None,
         "state": st.get("state"), "stage": st.get("stage"), "epoch": st.get("epoch"),
         "epochs": st.get("epochs"), "started": st.get("started"), "finished": st.get("finished"),
         "error": st.get("error"), "epochs_done": len(res.get("epoch", [])),
@@ -192,7 +183,7 @@ def spawn(rdir, *extra):
 def _choices():
     return {"yolo_runs": [r["id"] for r in yolo_runs()] + [""],
             "variants": list(PROMPT_VARIANTS), "unfreeze": list(UNFREEZE),
-            "anchor_rules": list(ANCHOR_RULES), "hitl_sources": list(HITL_SOURCES),
+            "anchor_rules": list(ANCHOR_RULES),
             "checkpoints": checkpoints()}
 
 
@@ -217,7 +208,7 @@ def api_overview():
                     else {"kind": v[0], "min": v[1], "max": v[2]}) for k, v in EDITABLE.items()}
     return jsonify({"config_text": text, "config": cfg, "editable": editable, "rebuilds": REBUILDS,
                     "variants": PROMPT_VARIANTS, "unfreeze": UNFREEZE, "pools": pools,
-                    "anchor_rules": ANCHOR_RULES, "hitl_sources": HITL_SOURCES,
+                    "anchor_rules": ANCHOR_RULES,
                     "yolo_runs": yolo_runs(), "checkpoints": checkpoints(),
                     "active": active_run(), "runs": [run_summary(r) for r in run_ids()]})
 

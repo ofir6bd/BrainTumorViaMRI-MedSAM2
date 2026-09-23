@@ -26,7 +26,3 @@
 .viewer-img img { max-height: 70vh; object-fit: contain; }
 .viewer-side .kpi { margin-bottom: 8px; }
 
-/* a run whose anchors were chosen by reading the expert mask is an upper bound, not a
-   result — it says so everywhere it appears */
-.badge.oracle { border-color: var(--warn); color: #ffd27a; }
-.note.warn { color: #ffd27a; border-left: 3px solid var(--warn); padding-left: 10px; }

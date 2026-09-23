@@ -3,11 +3,10 @@
 In video mode only a few slices are prompted; the rest of the volume is reached through
 SAM2's memory. Choosing those few is most of the work, and it is the same question the old
 `05_infer_multibbox_hitl.py` answered with "the slice with the most tumour, then wherever
-the prediction is worst" — except that script read the answer sheet to decide. Here the
-default reference is **YOLO**, so nothing at inference time depends on the ground truth.
+the prediction is worst" — except that script read the answer sheet to decide.
 
-`hitl.source = expert` reproduces the old oracle behaviour on purpose, for an upper bound.
-Every number produced that way is marked `oracle` so it can never be mistaken for a result.
+Here the reference is always **YOLO**. Nothing in this file ever looks at the expert mask,
+so no score this pipeline produces can be inflated by a hint it would not have in practice.
 """
 import numpy as np
 
@@ -22,8 +21,6 @@ def yolo_mask(entry, cfg):
 def strength(entry, cfg, rule=None):
     """How good a starting slice each slice would make, one number per slice."""
     rule = rule or cfg["anchors"]["pick"]
-    if rule == "expert_peak":
-        return entry["gt"].reshape(len(entry["z"]), -1).sum(axis=1).astype(np.float32)
     if rule == "yolo_score":
         return entry["scores"].astype(np.float32)
     area = (entry["prob"] > 127).reshape(len(entry["z"]), -1).sum(axis=1).astype(np.float32)
@@ -63,17 +60,16 @@ def initial(entry, cfg):
 
 
 def next_anchor(entry, cfg, pred, taken):
-    """The slice a HITL round adds: where the current prediction disagrees most with the
-    reference — YOLO's mask, or the expert mask when `hitl.source` is `expert`.
+    """The slice a HITL round adds: where the current prediction disagrees most with YOLO.
 
-    Only slices where the reference *has* tumour are eligible, so the new anchor is always a
+    Only slices where YOLO *found* something are eligible, so the new anchor is always a
     positive prompt ("the tumour is here"). Measured the hard way: without this, the rule
-    happily picked a slice where the prediction had drawn and the reference had not, prompted
-    it with a confident "nothing", and the memory carried that erasure into its neighbours —
-    round 2 scored *below* round 1 on three of four patients. It is also what the old
-    hand-prompted pipeline did: its anchors were boxes, which can only ever say "here".
+    happily picked a slice where the prediction had drawn and YOLO had not, prompted it with
+    a confident "nothing", and the memory carried that erasure into its neighbours — round 2
+    scored *below* round 1 on three of four patients. It is also what the old hand-prompted
+    pipeline did: its anchors were boxes, which can only ever say "here".
     """
-    reference = entry["gt"] > 0 if cfg["hitl"]["source"] == "expert" else yolo_mask(entry, cfg)
+    reference = yolo_mask(entry, cfg)
     n = len(entry["z"])
     has_reference = reference.reshape(n, -1).any(axis=1)
     wrong = np.logical_xor(pred, reference).reshape(n, -1).sum(axis=1) * has_reference

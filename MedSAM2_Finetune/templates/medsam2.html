@@ -83,7 +83,6 @@
         </li>
       </ol>
       <p class="note" id="howNote"></p>
-      <p class="note warn hidden" id="oracleNote"></p>
     </section>
 
     <!-- ================= START ================= -->
@@ -119,15 +118,12 @@
           <p class="note" id="anchorNote"></p>
 
           <p class="card-sub">Correction rounds (HITL)</p>
-          <label class="fld">Who picks the next anchor <em>(hitl.source)</em>
-            <select id="fHitlSource"></select></label>
           <label class="fld">Rounds at most <em>(hitl.rounds)</em>
             <input id="fHitlRounds" type="number" step="1" min="1" max="10"></label>
           <label class="fld">Stop when a round changes less than <em>(hitl.min_improvement)</em>
             <input id="fHitlMin" type="number" step="any" min="0" max="0.5"></label>
-          <label class="fld">Good enough (expert only) <em>(hitl.target_dice)</em>
-            <input id="fHitlTarget" type="number" step="any" min="0.5" max="1"></label>
-          <p class="note" id="hitlNote"></p>
+          <p class="note">Each round adds one more anchor, on the slice where the result
+            disagrees most with YOLO, and propagates the whole volume again.</p>
 
           <p class="card-sub">Data &mdash; who it learns from</p>
           <label class="fld">Patients per round <em>(data.max_train_patients)</em>

@@ -7,12 +7,11 @@ For one patient:
   3. The volume is propagated **forward** from the lowest anchor and **backward** from the
      highest one, exactly as `05_infer_multibbox_hitl.py` did; the backward pass fills the
      frames the forward pass never reached.
-  4. A HITL round then adds the anchor where the prediction disagrees most with the
-     reference, and the whole propagation runs again — up to `hitl.rounds` times.
+  4. A HITL round then adds the anchor where the prediction disagrees most with YOLO,
+     and the whole propagation runs again — up to `hitl.rounds` times.
 
-The reference in step 4 is YOLO by default, so nothing here depends on the ground truth.
-With `hitl.source: expert` it is the expert mask, which reproduces the old script's oracle;
-those runs are marked `oracle` everywhere so their numbers cannot be mistaken for results.
+Nothing in steps 1-4 ever looks at the expert mask, so the score at the end is always an
+honest one: the model is never given a hint it would not have on a new patient.
 
 Every number is measured at the slice's own size, so it is comparable with the
 YOLO_finetune page. Alongside MedSAM2, the YOLO prompt itself is scored on the same
@@ -32,11 +31,6 @@ from .yolo_prompts import load_prompt
 def thresholds_of(cfg):
     e = cfg["evaluate"]
     return sorted(set([float(v) for v in e["sweep"]]) | {float(e["mask_threshold"])})
-
-
-def is_oracle(cfg):
-    """True when the anchors are chosen by reading the expert mask."""
-    return cfg["hitl"]["source"] == "expert" or cfg["anchors"]["pick"] == "expert_peak"
 
 
 def build_predictor(cfg, device="cuda", weights=None):
@@ -157,12 +151,7 @@ def run_patient(predictor, cfg, patient_id, device="cuda", entry=None):
 
         if round_index + 1 >= int(hitl["rounds"]):
             break
-        if hitl["source"] == "expert":
-            if d_gt >= float(hitl["target_dice"]):
-                break
-            if len(rounds) > 1 and d_gt - rounds[-2]["dice3d"] < float(hitl["min_improvement"]):
-                break
-        elif change is not None and 1.0 - change < float(hitl["min_improvement"]):
+        if change is not None and 1.0 - change < float(hitl["min_improvement"]):
             break                       # the prediction stopped moving: more anchors change nothing
         nxt = anchor_rules.next_anchor(entry, cfg, pred, picked)
         if nxt is None:
@@ -255,7 +244,6 @@ def summarise(records, cfg):
             per_round.setdefault(item["round"], []).append(item["dice3d"])
     return {
         "patients": len(records),
-        "oracle": is_oracle(cfg),
         "threshold": float(cfg["evaluate"]["mask_threshold"]),
         "dice3d_mean": mean(d3), "dice3d_median": median(d3),
         "yolo_dice3d_mean": mean(y3), "yolo_dice3d_median": median(y3),
@@ -301,9 +289,7 @@ def evaluate(run_dir, cfg, out_dir, splits=("val", "test"), max_patients=None, p
     total = sum(len(v) for v in todo.values())
     done = 0
     summary = {"created": datetime.now().isoformat(timespec="seconds"), "which": which,
-               "threshold": float(cfg["evaluate"]["mask_threshold"]), "oracle": is_oracle(cfg)}
-    if summary["oracle"]:
-        log("[eval] ORACLE run: anchors come from the expert mask — an upper bound, not a result")
+               "threshold": float(cfg["evaluate"]["mask_threshold"])}
     for split, patients in todo.items():
         records = []
         for p in patients:

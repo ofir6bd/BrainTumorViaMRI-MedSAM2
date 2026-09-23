@@ -230,7 +230,7 @@ def run(run_dir, resume=False, evaluate_only=False):
         status.update(yolo_run=chosen["id"], prompt_key=prompt_key(cfg))
         print(f"[prompts] YOLO run {chosen['id']} ({chosen['which']}), variant {cfg['prompt']['variant']}; "
               f"anchors {cfg['anchors']['pick']} x{cfg['anchors']['count']}, "
-              f"HITL {cfg['hitl']['rounds']} round(s) from {cfg['hitl']['source']}", flush=True)
+              f"HITL up to {cfg['hitl']['rounds']} round(s)", flush=True)
         if not evaluate_only:
             train_patients, val_patients = _pools(cfg)
             ensure_cache(cfg, train_patients + val_patients,

@@ -53,8 +53,7 @@
     "prompt.score_min": "fScoreMin", "prompt.logit_scale": "fLogitScale",
     "prompt.empty_logit": "fEmptyLogit",
     "anchors.pick": "fAnchorPick", "anchors.count": "fAnchorCount", "anchors.min_gap": "fAnchorGap",
-    "hitl.source": "fHitlSource", "hitl.rounds": "fHitlRounds",
-    "hitl.min_improvement": "fHitlMin", "hitl.target_dice": "fHitlTarget",
+    "hitl.rounds": "fHitlRounds", "hitl.min_improvement": "fHitlMin",
     "model.checkpoint": "fCheckpoint",
     "data.max_train_patients": "fMaxTrain", "data.val_patients": "fValPatients",
     "data.clips_per_patient": "fClips", "data.tumour_clip_fraction": "fTumourClips",
@@ -76,14 +75,11 @@
     runs.unshift({ value: "", label: "best scoring run (automatic)" });
     fillSelect($("fYoloRun"), runs);
     fillSelect($("fVariant"), Object.keys(ov.variants).map((k) => ({ value: k, label: k })));
-    // the automatic choices first; the two that read the expert mask go last
-    const autoFirst = (o) => Object.keys(o).sort((x, y) => x.includes("expert") - y.includes("expert"));
-    fillSelect($("fAnchorPick"), autoFirst(ov.anchor_rules).map((k) => ({ value: k, label: k })));
-    fillSelect($("fHitlSource"), autoFirst(ov.hitl_sources).map((k) => ({ value: k, label: k })));
+    fillSelect($("fAnchorPick"), Object.keys(ov.anchor_rules).map((k) => ({ value: k, label: k })));
     fillSelect($("fCheckpoint"), ov.checkpoints.map((k) => ({ value: k, label: k })));
     fillSelect($("fUnfreeze"), Object.keys(ov.unfreeze).map((k) => ({ value: k, label: k })));
     resetForm();
-    ["fVariant", "fAnchorPick", "fHitlSource"].forEach((id) => $(id).addEventListener("change", showVariantNote));
+    ["fVariant", "fAnchorPick"].forEach((id) => $(id).addEventListener("change", showVariantNote));
     Object.values(FIELDS).forEach((id) => $(id).addEventListener("change", showEstimate));
     showVariantNote();
   }
@@ -103,18 +99,8 @@
     const ov = S.overview;
     const v = $("fVariant").value;
     const a = $("fAnchorPick").value;
-    const h = $("fHitlSource").value;
     $("variantNote").innerHTML = `<b>${esc(v)}</b> — ${esc(ov.variants[v] || "")}`;
     $("anchorNote").innerHTML = `<b>${esc(a)}</b> — ${esc(ov.anchor_rules[a] || "")}`;
-    $("hitlNote").innerHTML = `<b>${esc(h)}</b> — ${esc(ov.hitl_sources[h] || "")}`;
-    const oracle = a === "expert_peak" || h === "expert";
-    $("oracleNote").classList.toggle("hidden", !oracle);
-    $("oracleNote").innerHTML = oracle
-      ? "<b>This will be an ORACLE run.</b> The anchors are chosen by reading the expert mask, "
-        + "the way the old hand-prompted pipeline did. The score it produces is an upper bound — "
-        + "what MedSAM2 could reach if someone always pointed at the right slice — not a result "
-        + "you can compare with an automatic run."
-      : "";
   }
   function showEstimate() {
     const ov = S.overview;
@@ -155,8 +141,8 @@
     ["variant", "Prompt style", (r) => esc(r.variant)],
     ["yolo_run", "From YOLO", (r) => `<code>${esc(r.yolo_run)}</code>`],
     ["unfreeze", "Weights changed", (r) => esc(r.unfreeze)],
-    ["anchors", "Anchors", (r) => `${esc(r.anchors || "—")}${r.oracle ? ' <span class="badge oracle">oracle</span>' : ""}`],
-    ["hitl", "Rounds", (r) => `${r.rounds || "—"} <span class="dim">${esc(r.hitl_source || "")}</span>`],
+    ["anchors", "Anchors", (r) => esc(r.anchors || "—")],
+    ["hitl", "Rounds", (r) => `${r.rounds || "—"}`],
     ["rounds", "Rounds", (r) => `${r.epochs_done}/${r.epochs_cfg}`, true],
     ["best", "Best check score", (r) => (r.best ? `${f4(r.best.val_dice3d)} <span class="dim">@${r.best.epoch}</span>` : "—"), true],
     ["test", "Test 3D Dice", (r) => (r.test ? `<b>${f4(r.test.dice3d_mean)}</b>` : "—"), true],
@@ -327,12 +313,6 @@
       kpi("Cut-off used", test.threshold, `best here: ${test.best_threshold}${ev.val ? ` · best on check: ${ev.val.best_threshold}` : ""}`),
       kpi("Anchors per patient", f2(test.anchors_mean), `${f2(test.rounds_mean)} correction rounds`),
     ].join("");
-    if (test.oracle) {
-      kp.insertAdjacentHTML("afterbegin",
-        '<p class="err" style="grid-column:1/-1;margin:0 0 8px">These numbers are from an '
-        + '<b>oracle</b> run: the anchors were chosen by reading the expert mask. Treat them as an '
-        + 'upper bound, not as a result.</p>');
-    }
 
     const series = [{ name: "test", color: COL.medsam2, points: test.sweep.map((s) => [s.threshold, s.dice3d_mean]) }];
     if (ev.val) series.push({ name: "check (val)", color: COL.val, dash: "4 3",
@@ -596,8 +576,8 @@
     $("howNote").innerHTML = `Right now: prompts come from YOLO run
       <code>${esc(c.prompt.yolo_run || "the best scoring one")}</code>, style
       <b>${esc(c.prompt.variant)}</b>; the first <b>${c.anchors.count}</b> anchor(s) are chosen by
-      <b>${esc(c.anchors.pick)}</b>, then up to <b>${c.hitl.rounds}</b> correction round(s) from
-      <b>${esc(c.hitl.source)}</b>; MedSAM2 starts from <code>${esc(c.model.checkpoint)}</code> and
+      <b>${esc(c.anchors.pick)}</b>, then up to <b>${c.hitl.rounds}</b> correction round(s);
+      MedSAM2 starts from <code>${esc(c.model.checkpoint)}</code> and
       only <b>${esc(c.train.unfreeze)}</b> may change.`;
     document.querySelectorAll("[data-cfg]").forEach((el) => {
       el.textContent = el.dataset.cfg.split(".").reduce((n, k) => (n == null ? n : n[k]), c);

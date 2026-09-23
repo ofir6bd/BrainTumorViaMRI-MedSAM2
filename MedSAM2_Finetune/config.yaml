@@ -26,24 +26,20 @@ prompt:
   empty_logit: -8.0       # what a slice YOLO left empty is prompted with (a confident "nothing")
 
 anchors:                  # which slices are prompted; everything else is reached by memory
-  pick: yolo_peak         # yolo_peak | yolo_score | spread | expert_peak
+  pick: yolo_peak         # yolo_peak | yolo_score | spread
                           #   yolo_peak  = most confident tumour area (area x score) — the automatic
                           #                stand-in for "the slice a radiologist would start on"
                           #   yolo_score = highest single blob score
                           #   spread     = evenly spaced over the slices YOLO marked
-                          #   expert_peak= the ground truth's biggest slice (ORACLE, upper bound only)
   count: 1                # anchors the first round starts from
   min_gap: 5              # slices that must separate two anchors
 
 hitl:                     # extra anchors added round by round (the loop 05_infer_multibbox_hitl had)
   rounds: 3               # 1 = no extra anchors. Each round is a full forward+backward pass.
   min_improvement: 0.005  # stop when a round changes less than this
-  target_dice: 0.95       # expert source only: stop once this Dice is reached
-  source: yolo            # yolo   = the next anchor is where the prediction disagrees most with
-                          #          YOLO. Fully automatic; the reported score stays honest.
-                          # expert = the next anchor comes from the ground truth, exactly like the
-                          #          old 05_infer_multibbox_hitl.py. This is an ORACLE: the score it
-                          #          produces is an upper bound, not a result. Clearly marked as such.
+                          # The next anchor always goes where the prediction disagrees most with
+                          # YOLO. Nothing here ever reads the expert mask, so the reported score
+                          # is always an honest one.
 
 data:
   train_pool: medsam2_train   # pools are keys of the project config.yaml -> paths
