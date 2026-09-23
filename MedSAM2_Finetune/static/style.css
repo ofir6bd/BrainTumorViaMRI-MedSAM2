@@ -26,3 +26,6 @@
 .viewer-img img { max-height: 70vh; object-fit: contain; }
 .viewer-side .kpi { margin-bottom: 8px; }
 
+/* the plain-English line under every field of the start form */
+.fld .hint { font-size: 0.71rem; line-height: 1.45; color: var(--muted); opacity: 0.85; }
+.start-form .fld { gap: 4px; }

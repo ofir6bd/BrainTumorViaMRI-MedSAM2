@@ -154,8 +154,6 @@ def run_patient(predictor, cfg, patient_id, device="cuda", entry=None):
 
         if round_index + 1 >= int(hitl["rounds"]):
             break
-        if change is not None and 1.0 - change < float(hitl["min_improvement"]):
-            break                       # the prediction stopped moving: more anchors change nothing
         nxt = anchor_rules.next_anchor(entry, cfg, pred, picked)
         if nxt is None:
             break
@@ -240,11 +238,25 @@ def summarise(records, cfg):
     best = max(sweep, key=lambda s: s["dice3d_mean"] or 0) if records else {"threshold": None}
     mean = lambda v: float(np.mean(v)) if len(v) else None            # noqa: E731
     median = lambda v: float(np.median(v)) if len(v) else None        # noqa: E731
-    # what the HITL rounds did, averaged over patients
-    per_round = {}
-    for r in records:
-        for item in r["rounds"]:
-            per_round.setdefault(item["round"], []).append(item["dice3d"])
+    # What each round setting would actually give you, over the WHOLE pool.
+    #
+    # A patient that ran out of anchors at round 7 still answers with its round-7 result if
+    # `hitl.rounds` is set to 12 — so its value is carried forward rather than dropped. Taking
+    # the mean only over the patients that reached each round would compare round 12 on the
+    # handful of big tumours against round 1 on everybody, and the curve would rise for no
+    # reason but the changing cohort.
+    max_rounds = max((len(r["rounds"]) for r in records), default=0)
+    by_round = []
+    for k in range(1, max_rounds + 1):
+        vals, anchors, reached = [], [], 0
+        for r in records:
+            item = r["rounds"][min(k, len(r["rounds"])) - 1]
+            vals.append(item["dice3d"])
+            anchors.append(len(item["anchors"]))
+            reached += len(r["rounds"]) >= k
+        by_round.append({"round": k, "patients": len(records), "still_running": reached,
+                         "anchors_mean": float(np.mean(anchors)),
+                         "dice3d_mean": float(np.mean(vals))})
     return {
         "patients": len(records),
         "threshold": float(cfg["evaluate"]["mask_threshold"]),
@@ -264,8 +276,10 @@ def summarise(records, cfg):
         "best_threshold": best["threshold"],
         "anchors_mean": mean([len(r["anchors"]) for r in records]),
         "rounds_mean": mean([len(r["rounds"]) for r in records]),
-        "by_round": [{"round": k, "patients": len(v), "dice3d_mean": float(np.mean(v))}
-                     for k, v in sorted(per_round.items())],
+        "by_round": by_round,
+        # Which round count would have been best on this pool. On val it is a setting to copy
+        # into `hitl.rounds`; on test it is only ever reported, like the threshold sweep.
+        "best_round": max(by_round, key=lambda r: r["dice3d_mean"])["round"] if by_round else None,
         "patient_scores": [{"id": r["id"], "dice3d": r["dice3d"], "yolo_dice3d": r["yolo_dice3d"],
                             "delta": r["delta"], "gt_total": r["gt_total"],
                             "anchors": len(r["anchors"]), "rounds": len(r["rounds"]),

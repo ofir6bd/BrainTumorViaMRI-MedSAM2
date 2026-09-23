@@ -53,7 +53,7 @@
     "prompt.score_min": "fScoreMin", "prompt.logit_scale": "fLogitScale",
     "prompt.empty_logit": "fEmptyLogit",
     "anchors.pick": "fAnchorPick", "anchors.count": "fAnchorCount", "anchors.min_gap": "fAnchorGap",
-    "hitl.rounds": "fHitlRounds", "hitl.min_improvement": "fHitlMin",
+    "hitl.rounds": "fHitlRounds",
     "model.checkpoint": "fCheckpoint",
     "data.max_train_patients": "fMaxTrain", "data.val_patients": "fValPatients",
     "data.clips_per_patient": "fClips", "data.tumour_clip_fraction": "fTumourClips",
@@ -312,6 +312,8 @@
       kpi("Left empty slices empty", pct(test.specificity), "of slices without tumour"),
       kpi("Cut-off used", test.threshold, `best here: ${test.best_threshold}${ev.val ? ` · best on check: ${ev.val.best_threshold}` : ""}`),
       kpi("Anchors per patient", f2(test.anchors_mean), `${f2(test.rounds_mean)} correction rounds`),
+      kpi("Best round count", test.best_round ?? "—",
+          ev.val && ev.val.best_round ? `best on the check pool: ${ev.val.best_round}` : "on this pool"),
     ].join("");
 
     const series = [{ name: "test", color: COL.medsam2, points: test.sweep.map((s) => [s.threshold, s.dice3d_mean]) }];
@@ -338,12 +340,22 @@
     const part = ev && ev[S.split];
     $("chRounds").innerHTML = "";
     $("chAnchors").innerHTML = "";
-    if (!part || !part.by_round) return;
+    if (!part || !part.by_round || !part.by_round.length) return;
+    const cfg = (S.run && S.run.config) || {};
+    const setting = cfg.hitl && cfg.hitl.rounds;
+    const markers = [];
+    if (part.best_round) markers.push({ x: part.best_round, label: "best here", color: COL.gain });
+    if (setting && setting !== part.best_round) markers.push({ x: setting, label: "setting" });
+    const series = [{ name: `MedSAM2 (${part.patients} patients)`, color: COL.medsam2, dots: true,
+                      points: part.by_round.map((r) => [r.round, r.dice3d_mean]) }];
+    if (part.yolo_dice3d_mean != null) {
+      series.push({ name: "YOLO alone", color: COL.yolo, dash: "4 3",
+                    points: part.by_round.map((r) => [r.round, part.yolo_dice3d_mean]) });
+    }
     Charts.line($("chRounds"), {
-      height: 260, xLabel: "Correction round", yLabel: "Mean 3D Dice",
-      series: [{ name: "3D Dice", color: COL.medsam2,
-                 points: part.by_round.map((r) => [r.round, r.dice3d_mean]) }],
-      markers: part.by_round.map((r) => ({ x: r.round, label: `${r.patients} pt` })),
+      height: 280, markers, series,
+      xLabel: "Rounds setting  (round N = N anchors, with anchors.count = 1)",
+      yLabel: `Mean 3D Dice over all ${part.patients} patients`,
     });
     Charts.histogram($("chAnchors"), {
       values: (part.patient_scores || []).map((r) => r.anchors), bins: 10, height: 260,

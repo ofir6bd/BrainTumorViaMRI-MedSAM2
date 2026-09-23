@@ -54,11 +54,18 @@ anchors:                  # which slices are prompted; everything else is reache
   min_gap: 5              # slices that must separate two anchors
 
 hitl:                     # extra anchors added round by round (the loop 05_infer_multibbox_hitl had)
-  rounds: 3               # 1 = no extra anchors. Each round is a full forward+backward pass.
-  min_improvement: 0.005  # stop when a round changes less than this
+  rounds: 15              # every patient runs this many rounds, unless the anchors run out of
+                          #   room (anchors.min_gap). 1 = no extra anchors. Each round is a full
+                          #   forward+backward pass, so this is the main cost of scoring:
+                          #   roughly 4 s per round per patient.
+                          # The answer kept is the one after the LAST round. Which round count is
+                          #   actually best is read off the check pool — `summary[split].best_round`
+                          #   and the "Score after each round" chart — and then set here, the same
+                          #   way `evaluate.mask_threshold` is chosen. Picking the best round per
+                          #   patient by its Dice would mean reading the expert mask at inference,
+                          #   which is the oracle this folder deliberately does not have.
                           # The next anchor always goes where the prediction disagrees most with
-                          # YOLO. Nothing here ever reads the expert mask, so the reported score
-                          # is always an honest one.
+                          #   YOLO. Nothing here ever reads the expert mask.
 
 data:
   train_pool: medsam2_train   # pools are keys of the project config.yaml -> paths
