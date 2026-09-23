@@ -93,7 +93,17 @@
       </div>
       <div class="start-grid">
         <form class="start-form" id="startForm" autocomplete="off">
-          <p class="card-sub">Prompt &mdash; where the hint comes from</p>
+
+          <p class="band">Shared <span class="band-tag both">used when learning <em>and</em> when running</span></p>
+
+          <label class="fld">Starting checkpoint <em>(model.checkpoint)</em>
+            <select id="fCheckpoint"></select>
+            <small class="hint">Which MedSAM2 it starts from, before it learns anything from your patients.</small></label>
+          <label class="fld">Least brain on a slice <em>(data.min_fg_voxels)</em>
+            <input id="fMinFg" type="number" step="10" min="0" max="50000">
+            <small class="hint">A slice needs this much brain in it to be used at all &mdash; when learning and when running.</small></label>
+
+          <p class="card-sub">The hint YOLO gives</p>
           <label class="fld">Which YOLO makes the hint <em>(prompt.yolo_run)</em>
             <select id="fYoloRun"></select>
             <small class="hint">Which trained YOLO draws the hint. Leave it automatic to use the best-scoring one.</small></label>
@@ -114,44 +124,26 @@
             <small class="hint">What a slice with no hint is told. More negative is a firmer &ldquo;nothing here&rdquo;.</small></label>
           <p class="note" id="variantNote"></p>
 
-          <p class="card-sub">Anchors &mdash; which slices are pointed at</p>
           <label class="fld">How the first anchor is chosen <em>(anchors.pick)</em>
             <select id="fAnchorPick"></select>
-            <small class="hint">How the first slice to point at is chosen.</small></label>
-          <label class="fld">How many to start with <em>(anchors.count)</em>
-            <input id="fAnchorCount" type="number" step="1" min="1" max="20">
-            <small class="hint">How many slices are pointed at before any correction round.</small></label>
-          <label class="fld">Slices between anchors <em>(anchors.min_gap)</em>
-            <input id="fAnchorGap" type="number" step="1" min="1" max="60">
-            <small class="hint">Two anchors must be this many slices apart, so they are never neighbours.</small></label>
+            <small class="hint">Picks the slice to point at when running &mdash; and where training clips start from.</small></label>
           <p class="note" id="anchorNote"></p>
 
-          <p class="card-sub">Correction rounds (HITL)</p>
-          <label class="fld">Rounds <em>(hitl.rounds)</em>
-            <input id="fHitlRounds" type="number" step="1" min="1" max="40">
-            <small class="hint">How many times one more anchor is added and the whole volume redone.
-              Every patient runs them all; about 4 seconds each, per patient.</small></label>
-          <p class="note">Each round adds one more anchor, on the slice where the result disagrees
-            most with YOLO, and propagates the whole volume again. The answer kept is the one after
-            the <b>last</b> round &mdash; the results panel then tells you which round count was
-            best on the check pool, to copy back into this box.</p>
+          <p class="band">Training only <span class="band-tag train">how it learns</span></p>
 
-          <p class="card-sub">Data &mdash; who it learns from</p>
+          <p class="card-sub">Who it learns from</p>
           <label class="fld">Patients per round <em>(data.max_train_patients)</em>
             <input id="fMaxTrain" type="number" step="1" min="1" placeholder="all">
             <small class="hint">How many patients each round learns from. Leave empty for all of them.</small></label>
           <label class="fld">Patients in the round check <em>(data.val_patients)</em>
             <input id="fValPatients" type="number" step="1" min="1" placeholder="all">
-            <small class="hint">Patients used to score each round. More gives a steadier score but a slower round.</small></label>
+            <small class="hint">Patients used to score each round and pick the best one. More gives a steadier score but a slower round.</small></label>
           <label class="fld">Clips per patient <em>(data.clips_per_patient)</em>
             <input id="fClips" type="number" step="1" min="1" max="64">
             <small class="hint">How many short runs of slices are taken from each patient. Fresh ones every round.</small></label>
           <label class="fld">Share of clips with tumour <em>(data.tumour_clip_fraction)</em>
             <input id="fTumourClips" type="number" step="any" min="0" max="1">
             <small class="hint">Share of those that must start on a slice with tumour. The rest start anywhere, so empty stretches are seen too.</small></label>
-          <label class="fld">Least brain on a slice <em>(data.min_fg_voxels)</em>
-            <input id="fMinFg" type="number" step="10" min="0" max="50000">
-            <small class="hint">A slice needs this much brain in it to be used at all.</small></label>
 
           <p class="card-sub">Clips &mdash; how far the answer has to travel</p>
           <label class="fld">Slices in a clip <em>(video.num_frames)</em>
@@ -164,10 +156,7 @@
             <input id="fVideoBatch" type="number" step="1" min="1" max="8">
             <small class="hint">How many clips go through the card at once. One clip is already several pictures.</small></label>
 
-          <p class="card-sub">Training &mdash; how it learns</p>
-          <label class="fld">Starting checkpoint <em>(model.checkpoint)</em>
-            <select id="fCheckpoint"></select>
-            <small class="hint">Which MedSAM2 it starts from, before it learns anything from your patients.</small></label>
+          <p class="card-sub">How it learns</p>
           <label class="fld">Which weights may change <em>(train.unfreeze)</em>
             <select id="fUnfreeze"></select>
             <small class="hint">Which parts are allowed to change. The image reader stays fixed unless you pick &ldquo;all&rdquo;.</small></label>
@@ -201,6 +190,25 @@
           <label class="fld">Reader processes <em>(train.workers)</em>
             <input id="fWorkers" type="number" step="1" min="0" max="16">
             <small class="hint">Background processes reading the data. More is faster but uses more memory.</small></label>
+
+          <p class="band">Inference only <span class="band-tag infer">how it runs on a new patient</span></p>
+
+          <label class="fld">How many anchors to start with <em>(anchors.count)</em>
+            <input id="fAnchorCount" type="number" step="1" min="1" max="20">
+            <small class="hint">How many slices are pointed at before any correction round. Training always uses one.</small></label>
+          <label class="fld">Slices between anchors <em>(anchors.min_gap)</em>
+            <input id="fAnchorGap" type="number" step="1" min="1" max="60">
+            <small class="hint">Two anchors must be this many slices apart, so they are never neighbours.</small></label>
+          <label class="fld">Rounds <em>(hitl.rounds)</em>
+            <input id="fHitlRounds" type="number" step="1" min="1" max="40">
+            <small class="hint">How many times one more anchor is added and the whole volume redone. Every patient runs them all; about 4 seconds each, per patient.</small></label>
+          <label class="fld">Tumour cut-off <em>(evaluate.mask_threshold)</em>
+            <input id="fThreshold" type="number" step="any" min="-10" max="10">
+            <small class="hint">MedSAM2 answers with a confidence per pixel; above this line counts as tumour. 0 means &ldquo;more likely than not&rdquo;.</small></label>
+          <p class="note">Each round adds one more anchor, on the slice where the result disagrees
+            most with YOLO, and propagates the whole volume again. The answer kept is the one after
+            the <b>last</b> round &mdash; the results panel then tells you which round count was
+            best on the check pool, to copy back into this box.</p>
 
           <p class="estimate" id="startEstimate"></p>
           <p class="form-err" id="startErr"></p>

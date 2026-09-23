@@ -29,3 +29,14 @@
 /* the plain-English line under every field of the start form */
 .fld .hint { font-size: 0.71rem; line-height: 1.45; color: var(--muted); opacity: 0.85; }
 .start-form .fld { gap: 4px; }
+
+/* the start form is split into what is shared, what only trains, and what only runs */
+.start-form .band { grid-column: 1 / -1; margin: 22px 0 2px; padding-top: 12px;
+  border-top: 1px solid var(--border); font-size: 0.95rem; font-weight: 600; color: var(--fg); }
+.start-form .band:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.band-tag { margin-left: 8px; padding: 2px 9px; border-radius: 999px; font-size: 0.7rem;
+  font-weight: 400; font-style: normal; border: 1px solid var(--border); color: var(--muted); }
+.band-tag em { font-style: normal; color: var(--fg); }
+.band-tag.both { border-color: #6a5acd; color: #c7bfff; }
+.band-tag.train { border-color: var(--accent); color: #b9c9ff; }
+.band-tag.infer { border-color: var(--good); color: #8fe08f; }

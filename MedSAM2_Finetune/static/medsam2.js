@@ -64,6 +64,7 @@
     "train.accum": "fAccum", "train.lr": "fLr", "train.memory_lr": "fMemoryLr",
     "train.vision_lr": "fVisionLr", "train.dice_weight": "fDiceW", "train.bce_weight": "fBceW",
     "train.fliplr": "fFliplr", "train.workers": "fWorkers",
+    "evaluate.mask_threshold": "fThreshold",
   };
   const cfgValue = (cfg, dotted) => dotted.split(".").reduce((n, k) => (n == null ? n : n[k]), cfg);
 
