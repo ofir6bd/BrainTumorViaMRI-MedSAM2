@@ -83,9 +83,12 @@ def yolo_runs():
                         rc = yaml.safe_load(f) or {}
                     imgsz = rc.get("train", {}).get("imgsz", imgsz)
                     min_fg = rc.get("data", {}).get("min_fg_voxels", min_fg)
+                # A run that is still training rewrites best.pt after every round, so its
+                # prompts would come from a moving checkpoint. The picker says so.
+                st = read_json(os.path.join(d, "status.json"), {}) or {}
                 out.append({
                     "id": run_id, "weights": weights, "which": name, "imgsz": imgsz,
-                    "min_fg_voxels": min_fg,
+                    "min_fg_voxels": min_fg, "training": st.get("state") in ("queued", "running"),
                     "test_dice3d": (cfg.get("test") or {}).get("dice3d_mean"),
                     "val_dice3d": (cfg.get("val") or {}).get("dice3d_mean"),
                 })

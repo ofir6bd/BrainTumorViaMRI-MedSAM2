@@ -57,10 +57,20 @@ anchors:                  # which slices are prompted; everything else is reache
   min_gap: 5              # slices that must separate two anchors
 
 hitl:                     # extra anchors added round by round (the loop 05_infer_multibbox_hitl had)
-  rounds: 15              # every patient runs this many rounds, unless the anchors run out of
+  rounds: 8               # every patient runs this many rounds, unless the anchors run out of
                           #   room (anchors.min_gap). 1 = no extra anchors. Each round is a full
                           #   forward+backward pass, so this is the main cost of scoring:
                           #   roughly 4 s per round per patient.
+                          # Read off run 20260924-105947, which ran 15. The check pool peaked at
+                          #   5 (0.8561) and the test pool at 8 (0.8628); both were far above the
+                          #   0.8493 / 0.8597 they ended at by 15. 8 sits inside the check pool's
+                          #   noise of its own peak (0.8538 at 8 vs 0.8561 at 5, and that check
+                          #   wanders by about +-0.01), so it is a fair choice rather than a
+                          #   test-set one. Fewer anchors also spreads them further apart,
+                          #   which matters: with 11 anchors, 96% of tumour slices sat within 4
+                          #   slices of one, and on those MedSAM2 ran 0.008 BELOW the YOLO hint,
+                          #   while on slices 5-9 away it ran 0.209 ABOVE it. Propagation is what
+                          #   this model is good at, so give it something to propagate.
                           # The answer kept is the one after the LAST round. Which round count is
                           #   actually best is read off the check pool — `summary[split].best_round`
                           #   and the "Score after each round" chart — and then set here, the same
@@ -88,10 +98,13 @@ video:
   batch: 1                    # clips per step (a clip is already num_frames forward passes)
 
 train:
-  epochs: 30                  # the first run's loss was still falling and its best check was
-                              #   round 19 of 20, with the cosine schedule already at lr 0
-  patience: 8                 # the 40-patient check wanders by about +-0.01, so rounds within
-                              #   a point of each other are noise: do not stop on it
+  epochs: 50                  # run 20260924-105947 was still underfitting at 30: its loss fell
+                              #   every single round (0.2241 -> 0.1386) and its best check was
+                              #   round 21 of 29, by which point the cosine schedule had annealed
+                              #   the rate to 2.7e-7. It stopped because the schedule ran out.
+  patience: 10                # the 40-patient check wanders by about +-0.01, so rounds within
+                              #   a point of each other are noise: do not stop on it. Raised with
+                              #   `epochs`, or a long run gets cut short by that wobble.
   accum: 4                    # clips added up before a correction (effective batch = batch * accum)
   lr: 1.0e-4                  # AdamW, for the mask decoder and the prompt encoder
   memory_lr: 1.0e-5           # the memory moves 10x slower: it carries the answer between

@@ -29,7 +29,7 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from .common import RUNS_DIR, list_patients, load_config, read_json, write_json
+from .common import RUNS_DIR, list_patients, load_config, read_json, write_json, yolo_run
 from .dataset import ClipDataset, PatientShuffle, clip_sources, collate, sample_clips
 from .evaluate import build_predictor, evaluate, quick_dice
 from .model import Clips, build_train_model, losses, param_groups
@@ -74,6 +74,11 @@ def new_run(overrides=(), smoke=False):
         cfg["data"]["max_train_patients"] = SMOKE["max_train_patients"]
         cfg["data"]["val_patients"] = SMOKE["val_patients"]
         cfg["train"]["epochs"] = SMOKE["epochs"]
+    # Pin which YOLO makes the prompts, now, while the run is being created. Left as "" it
+    # would be re-resolved to "the best-scoring run" on every cache lookup — so a YOLO
+    # finishing mid-run could change the prompt cache under a run that had already trained
+    # on the old one. The page's "automatic" choice still works; it just resolves once.
+    cfg["prompt"]["yolo_run"] = yolo_run(cfg["prompt"]["yolo_run"])["id"]
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = os.path.join(RUNS_DIR, run_id)
     os.makedirs(run_dir)
@@ -219,7 +224,7 @@ def train(run_dir, cfg, status, resume=False):
 
 
 def run(run_dir, resume=False, evaluate_only=False):
-    from .yolo_prompts import ensure_cache, prompt_key, yolo_run
+    from .yolo_prompts import ensure_cache, prompt_key
 
     with open(os.path.join(run_dir, "run_config.yaml"), "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
@@ -231,7 +236,7 @@ def run(run_dir, resume=False, evaluate_only=False):
         chosen = yolo_run(cfg["prompt"]["yolo_run"])
         status.update(yolo_run=chosen["id"], prompt_key=prompt_key(cfg))
         print(f"[prompts] YOLO run {chosen['id']} ({chosen['which']}), variant {cfg['prompt']['variant']}; "
-              f"anchors {cfg['anchors']['pick']} x{cfg['anchors']['count']}, "
+              f"anchors x{cfg['anchors']['count']}, "
               f"HITL up to {cfg['hitl']['rounds']} round(s)", flush=True)
         if not evaluate_only:
             train_patients, val_patients = _pools(cfg)

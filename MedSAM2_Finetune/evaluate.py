@@ -146,10 +146,16 @@ def run_patient(predictor, cfg, patient_id, device="cuda", entry=None):
         new_pred = (logits > threshold) & gate[:, None, None]
         d_gt = dice(*_counts(new_pred, gt))
         change = None if pred is None else dice(*_counts(new_pred, pred))
+        # Per-slice counts for this round, so the page can redraw the curve as it was at any
+        # round rather than only at the last one. Counts, not masks: two small integers per
+        # slice, which is a few KB per patient rather than a few MB.
+        flat = new_pred.reshape(len(new_pred), -1)
         rounds.append({"round": round_index + 1, "anchors": sorted(int(k) for k in picked),
                        "z": [int(entry["z"][k]) for k in sorted(picked)],
                        "dice3d": round(d_gt, 4),
-                       "same_as_previous": None if change is None else round(change, 4)})
+                       "same_as_previous": None if change is None else round(change, 4),
+                       "pred": flat.sum(axis=1).tolist(),
+                       "inter": np.logical_and(new_pred, gt).reshape(len(new_pred), -1).sum(axis=1).tolist()})
         pred = new_pred
 
         if round_index + 1 >= int(hitl["rounds"]):

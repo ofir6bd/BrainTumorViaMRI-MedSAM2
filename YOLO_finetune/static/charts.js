@@ -195,7 +195,9 @@
    * series: [{name, color, dash, axis, points:[[x,y],...]}]; marker: {x, label}. */
   function dualLine(container, opt) {
     const { svg, w, h } = root(container, opt.height || 260, opt.title);
-    const box = { L: 54, R: 60, T: 26, B: 40, w, h };
+    // Markers label themselves above the plot, so leave room for two staggered rows of them.
+    const nMarks = (opt.markers || []).length;
+    const box = { L: 54, R: 60, T: nMarks ? 48 : 26, B: 40, w, h };
     const left = opt.series.filter((s) => s.axis !== "right");
     const right = opt.series.filter((s) => s.axis === "right");
     legend(svg, box.L, 13, opt.series.map((s) => ({ name: s.name, color: s.color, dash: s.dash, line: true })));
@@ -248,7 +250,10 @@
       const mx = x(m.x);
       el("line", { x1: mx, x2: mx, y1: box.T, y2: h - box.B, stroke: m.color || INK.muted,
                    "stroke-dasharray": "3 3" }, svg);
-      if (m.label) txt(svg, mx + 4, box.T + 10 + (i % 2) * 11, m.label, { class: "ch-tick", fill: m.color || null });
+      if (m.label) {
+        txt(svg, mx, box.T - 6 - (i % 2) * 12, m.label,
+            { class: "ch-tick", fill: m.color || null, "text-anchor": "middle" });
+      }
     });
     const yOf = (s) => (s.axis === "right" ? yR : yL);
     for (const s of opt.series) {

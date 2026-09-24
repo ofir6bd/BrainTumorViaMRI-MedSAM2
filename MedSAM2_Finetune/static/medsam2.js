@@ -29,7 +29,7 @@
 
   const S = {           // everything the page knows, in one place
     overview: null, runId: null, run: null, compare: new Set(), split: "test",
-    patients: [], patient: null, slice: null, logOffset: 0, profile: null,
+    patients: [], patient: null, slice: null, logOffset: 0, profile: null, round: null,
   };
 
   /* ------------------------------------------------------------------ hash state */
@@ -71,7 +71,8 @@
   function fillForm(ov) {
     const runs = ov.yolo_runs.map((r) => ({
       value: r.id,
-      label: `${r.id} — ${r.test_dice3d != null ? "test 3D Dice " + f4(r.test_dice3d) : "not scored"}`,
+      label: `${r.id} — ${r.training ? "STILL TRAINING, do not use"
+        : r.test_dice3d != null ? "test 3D Dice " + f4(r.test_dice3d) : "not scored"}`,
     }));
     runs.unshift({ value: "", label: "best scoring run (automatic)" });
     fillSelect($("fYoloRun"), runs);
@@ -462,6 +463,12 @@
     let prof = null;
     if (which === "best.pt" && (split === "test" || split === "val")) {
       prof = await api(`/api/runs/${S.runId}/eval/${split}?patient=${encodeURIComponent(S.patient)}`).catch(() => null);
+      // A record stored before per-round curves were recorded cannot answer "what did round 1
+      // look like". Fall back to propagating the patient again, which does produce them.
+      if (prof && !(prof.rounds || []).some((r) => r.pred)) {
+        $("profileNote").textContent = "The stored results have no per-round curves — working it out again…";
+        prof = null;
+      }
     }
     if (!prof) {
       prof = await api(`/api/runs/${S.runId}/profile.json?patient=${encodeURIComponent(S.patient)}&which=${which}`)
@@ -469,28 +476,42 @@
     }
     if (!prof) return;
     S.profile = prof;
+    S.round = null;
     drawProfile(prof);
     loadSlice(prof.z[argmax(prof.gt)] ?? prof.z[0]);
   }
   const argmax = (a) => a.reduce((best, v, i) => (v > a[best] ? i : best), 0);
 
+  const sliceDice = (inter, pred, gt) => (pred + gt === 0 ? 1 : (2 * inter) / (pred + gt));
+
   function drawProfile(p) {
     const box = $("chProfile");
     box.innerHTML = "";
+    // A selected round redraws MedSAM2's own curves from that round's counts. Rounds scored
+    // before this was recorded have none, so those fall back to the final round.
+    const r = S.round != null && p.rounds && p.rounds[S.round] && p.rounds[S.round].pred
+      ? p.rounds[S.round] : null;
+    const medPx = r ? r.pred : p.pred;
+    const medDice = r ? p.z.map((z, i) => sliceDice(r.inter[i], r.pred[i], p.gt[i])) : p.dice;
+    const tag = r ? ` (round ${r.round})` : "";
     Charts.dualLine(box, {
       height: 330,
       xLabel: "Slice number (z)", leftLabel: "Dice on this slice", rightLabel: "Tumour pixels on this slice",
       leftMin: 0, leftMax: 1,
       series: [
-        { name: "Dice — MedSAM2", color: COL.medsam2, points: p.z.map((z, i) => [z, p.dice[i]]) },
-        { name: "Dice — YOLO", color: COL.yolo, dash: "4 3", points: p.z.map((z, i) => [z, p.yolo_dice[i]]) },
+        // one colour per model, solid for Dice and dashed for pixels, so a glance tells you
+        // whose line it is and the dash tells you which axis it belongs to
+        { name: `Dice — MedSAM2${tag}`, color: COL.medsam2, points: p.z.map((z, i) => [z, medDice[i]]) },
+        { name: "Dice — YOLO", color: COL.yolo, points: p.z.map((z, i) => [z, p.yolo_dice[i]]) },
         { name: "pixels — expert", color: COL.gt, axis: "right", points: p.z.map((z, i) => [z, p.gt[i]]) },
-        { name: "pixels — MedSAM2", color: "#6fb3ff", axis: "right", points: p.z.map((z, i) => [z, p.pred[i]]) },
-        { name: "pixels — YOLO", color: "#f0b27a", axis: "right", dash: "4 3", points: p.z.map((z, i) => [z, p.yolo[i]]) },
+        { name: `pixels — MedSAM2${tag}`, color: COL.medsam2, axis: "right", dash: "5 4",
+          points: p.z.map((z, i) => [z, medPx[i]]) },
+        { name: "pixels — YOLO", color: COL.yolo, axis: "right", dash: "5 4",
+          points: p.z.map((z, i) => [z, p.yolo[i]]) },
       ],
       marker: S.slice ? S.slice.z : null,
       onClick: (x) => loadSlice(Math.round(x)),
-      markers: (p.anchor_z || []).map((z, i) => ({ x: z, label: `anchor ${i + 1}`, color: COL.anchor })),
+      markers: anchorMarkers(p),
     });
     renderRoundsTable(p);
     $("profileNote").innerHTML = `<b>${esc(p.id)}</b> — 3D Dice: MedSAM2 <b>${f4(p.dice3d)}</b>,
@@ -499,15 +520,59 @@
       were prompted (the anchors); everything else was reached by memory. Click the chart to jump to a slice.`;
   }
 
+  /* Which anchors to mark. With no round picked, all of them; with one picked, only the
+     anchors that round actually had, plus the slice the next round goes on to add. */
+  function anchorMarkers(p) {
+    const rounds = p.rounds || [];
+    if (S.round == null || !rounds[S.round]) {
+      return (p.anchor_z || []).map((z, i) => ({ x: z, label: `anchor ${i + 1}`, color: COL.anchor }));
+    }
+    const here = rounds[S.round].z || [];
+    const out = here.map((z, i) => ({ x: z, label: `anchor ${i + 1}`, color: COL.anchor }));
+    for (const z of newAnchors(rounds, S.round + 1)) {
+      out.push({ x: z, label: "added next", color: COL.gain });
+    }
+    return out;
+  }
+
+  /* The slice(s) a round put an anchor on that the round before did not have. */
+  function newAnchors(rounds, index) {
+    if (!rounds[index]) return [];
+    const before = index ? (rounds[index - 1].z || []) : [];
+    return (rounds[index].z || []).filter((z) => !before.includes(z));
+  }
+
   function renderRoundsTable(p) {
     const el = $("roundsTbl");
     const rounds = p.rounds || [];
     el.querySelector("thead").innerHTML = `<tr><th>Round</th><th>Anchor slices (z)</th>
+      <th>Added this round</th><th>Next round adds</th>
       <th class="num">3D Dice</th><th class="num">Same as the round before</th></tr>`;
-    el.querySelector("tbody").innerHTML = rounds.map((r) => `<tr>
-      <td>${r.round}</td><td><code>${(r.z || []).join(", ")}</code></td>
-      <td class="num">${f4(r.dice3d)}</td>
-      <td class="num">${r.same_as_previous == null ? "—" : f4(r.same_as_previous)}</td></tr>`).join("");
+    el.querySelector("tbody").innerHTML = rounds.map((r, i) => {
+      const added = newAnchors(rounds, i);
+      const next = newAnchors(rounds, i + 1);
+      return `<tr data-round="${i}" class="${S.round === i ? "sel" : ""}">
+        <td>${r.round}</td><td><code>${(r.z || []).join(", ")}</code></td>
+        <td><code>${i ? added.join(", ") : "&mdash;"}</code></td>
+        <td><code class="next">${next.length ? next.join(", ") : "&mdash;"}</code></td>
+        <td class="num">${f4(r.dice3d)}</td>
+        <td class="num">${r.same_as_previous == null ? "—" : f4(r.same_as_previous)}</td></tr>`;
+    }).join("");
+    el.querySelectorAll("tbody tr").forEach((tr) => tr.addEventListener("click", () => {
+      const i = Number(tr.dataset.round);
+      S.round = S.round === i ? null : i;      // clicking the same row again shows them all
+      drawProfile(p);
+    }));
+    const sel = S.round == null ? null : rounds[S.round];
+    $("roundsNote").innerHTML = !sel
+      ? "Click a round to redraw the chart as it was at that round, with only the anchors it had."
+      : sel.pred
+        ? `Showing round <b>${sel.round}</b>: MedSAM2's blue curves are that round's own answer,
+           from ${(sel.z || []).length} anchor(s) marked in purple. Green marks the slice round
+           ${sel.round + 1} goes on to add. Click the row again for the final round.`
+        : `Showing round <b>${sel.round}</b>'s anchors in purple, and in green the slice round
+           ${sel.round + 1} adds. This run was scored before per-round curves were recorded, so
+           the curves are still the final round's. Click the row again to show all anchors.`;
     $("roundsWrap").classList.toggle("hidden", !rounds.length);
   }
 

@@ -44,3 +44,7 @@
 /* "For example:" inside a field's explanation */
 .hint .eg { color: #b8b8d0; font-weight: 600; }
 .hint code { font-size: 0.95em; color: #9ec5ff; }
+
+/* the per-round table: pick a round to see the anchors it had */
+#roundsTbl tbody tr { cursor: pointer; }
+#roundsTbl code.next { color: #7ee07e; }
