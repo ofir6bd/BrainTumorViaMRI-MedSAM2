@@ -40,3 +40,7 @@
 .band-tag.both { border-color: #6a5acd; color: #c7bfff; }
 .band-tag.train { border-color: var(--accent); color: #b9c9ff; }
 .band-tag.infer { border-color: var(--good); color: #8fe08f; }
+
+/* "For example:" inside a field's explanation */
+.hint .eg { color: #b8b8d0; font-weight: 600; }
+.hint code { font-size: 0.95em; color: #9ec5ff; }
