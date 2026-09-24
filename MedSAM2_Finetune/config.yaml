@@ -78,7 +78,21 @@ hitl:                     # extra anchors added round by round (the loop 05_infe
                           #   patient by its Dice would mean reading the expert mask at inference,
                           #   which is the oracle this folder deliberately does not have.
                           # The next anchor always goes where the prediction disagrees most with
-                          #   YOLO. Nothing here ever reads the expert mask.
+                          #   YOLO, counted in voxels, at least `anchors.min_gap` from every
+                          #   anchor already placed. Any slice may win, including one YOLO left
+                          #   empty — that anchor is prompted with `prompt.empty_logit`, a
+                          #   confident "nothing here".
+                          # Slices YOLO left empty used to be barred, so that no anchor could
+                          #   ever erase and have the memory carry that erasure into its
+                          #   neighbours. Measured on 12 test patients at 8 rounds, the guard
+                          #   scored 0.8263 against 0.8679 without it (YOLO itself 0.8839). It
+                          #   picked the same anchors on 7 of the 12 and cost 0.0009 on the 11
+                          #   that behave, but on BraTS-GLI-02254-100 — where YOLO's tumour ends
+                          #   at z=97 and memory kept drawing up to 1100 voxels a slice out to
+                          #   z=150 — it could not point at the run-away at all (0.2450 against
+                          #   0.7342 with z=130 and z=135 anchored), and ran out of room after
+                          #   4 of the 8 rounds.
+                          # Nothing here ever reads the expert mask.
 
 data:
   train_pool: medsam2_train   # pools are keys of the project config.yaml -> paths

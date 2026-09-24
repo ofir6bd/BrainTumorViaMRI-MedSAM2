@@ -207,7 +207,9 @@
             <input id="fThreshold" type="number" step="any" min="-10" max="10">
             <small class="hint">MedSAM2 answers with a confidence for every pixel; above this line counts as tumour. <b class="eg">For example:</b> 0 means &ldquo;more likely than not&rdquo;. Raise it to 1 and it draws less; drop it to &minus;1 and it draws more.</small></label>
           <p class="note">Each round adds one more anchor, on the slice where the result disagrees
-            most with YOLO, and propagates the whole volume again. The answer kept is the one after
+            most with YOLO &mdash; counted in pixels, and it may be a slice YOLO left empty, which
+            anchors a confident &ldquo;nothing here&rdquo; and is the only way to stop a run-away.
+            Then it propagates the whole volume again. The answer kept is the one after
             the <b>last</b> round &mdash; the results panel then tells you which round count was
             best on the check pool, to copy back into this box.</p>
 

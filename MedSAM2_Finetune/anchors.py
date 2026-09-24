@@ -59,17 +59,25 @@ def initial(entry, cfg):
 def next_anchor(entry, cfg, pred, taken):
     """The slice a HITL round adds: where the current prediction disagrees most with YOLO.
 
-    Only slices where YOLO *found* something are eligible, so the new anchor is always a
-    positive prompt ("the tumour is here"). Measured the hard way: without this, the rule
-    happily picked a slice where the prediction had drawn and YOLO had not, prompted it with
-    a confident "nothing", and the memory carried that erasure into its neighbours — round 2
-    scored *below* round 1 on three of four patients. It is also what the old hand-prompted
-    pipeline did: its anchors were boxes, which can only ever say "here".
+    The disagreement is a plain voxel count — how many voxels one of them calls tumour and
+    the other does not — so a big argument outranks a small one. Any slice may win, including
+    one YOLO left empty: that anchor is prompted with `prompt.empty_logit`, a confident
+    "nothing here", which is the only way to answer a run-away propagation where memory keeps
+    drawing tumour far past the end of it.
+
+    Slices YOLO left empty used to be barred, so that every anchor said "the tumour is here"
+    and no confident "nothing" could be carried into the neighbours by the memory. Measured on
+    12 test patients with an 8-round schedule, that guard bought nothing and cost a patient:
+    0.8263 against 0.8679 without it. The two rules pick the same anchors on 7 of the 12 and
+    average 0.0009 apart on the 11 that behave; the whole gap is BraTS-GLI-02254-100, where
+    YOLO's tumour ends at z=97 but memory drew up to 1100 voxels a slice out to z=150 — the
+    guard could not point at any of those slices (0.2450), and without it z=130 and z=135
+    became anchors (0.7342). It also used to stop the loop early on that patient, at 4 of 8
+    rounds, because every YOLO-positive slice was already within `anchors.min_gap` of one.
     """
     reference = yolo_mask(entry, cfg)
     n = len(entry["z"])
-    has_reference = reference.reshape(n, -1).any(axis=1)
-    wrong = np.logical_xor(pred, reference).reshape(n, -1).sum(axis=1) * has_reference
+    wrong = np.logical_xor(pred, reference).reshape(n, -1).sum(axis=1)
     order = np.argsort(-wrong)
     order = order[wrong[order] > 0]
     picks = _spaced(order, 1, cfg["anchors"]["min_gap"], taken)
