@@ -1,0 +1,50 @@
+/* Only what the YOLO_finetune stylesheet (loaded first) does not already provide.
+   Anything shared — cards, KPIs, tables, charts, the stepper — comes from there. */
+
+.tbl tbody tr { cursor: pointer; }
+.tbl tbody tr:hover { background: #20203a; }
+.tbl tbody tr.sel { background: #273158; }
+
+/* This form has many more fields than the YOLO one, with longer labels and long option
+   text ("best scoring run (automatic)"). A plain `1fr 1fr` refuses to go below the widest
+   field's own content, so the form grew past its grid cell and slid under the config
+   panel. `minmax(0, 1fr)` lets both columns shrink, and the controls follow the cell. */
+/* no config panel beside it any more: the fields flow across the whole card, so a long
+   form stays short enough to read without endless scrolling */
+.start-form { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); min-width: 0; }
+.start-form select,
+.start-form input { width: 100%; min-width: 0; }
+.fld { min-width: 0; overflow-wrap: anywhere; }
+
+/* the start form is long, so its group headings need air above them */
+.start-form > .card-sub { margin: 10px 0 0; color: var(--fg); font-weight: 600; }
+.start-form > .card-sub:first-child { margin-top: 0; }
+.start-form > .note { grid-column: 1 / -1; margin: 0; }
+
+
+/* the slice viewer shows up to four panels side by side */
+.viewer-img img { max-height: 70vh; object-fit: contain; }
+.viewer-side .kpi { margin-bottom: 8px; }
+
+/* the plain-English line under every field of the start form */
+.fld .hint { font-size: 0.71rem; line-height: 1.45; color: var(--muted); opacity: 0.85; }
+.start-form .fld { gap: 4px; }
+
+/* the start form is split into what is shared, what only trains, and what only runs */
+.start-form .band { grid-column: 1 / -1; margin: 22px 0 2px; padding-top: 12px;
+  border-top: 1px solid var(--border); font-size: 0.95rem; font-weight: 600; color: var(--fg); }
+.start-form .band:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.band-tag { margin-left: 8px; padding: 2px 9px; border-radius: 999px; font-size: 0.7rem;
+  font-weight: 400; font-style: normal; border: 1px solid var(--border); color: var(--muted); }
+.band-tag em { font-style: normal; color: var(--fg); }
+.band-tag.both { border-color: #6a5acd; color: #c7bfff; }
+.band-tag.train { border-color: var(--accent); color: #b9c9ff; }
+.band-tag.infer { border-color: var(--good); color: #8fe08f; }
+
+/* "For example:" inside a field's explanation */
+.hint .eg { color: #b8b8d0; font-weight: 600; }
+.hint code { font-size: 0.95em; color: #9ec5ff; }
+
+/* the per-round table: pick a round to see the anchors it had */
+#roundsTbl tbody tr { cursor: pointer; }
+#roundsTbl code.next { color: #7ee07e; }

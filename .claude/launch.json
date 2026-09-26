@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "brats-viewer",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["Frontend/serve.py"],
+      "port": 5000
+    }
+  ]
+}

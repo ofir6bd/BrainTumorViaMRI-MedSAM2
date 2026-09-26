@@ -1,12 +1,21 @@
 paths:
   raw:        data/raw                        # downloaded archives (script 01)
   extract_to: data/dataset                    # script 01 extracts archives here
-  dataset:    data/dataset/training_data1_v2  # patient folders (scripts 02-05 read this)
+  dataset:    data/dataset                    # patient folders, in yolo_*/ medsam2_*/ test/ (scripts 02-05 read this)
   sample:     data/sample                     # single-patient smoke test
+
+  # Physical dataset pools, split by subject: apart from test/, no person is in two pools.
+  # data/dataset/split_manifest.json records who is where.
+  yolo_train:    data/dataset/yolo_train      # 250 patients - YOLO trains on these
+  yolo_val:      data/dataset/yolo_val        #  81 patients - YOLO picks its best epoch
+  medsam2_train: data/dataset/medsam2_train   # 721 patients - MedSAM2 trains on these
+  medsam2_val:   data/dataset/medsam2_val     # 245 patients - MedSAM2 picks its best epoch
+  test:          data/dataset/test            # 324 patients - final test for both, never trained on
+
   outputs:    outputs                         # all generated artifacts
   tmp:        outputs/tmp_frames              # ephemeral RGB frames, auto-cleaned
   medsam2:    MedSAM2                         # vendored MedSAM2 repo + checkpoints
 
 inference:
   num_patients: 1        # how many patients to process (null = all)
-  use_sample:   true     # true -> read paths.sample; false -> read paths.dataset
+  use_sample:   false    # true -> read paths.sample; false -> read paths.dataset

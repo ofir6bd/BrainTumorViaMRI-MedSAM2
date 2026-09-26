@@ -1,0 +1,4 @@
+# Everything this folder generates. The code and config are tracked; the data is not.
+cache/
+runs/
+__pycache__/

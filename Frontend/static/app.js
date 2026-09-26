@@ -1,86 +1,18 @@
-const patientSel = document.getElementById("patient");
-const zSlider = document.getElementById("z");
-const zLabel = document.getElementById("zlabel");
-const sliceField = document.getElementById("sliceField");
-const viewer = document.getElementById("viewer");
-const statusEl = document.getElementById("status");
-const bestBtn = document.getElementById("best");
-const viewTabs = document.getElementById("views");
+// App shell: sidebar + "Copy page image". The Analytics tab (dashboard.js) owns the page;
+// its whole view lives in the URL hash (#analytics?...).
+
 const copyPageBtn = document.getElementById("copyPageBtn");
 const copyPageStatus = document.getElementById("copyPageStatus");
 
-const VIEWS = {
-  panels:     { slice: true,  url: (id, z) => `/panels.png?id=${id}&z=${z}` },
-  modalities: { slice: true,  url: (id, z) => `/modalities.png?id=${id}&z=${z}` },
-  bbox:       { slice: false, url: (id) => `/bbox.png?id=${id}` },
-  scatter:    { slice: false, url: (id) => `/scatter.png?id=${id}` },
-  rgb:        { slice: true,  url: (id, z) => `/rgb.png?id=${id}&z=${z}` },
-};
-
-const current = { id: null, best: 0, view: "panels" };
-
-async function loadPatients() {
-  const list = await (await fetch("/api/patients")).json();
-  patientSel.innerHTML = "";
-  if (!list.length) {
-    statusEl.textContent =
-      "No patients found. Put data in data/dataset/training_data1_v2/ and restart run_web.bat.";
-    viewer.removeAttribute("src");
-    return;
-  }
-  for (const p of list) {
-    const opt = document.createElement("option");
-    opt.value = p.id;
-    opt.textContent = p.label;
-    patientSel.appendChild(opt);
-  }
-  setActiveTab("panels");
-  await selectPatient(Number(list[0].id));
+function route() {
+  if (window.Dashboard) window.Dashboard.show();
 }
 
-async function selectPatient(id) {
-  current.id = id;
-  statusEl.textContent = "Loading patient…";
-  const info = await (await fetch(`/api/patient/${id}`)).json();
-  current.best = info.best_slice;
-  zSlider.max = info.depth - 1;
-  zSlider.value = info.best_slice;
-  render();
-}
-
-function setActiveTab(view) {
-  current.view = view;
-  for (const btn of viewTabs.querySelectorAll(".tab")) {
-    btn.classList.toggle("active", btn.dataset.view === view);
-  }
-  sliceField.classList.toggle("hidden", !VIEWS[view].slice);
-}
-
-function render() {
-  if (current.id === null) return;
-  const view = VIEWS[current.view];
-  const z = zSlider.value;
-  zLabel.textContent = `z = ${z}`;
-  statusEl.textContent = "Rendering…";
-  viewer.onload = () => (statusEl.textContent = "");
-  viewer.onerror = () => (statusEl.textContent = "Failed to render this view.");
-  viewer.src = `${view.url(current.id, z)}&_=${Date.now()}`;
-}
-
-patientSel.addEventListener("change", (e) => selectPatient(Number(e.target.value)));
-zSlider.addEventListener("input", render);
-bestBtn.addEventListener("click", () => {
-  zSlider.value = current.best;
-  render();
+document.getElementById("sidenav").addEventListener("click", (e) => {
+  const btn = e.target.closest("button.navbtn"); // links (e.g. YOLO_finetune) just navigate
+  if (btn && window.Dashboard) location.hash = window.Dashboard.hash();
 });
-viewTabs.addEventListener("click", (e) => {
-  const btn = e.target.closest(".tab");
-  if (!btn) return;
-  setActiveTab(btn.dataset.view);
-  render();
-});
-
-loadPatients();
+window.addEventListener("hashchange", route);
 
 // ---- copy whole page as image ----
 let _html2canvasPromise = null;
@@ -153,24 +85,5 @@ if (copyPageBtn) {
   copyPageBtn.addEventListener("click", copyPageAsImage);
 }
 
-// ---- sidebar mode switching (Explore / FCM / YOLO / GT vs YOLO) ----
-const sidenav = document.getElementById("sidenav");
-const panels = {
-  explore: document.getElementById("explorePanel"),
-  "fcm-segmentation": document.getElementById("fcmPanel"),
-  "yolo-detection": document.getElementById("yoloPanel"),
-  "gt-vs-yolo": document.getElementById("gtvsyoloPanel"),
-};
-sidenav.addEventListener("click", (e) => {
-  const btn = e.target.closest(".navbtn");
-  if (!btn) return;
-  const mode = btn.dataset.mode;
-  for (const b of sidenav.querySelectorAll(".navbtn")) {
-    b.classList.toggle("active", b === btn);
-  }
-  for (const [name, el] of Object.entries(panels)) {
-    el.classList.toggle("hidden", name !== mode);
-  }
-  if (mode === "fcm-segmentation" && window.initFcmSegmentation) window.initFcmSegmentation();
-  if (mode === "yolo-detection" && window.initYolo) window.initYolo();
-});
+// dashboard.js loads after this file; route once everything is defined.
+window.addEventListener("DOMContentLoaded", route);
