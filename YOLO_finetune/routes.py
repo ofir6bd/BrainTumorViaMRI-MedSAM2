@@ -114,6 +114,7 @@ def run_summary(run_id):
     return {
         "id": run_id, "created": cfg["run"]["created"], "smoke": cfg["run"].get("smoke"),
         "model": cfg["model"], "epochs_cfg": cfg["train"]["epochs"], "imgsz": cfg["train"]["imgsz"],
+        "min_mask_area": cfg["data"]["min_mask_area"],
         "batch": cfg["train"]["batch"], "state": st.get("state"), "stage": st.get("stage"),
         "epoch": st.get("epoch"), "epochs": st.get("epochs"), "started": st.get("started"),
         "finished": st.get("finished"), "error": st.get("error"),

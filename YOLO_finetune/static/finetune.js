@@ -178,6 +178,7 @@
         <td class="mono">${esc(r.id)}${r.smoke ? ' <span class="badge smoke">quick test</span>' : ""}</td>
         <td>${badge(r.state)}${r.error ? ` <span class="err" title="${esc(r.error)}">!</span>` : ""}</td>
         <td>${esc(r.model)}</td>
+        <td class="num">${r.min_mask_area == null ? "–" : r.min_mask_area}</td>
         <td class="num">${r.epochs_done}/${r.epochs || r.epochs_cfg}</td>
         <td class="num">${r.best ? `${fmt(r.best.map5095_m)} <span class="dim">@${r.best.epoch}</span>` : "–"}</td>
         <td class="num">${t ? `<b>${t.dice3d_mean.toFixed(4)}</b>` : "–"}</td>
@@ -187,6 +188,7 @@
         <td>${esc((r.created || "").replace("T", " "))}</td></tr>`;
     }).join("");
     $("runsTable").innerHTML = `<table class="tbl"><thead><tr><th title="Tick to compare this run's curves">Compare</th><th>Run</th><th>Status</th><th>Model</th>
+      <th class="num" title="Tumour pieces smaller than this many pixels were left out of the answers, so runs with different values were not marked the same way">Smallest tumour piece</th>
       <th class="num" title="Rounds done / most rounds allowed">Rounds</th><th class="num" title="Best mask score on the val pool during training (mAP50-95, 0 to 1)">Best val score</th>
       <th class="num" title="Average 3D Dice over the test patients — the main result">Test 3D Dice</th><th class="num" title="Average 2D Dice over test slices that have tumour">Test 2D Dice</th>
       <th class="num" title="The old YOLO/ number: average over all slices, where an empty slice with no drawing counts as perfect">Old-style Dice</th>
