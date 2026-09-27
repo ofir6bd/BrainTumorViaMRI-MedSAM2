@@ -15,7 +15,7 @@ never needs a rebuild:
   prob    max over all blobs                     -> variants `max`, `binary`
   prob_w  max over blobs of probability x score  -> variant  `max_weighted`
   prob_f  max over blobs whose score >= score_min -> variant `conf_filtered`
-plus every blob's box and score (variant `box`, and the charts).
+plus the best score and the blob count per slice, which the page shows.
 
 The frame and the expert mask are stored next to them, so one patient file holds
 everything a training step needs and training never touches the NIfTI files again.
@@ -101,7 +101,6 @@ def predict_patient(model, patient, cfg):
     out = {k: np.zeros((len(zs), h, w), np.uint8) for k in ("prob", "prob_w", "prob_f")}
     rgb = np.zeros((len(zs), h, w, 3), np.uint8)
     gt = np.zeros((len(zs), h, w), np.uint8)
-    blob_slice, blob_box, blob_score = [], [], []
     scores, nblobs = np.zeros(len(zs), np.float32), np.zeros(len(zs), np.int16)
 
     for i in range(0, len(zs), BATCH):
@@ -120,7 +119,6 @@ def predict_patient(model, patient, cfg):
         for j, r in enumerate(results):
             k = i + j
             conf = r.boxes.conf.cpu().numpy() if r.boxes is not None else np.zeros(0, np.float32)
-            boxes = r.boxes.xyxy.cpu().numpy() if r.boxes is not None else np.zeros((0, 4), np.float32)
             # A slice with no detection at all never reaches the mask step, so it consumed
             # nothing from the capture.
             if r.masks is None:
@@ -139,17 +137,11 @@ def predict_patient(model, patient, cfg):
                 keep = conf >= p["score_min"]
                 if keep.any():
                     out["prob_f"][k] = _u8(masks[keep].max(axis=0))
-            for b in range(len(conf)):
-                blob_slice.append(k)
-                blob_box.append(boxes[b])
-                blob_score.append(conf[b])
 
     return {"z": np.asarray(zs, np.int16), "shape": np.asarray([h, w], np.int16),
             "scores": scores, "nblobs": nblobs, "rgb": rgb, "gt": gt,
             "gt_px": gt.reshape(len(zs), -1).sum(axis=1).astype(np.int32),
-            "blob_slice": np.asarray(blob_slice, np.int32),
-            "blob_box": np.asarray(blob_box, np.float32).reshape(-1, 4),
-            "blob_score": np.asarray(blob_score, np.float32), **out}
+            **out}
 
 
 def ensure_cache(cfg, patients, progress=None, log=print, model=None):
@@ -197,32 +189,14 @@ def load_prompt(cfg, patient_id, keys=None):
 def prompt_logits(entry, cfg, index=None):
     """The prompt MedSAM2 is given, as logits, for one slice (`index`) or all of them.
 
-    `binary` and `box` are hard prompts, so they are expressed as +-`empty_logit`: the same
-    "certain" scale the soft variants can reach, so that no variant is quietly louder than
-    another because of its units.
+    Every variant is a soft map: which of the three cached probability maps it reads is the
+    only difference. Three hard ones were dropped — `binary` (the mask with the shading
+    thrown away), `box` (a filled rectangle per blob) and `none` (no hint at all).
     """
     p = cfg["prompt"]
     variant, k = p["variant"], p["empty_logit"]
     n = len(entry["z"])
     idx = np.arange(n) if index is None else np.atleast_1d(index)
-
-    if variant == "none":
-        return np.full((len(idx), *entry["shape"]), k, np.float32)   # already silent everywhere
-    if variant == "box":
-        out = np.full((len(idx), *entry["shape"]), k, np.float32)
-        keep = entry["blob_score"] >= p["score_min"]
-        for s, box, score in zip(entry["blob_slice"][keep], entry["blob_box"][keep],
-                                 entry["blob_score"][keep]):
-            hit = np.nonzero(idx == s)[0]
-            if not len(hit):
-                continue
-            x1, y1, x2, y2 = [int(round(v)) for v in box]
-            # boxes are in (x, y) image coordinates; the arrays are [row, col] = (y, x)
-            out[hit[0], max(y1, 0):max(y2, 0), max(x1, 0):max(x2, 0)] = abs(k) * float(score)
-        return _clip_to_head(out, entry, cfg, idx)
-    if variant == "binary":
-        hard = entry["prob"][idx] > 127
-        return _clip_to_head(np.where(hard, abs(k), k).astype(np.float32), entry, cfg, idx)
 
     field = {"max": "prob", "max_weighted": "prob_w", "conf_filtered": "prob_f"}[variant]
     logits = prob_to_logit(entry[field][idx]) * float(p["logit_scale"])

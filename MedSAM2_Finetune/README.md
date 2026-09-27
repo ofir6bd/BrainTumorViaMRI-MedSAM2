@@ -90,9 +90,9 @@ that picks the best round is the score that gets reported.
 | `max` | the highest probability any YOLO blob gives it |
 | `max_weighted` | the same, multiplied by that blob's confidence score |
 | `conf_filtered` | blobs below `prompt.score_min` are dropped first |
-| `binary` | the plain YOLO mask, 0 or 1 — no soft values |
-| `box` | a filled rectangle per kept blob |
-| `none` | nothing: MedSAM2 has to find the tumour unaided (the control) |
+
+All three are soft maps. Three hard styles were dropped — `binary` (the same mask with the
+shading thrown away), `box` (a filled rectangle per blob) and `none` (no hint at all).
 
 Only `prompt.yolo_run`, `prompt.yolo_conf`, `prompt.score_min` and `data.min_fg_voxels`
 change the cache; switching variant, anchors or HITL settings costs no rebuild.

@@ -26,9 +26,11 @@ model:
 
 prompt:
   yolo_run: ""            # which YOLO_finetune run makes the prompts ("" = the best-scoring one)
-  variant: max            # max | max_weighted | conf_filtered | binary | box | none
+  variant: max            # max | max_weighted | conf_filtered
   yolo_conf: 0.05         # blobs below this confidence are never produced
-  score_min: 0.25         # conf_filtered / box: drop blobs whose confidence is below this
+  score_min: 0.25         # conf_filtered: drop blobs whose confidence is below this. It also
+                          #   sets YOLO's own mask — the answer MedSAM2 is scored against and
+                          #   the one the anchor rule compares to — whatever the variant is.
   logit_scale: 8.0        # multiply YOLO's logits before handing them to MedSAM2.
                           #   YOLO's logits reach about +-5.5; SAM2's mask prompt was trained on a
                           #   wider scale, so it barely reacts to them raw. Measured on 4 val

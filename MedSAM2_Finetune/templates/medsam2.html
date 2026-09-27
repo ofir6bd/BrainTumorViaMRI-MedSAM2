@@ -108,7 +108,7 @@
             <small class="hint">Which of your trained YOLOs draws the hint. <b class="eg">For example:</b> leave it automatic and it takes run <code>20260921-200857</code>, the one that scored 0.8767 on the test patients.</small></label>
           <label class="fld">Prompt style <em>(prompt.variant)</em>
             <select id="fVariant"></select>
-            <small class="hint">YOLO finds several blobs on a slice, each with its own confidence. This decides how they become one number per pixel. <b class="eg">For example:</b> <code>max</code> takes the highest of them; <code>binary</code> throws the softness away and gives a plain yes or no.</small></label>
+            <small class="hint">YOLO finds several blobs on a slice, each with its own confidence. This decides how they become one number per pixel. <b class="eg">For example:</b> <code>max</code> takes the highest of them, so a weak blob speaks as loudly as a strong one; <code>conf_filtered</code> deletes the blobs under the score threshold first; <code>max_weighted</code> keeps them but dims each one by its own score.</small></label>
           <label class="fld">Lowest YOLO confidence kept <em>(prompt.yolo_conf)</em>
             <input id="fYoloConf" type="number" step="any" min="0.005" max="0.9">
             <small class="hint">YOLO reports every blob it is at least this sure of. Lower keeps more guesses, including near-random ones. <b class="eg">For example:</b> at 0.05, one slice came back with nine blobs &mdash; eight sensible, and one scoring 0.050 that covered air outside the head.</small></label>
