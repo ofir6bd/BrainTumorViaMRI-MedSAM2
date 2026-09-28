@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import time
+from contextlib import contextmanager
 
 import nibabel as nib
 import numpy as np
@@ -115,6 +116,15 @@ def yolo_seg_lines(polys, h, w):
     return lines
 
 
+def best_weights(run_dir):
+    """The checkpoint a run stands for: the round with the best check 3D Dice
+    (`best_dice.pt`, written when `select.by: dice3d`), else Ultralytics' own `best.pt`
+    (the round with the best mask mAP — what every run before 2026-09-28 kept)."""
+    w = os.path.join(run_dir, "train", "weights")
+    dice = os.path.join(w, "best_dice.pt")
+    return dice if os.path.exists(dice) else os.path.join(w, "best.pt")
+
+
 def short_hash(obj):
     return hashlib.sha1(json.dumps(obj, sort_keys=True).encode("utf-8")).hexdigest()[:10]
 
@@ -145,3 +155,41 @@ def read_json(path, default=None):
             return json.load(f)
     except (OSError, ValueError):
         return default
+
+
+@contextmanager
+def keep_soft_masks():
+    """While this is open, every `process_mask_native` call also records its soft masks.
+
+    Ultralytics keeps only "probability > 0.5" of each blob's mask (`.gt_(0.0)` on the
+    logits). The per-pixel probability behind it is what the mirror TTA averages here, and
+    what MedSAM2_Finetune uses as its hint.
+
+    The predictor looks the function up on the module at call time, so replacing the
+    attribute is enough. Single-threaded by nature — one model, one prediction at a time.
+    """
+    import torch
+    from ultralytics.utils import ops
+
+    captured, original = [], ops.process_mask_native
+
+    def wrapper(protos, masks_in, bboxes, shape):
+        c, mh, mw = protos.shape
+        binary = original(protos, masks_in, bboxes, shape)
+        if masks_in.shape[0] == 0:
+            soft = torch.zeros((0, *shape), dtype=torch.float32, device=masks_in.device)
+        else:
+            coeffs = masks_in @ protos.float().view(c, -1)            # prototype-resolution logits
+            soft = ops.scale_masks(coeffs.view(-1, mh, mw)[None], shape)[0]   # native size, still logits
+            soft = ops.crop_mask(soft.sigmoid(), bboxes)              # probability, cropped to the box
+        # Ultralytics then drops any blob whose binary mask came out empty, and drops its box
+        # with it. The soft masks have to lose exactly the same rows or they stop lining up
+        # with `r.boxes.conf`.
+        captured.append(soft[binary.amax((-2, -1)) > 0] if len(binary) else soft)
+        return binary
+
+    ops.process_mask_native = wrapper
+    try:
+        yield captured
+    finally:
+        ops.process_mask_native = original

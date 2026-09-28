@@ -22,8 +22,8 @@ from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from werkzeug.exceptions import HTTPException
 from PIL import Image
 
-from .common import (CONFIG_PATH, DATASETS_DIR, ROOT, RUNS_DIR, brain_slices, list_patients,
-                     load_config, load_volumes, read_json, rgb_slice, write_json)
+from .common import (CONFIG_PATH, DATASETS_DIR, ROOT, RUNS_DIR, best_weights, brain_slices,
+                     list_patients, load_config, load_volumes, read_json, rgb_slice, write_json)
 from .train import new_run
 
 MODELS = ["yolo11n-seg.pt", "yolo11s-seg.pt", "yolo11m-seg.pt", "yolo11l-seg.pt", "yolo11x-seg.pt",
@@ -122,7 +122,7 @@ def run_summary(run_id):
         "train_seconds": res.get("time", [None])[-1] if res.get("time") else None,
         "best": best,
         "test": ev.get("test") if ev else None, "val": ev.get("val") if ev else None,
-        "has_best": os.path.exists(os.path.join(RUNS_DIR, run_id, "train", "weights", "best.pt")),
+        "has_best": os.path.exists(best_weights(os.path.join(RUNS_DIR, run_id))),
         "has_last": os.path.exists(os.path.join(RUNS_DIR, run_id, "train", "weights", "last.pt")),
     }
 
@@ -258,8 +258,8 @@ def api_resume(run_id):
 @finetune_bp.route("/api/runs/<run_id>/evaluate", methods=["POST"])
 def api_evaluate(run_id):
     d = run_dir(run_id)
-    if not os.path.exists(os.path.join(d, "train", "weights", "best.pt")):
-        abort(400, "This run has no best.pt yet.")
+    if not os.path.exists(best_weights(d)):
+        abort(400, "This run has no best checkpoint yet.")
     spawn(d, "--evaluate-only")
     return jsonify({"ok": True})
 
@@ -311,7 +311,7 @@ def _cached(store, key, make, size):
 
 def _model_of(run_id):
     """The run's best checkpoint, loaded once and kept."""
-    weights = os.path.join(run_dir(run_id), "train", "weights", "best.pt")
+    weights = best_weights(run_dir(run_id))
     if not os.path.exists(weights):
         abort(404, "This run has no trained model (best.pt) yet.")
     from ultralytics import YOLO

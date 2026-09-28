@@ -38,14 +38,51 @@ The first run of a model downloads its COCO weights (`yolo11m-seg.pt`, ~45 MB) i
    label. Built once into `dataset/<hash>/` and reused by every run with the same data settings.
 2. **Training** (`train.py`) — Ultralytics fine-tune with the settings in `config.yaml`.
    Hue/saturation jitter is off: the three channels are MRI sequences, not colours.
-3. **Evaluation** (`evaluate.py`) — `best.pt` on every brain slice of **val** and **test**,
-   straight from the NIfTI files, masks at the slice's own size (`retina_masks`). One pass
-   scores every confidence threshold in `evaluate.sweep`.
+3. **Evaluation** (`evaluate.py`) — the run's model on every brain slice of **val** and
+   **test**, straight from the NIfTI files, masks at the slice's own size. One pass scores
+   every confidence threshold in `evaluate.sweep`. Each blob is kept as a probability map
+   (`common.keep_soft_masks`); "tumour" is probability > 0.5, which with the extras off is
+   exactly Ultralytics' own mask. Two extras, both on by default:
+   - `evaluate.tta_flip` — the left-right mirrored slice is predicted too (same call) and the
+     two probability maps are averaged;
+   - `evaluate.min_component` — 3D tumour pieces smaller than this many voxels are removed.
+
+Which round becomes the model is `select.by`: `map` (Ultralytics' `best.pt`, the default) or
+`dice3d` (every round scored by 3D Dice on `select.patients` val patients, best kept as
+`best_dice.pt`, early stop after `select.patience`). `common.best_weights` picks
+`best_dice.pt` when a run has one; the page and MedSAM2_Finetune use it.
+
+`--splits val` scores only val at the end, for runs that compare settings.
 
 Each run is `runs/<YYYYMMDD-HHMMSS>/`: `run_config.yaml` (its exact settings), `status.json`,
 `log.txt`, `train/` (Ultralytics: `results.csv`, `weights/best.pt`, `last.pt`, plots) and
 `eval/` (`val.json`, `test.json`, `summary.json`). A run is its own process — closing the page
 (or restarting the viewer) does not stop it; **Stop** does, and **Resume** continues from `last.pt`.
+
+## What was measured (2026-09-28)
+
+Choices were made on **both** pools YOLO never trained on, `yolo_val` + `medsam2_val`
+(326 patients); test was scored once, at the end.
+
+| change | val 3D Dice |
+|---|---|
+| run `20260927-010028`, conf 0.25, no extras | 0.8690 |
+| **+ mirror TTA, conf 0.05, `min_component` 200** | **0.8754** (+0.0064; flat from conf 0.03 to 0.075) |
+| retrain: less mosaic / zoom, ±10° rotation | 0.8776 (map pick) / 0.8729 (dice pick) |
+| retrain: no mosaic | 0.8737 / 0.8725 |
+| retrain: cosine learning rate | 0.8753 / 0.8764 |
+
+None of the retrains beats the old weights beyond noise (best: +0.0022 ± 0.0021, 73 patients
+better / 71 worse), and picking the round by a 30-patient Dice check was *worse* than
+Ultralytics' mAP pick on two of three runs. So the model stays `20260927-010028`, now scored
+with the extras. Six earlier runs (model size m/x, `min_mask_area` 0-50) had already all
+landed within 0.8746-0.8781 on test: this YOLO is limited by its 250 training patients, not by
+its settings — every run's val loss bottoms out around round 16-19 and then rises.
+
+**Test, scored once: 0.8805 vs 0.8781 before (+0.0024 ± 0.0021, median +0.0024; 113 patients
+better, 51 worse).** Smaller than on val, but most patients gain. The run's pre-extras scores
+are kept in `runs/20260927-010028/eval_conf025_noextras/`. The three retrain screens are
+`runs/20260928-122541` (A), `-164059` (B), `-194043` (C), scored on val only.
 
 ## Metrics
 

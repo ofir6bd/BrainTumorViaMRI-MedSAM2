@@ -7,8 +7,8 @@ above probability 0.5". The soft value is what MedSAM2 wants, because SAM2's den
 is a *logit* map, exactly the same kind of number YOLO produced before the cut.
 
 So we let Ultralytics do its own (letterboxing, NMS, native-size mask) work untouched and
-wrap `process_mask_native` for the length of our own call, keeping the soft masks it was
-about to throw away. Nothing in the installed package is edited.
+keep the soft masks it was about to throw away (`YOLO_finetune.common.keep_soft_masks`,
+shared with YOLO's own scorer). Nothing in the installed package is edited.
 
 Per slice the cache keeps three uint8 probability maps, so that changing the *variant*
 never needs a rebuild:
@@ -21,11 +21,11 @@ The frame and the expert mask are stored next to them, so one patient file holds
 everything a training step needs and training never touches the NIfTI files again.
 """
 import os
-from contextlib import contextmanager
 
 import numpy as np
-import torch
 from PIL import Image
+
+from YOLO_finetune.common import keep_soft_masks
 
 from .common import (CACHE_DIR, CHANNELS, brain_slices, load_volumes, prob_to_logit, read_json,
                      rgb_slice, short_hash, write_json, yolo_run)
@@ -53,40 +53,6 @@ def patient_file(cfg, patient_id):
     return os.path.join(cache_dir(cfg), f"{patient_id}.npz")
 
 
-# ------------------------------------------------------------------ the soft mask
-@contextmanager
-def _keep_soft_masks():
-    """While this is open, every `process_mask_native` call also records its soft masks.
-
-    The predictor looks the function up on the module at call time, so replacing the
-    attribute is enough. Single-threaded by nature — one model, one prediction at a time.
-    """
-    from ultralytics.utils import ops
-
-    captured, original = [], ops.process_mask_native
-
-    def wrapper(protos, masks_in, bboxes, shape):
-        c, mh, mw = protos.shape
-        binary = original(protos, masks_in, bboxes, shape)
-        if masks_in.shape[0] == 0:
-            soft = torch.zeros((0, *shape), dtype=torch.float32, device=masks_in.device)
-        else:
-            coeffs = masks_in @ protos.float().view(c, -1)            # prototype-resolution logits
-            soft = ops.scale_masks(coeffs.view(-1, mh, mw)[None], shape)[0]   # native size, still logits
-            soft = ops.crop_mask(soft.sigmoid(), bboxes)              # probability, cropped to the box
-        # Ultralytics then drops any blob whose binary mask came out empty, and drops its box
-        # with it. The soft masks have to lose exactly the same rows or they stop lining up
-        # with `r.boxes.conf`.
-        captured.append(soft[binary.amax((-2, -1)) > 0] if len(binary) else soft)
-        return binary
-
-    ops.process_mask_native = wrapper
-    try:
-        yield captured
-    finally:
-        ops.process_mask_native = original
-
-
 def _u8(prob):
     return np.clip(prob * 255.0 + 0.5, 0, 255).astype(np.uint8)
 
@@ -112,7 +78,7 @@ def predict_patient(model, patient, cfg):
             rgb[i + j] = frames[j]
             gt[i + j] = (vols["SEG"][:, :, z] > 0).astype(np.uint8)
         imgs = [Image.fromarray(f) for f in frames]
-        with _keep_soft_masks() as soft:
+        with keep_soft_masks() as soft:
             results = model.predict(imgs, conf=p["yolo_conf"], imgsz=run["imgsz"], retina_masks=True,
                                     verbose=False, device=cfg["train"]["device"])
         taken = 0

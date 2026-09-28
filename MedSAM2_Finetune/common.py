@@ -69,7 +69,8 @@ def yolo_runs():
         return out
     for run_id in sorted(os.listdir(YOLO_RUNS_DIR), reverse=True):
         d = os.path.join(YOLO_RUNS_DIR, run_id)
-        for name in ("best.pt", "last.pt"):
+        # best_dice.pt: the round with the best check 3D Dice (YOLO runs from 2026-09-28 on)
+        for name in ("best_dice.pt", "best.pt", "last.pt"):
             weights = os.path.join(d, "train", "weights", name)
             if os.path.exists(weights):
                 cfg = read_json(os.path.join(d, "eval", "summary.json")) or {}
