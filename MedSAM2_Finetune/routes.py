@@ -37,9 +37,7 @@ EDITABLE = {
     "prompt.score_min": ("float", 0.0, 0.95),
     "prompt.logit_scale": ("float", 0.05, 20.0),
     "prompt.empty_logit": ("float", -30.0, 0.0),
-    "anchors.count": ("int", 1, 20),
-    "anchors.min_gap": ("int", 1, 60),
-    "hitl.rounds": ("int", 1, 40),
+    "augment.p": ("float", 0.0, 1.0),
     "model.checkpoint": ("choice", "checkpoints"),
     "data.max_train_patients": ("int?", 1, 5000),
     "data.val_patients": ("int?", 1, 5000),
@@ -63,6 +61,7 @@ EDITABLE = {
     "train.fliplr": ("float", 0.0, 1.0),
     "train.workers": ("int", 0, 16),
     "evaluate.mask_threshold": ("float", -10.0, 10.0),
+    "evaluate.min_component": ("int", 0, 100000),
 }
 REBUILDS = ("prompt.yolo_run", "prompt.yolo_conf", "prompt.score_min", "data.min_fg_voxels")
 
@@ -142,7 +141,7 @@ def run_summary(run_id):
         "checkpoint": cfg["model"]["checkpoint"], "variant": cfg["prompt"]["variant"],
         "yolo_run": st.get("yolo_run") or cfg["prompt"]["yolo_run"] or "(best)",
         "unfreeze": cfg["train"]["unfreeze"], "epochs_cfg": cfg["train"]["epochs"],
-        "anchors": cfg.get("anchors", {}).get("count"), "rounds": cfg.get("hitl", {}).get("rounds"),
+        "augment": (cfg.get("augment") or {}).get("p"),
         "state": st.get("state"), "stage": st.get("stage"), "epoch": st.get("epoch"),
         "epochs": st.get("epochs"), "started": st.get("started"), "finished": st.get("finished"),
         "error": st.get("error"), "epochs_done": len(res.get("epoch", [])),
@@ -408,7 +407,7 @@ def _entry_of(run_id, patient_id):
 
 
 def _prediction(run_id, patient_id, which="best.pt"):
-    """Propagate this patient once (a few seconds) and keep the result for every panel."""
+    """Run this patient once (a few seconds) and keep the result for every panel."""
     from .evaluate import run_patient
 
     if which not in ("best.pt", "last.pt"):
@@ -421,16 +420,13 @@ def _prediction(run_id, patient_id, which="best.pt"):
 
 
 def _mask_at(cfg, out, k):
-    """The MedSAM2 mask on one slice, from the propagated logits."""
-    m = out["logits"][k] > float(cfg["evaluate"]["mask_threshold"])
-    if cfg["evaluate"]["use_obj_score"] and out["objs"][k] <= 0:
-        m = np.zeros_like(m)
-    return m
+    """The MedSAM2 mask on one slice — the final one, after the clean-up."""
+    return out["mask"][k]
 
 
 @medsam2_bp.route("/api/runs/<run_id>/profile.json")
 def api_profile(run_id):
-    """Propagate one patient through this run's model and chart it slice by slice."""
+    """Run one patient through this run's model and chart it slice by slice."""
     from .evaluate import patient_profile
 
     patient_id = request.args.get("patient", "")
@@ -526,5 +522,4 @@ def api_slice_json(run_id):
                     "yolo_score": round(float(entry["scores"][k]), 3),
                     "blobs": int(entry["nblobs"][k]),
                     "is_anchor": k in out["anchors"],
-                    "anchor_z": [int(entry["z"][a]) for a in out["anchors"]],
-                    "rounds": out["rounds"]})
+                    "anchor_z": [int(entry["z"][a]) for a in out["anchors"]]})

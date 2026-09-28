@@ -29,7 +29,7 @@
 
   const S = {           // everything the page knows, in one place
     overview: null, runId: null, run: null, compare: new Set(), split: "test",
-    patients: [], patient: null, slice: null, logOffset: 0, profile: null, round: null,
+    patients: [], patient: null, slice: null, logOffset: 0, profile: null,
   };
 
   /* ------------------------------------------------------------------ hash state */
@@ -52,8 +52,7 @@
     "prompt.yolo_run": "fYoloRun", "prompt.variant": "fVariant", "prompt.yolo_conf": "fYoloConf",
     "prompt.score_min": "fScoreMin", "prompt.logit_scale": "fLogitScale",
     "prompt.empty_logit": "fEmptyLogit",
-    "anchors.count": "fAnchorCount", "anchors.min_gap": "fAnchorGap",
-    "hitl.rounds": "fHitlRounds",
+    "augment.p": "fAugP",
     "model.checkpoint": "fCheckpoint",
     "data.max_train_patients": "fMaxTrain", "data.val_patients": "fValPatients",
     "data.clips_per_patient": "fClips", "data.tumour_clip_fraction": "fTumourClips",
@@ -64,7 +63,7 @@
     "train.accum": "fAccum", "train.lr": "fLr", "train.memory_lr": "fMemoryLr",
     "train.vision_lr": "fVisionLr", "train.dice_weight": "fDiceW", "train.bce_weight": "fBceW",
     "train.fliplr": "fFliplr", "train.workers": "fWorkers",
-    "evaluate.mask_threshold": "fThreshold",
+    "evaluate.mask_threshold": "fThreshold", "evaluate.min_component": "fMinComp",
   };
   const cfgValue = (cfg, dotted) => dotted.split(".").reduce((n, k) => (n == null ? n : n[k]), cfg);
 
@@ -113,8 +112,8 @@
     const clips = n * Number($("fClips").value || 1);
     const checks = Number($("fValPatients").value || ov.pools.val || 0);
     const parts = [`About <b>${n}</b> patients per round = <b>${clips}</b> clips of
-      ${esc($("fNumFrames").value)} slices. The check after each round propagates
-      <b>${checks}</b> whole patients, so it is the slow part.`];
+      ${esc($("fNumFrames").value)} slices. The check after each round runs
+      <b>${checks}</b> whole patients.`];
     if (rebuild.length) {
       parts.push(`<b>The hints will be worked out again</b> (you changed ${rebuild.map(esc).join(", ")}) —
         that is a YOLO pass over every slice of every patient used, which takes a while the first time.`);
@@ -140,7 +139,7 @@
     ["variant", "Prompt style", (r) => esc(r.variant)],
     ["yolo_run", "From YOLO", (r) => `<code>${esc(r.yolo_run)}</code>`],
     ["unfreeze", "Weights changed", (r) => esc(r.unfreeze)],
-    ["hitl", "HITL rounds", (r) => `${r.rounds || "—"}`],
+    ["augment", "Hints damaged", (r) => (r.augment == null ? "—" : f2(r.augment)), true],
     ["rounds", "Training rounds", (r) => `${r.epochs_done}/${r.epochs_cfg}`, true],
     ["best", "Best check score", (r) => (r.best ? `${f4(r.best.val_dice3d)} <span class="dim">@${r.best.epoch}</span>` : "—"), true],
     ["test", "Test 3D Dice", (r) => (r.test ? `<b>${f4(r.test.dice3d_mean)}</b>` : "—"), true],
@@ -290,7 +289,9 @@
   function renderEval(run) {
     $("evalRunId").textContent = run ? run.id : "";
     const ev = run && run.eval;
-    const test = ev && ev.test;
+    // A run compared on val only (`--splits val`) has no test pool: show its val numbers.
+    const onVal = !!(ev && !ev.test && ev.val);
+    const test = ev && (ev.test || ev.val);
     const kp = $("evalKpis");
     if (!test) {
       kp.innerHTML = '<p class="dim">This run has not been scored yet. Press “Score again” once it has a best round.</p>';
@@ -299,7 +300,7 @@
       return;
     }
     kp.innerHTML = [
-      kpi("3D Dice — MedSAM2", `<b>${f4(test.dice3d_mean)}</b>`, `${test.patients} test patients · median ${f4(test.dice3d_median)}`, "hero"),
+      kpi("3D Dice — MedSAM2", `<b>${f4(test.dice3d_mean)}</b>`, `${test.patients} ${onVal ? "val (not scored on test)" : "test"} patients · median ${f4(test.dice3d_median)}`, "hero"),
       kpi("3D Dice — YOLO alone", f4(test.yolo_dice3d_mean), `median ${f4(test.yolo_dice3d_median)}`),
       kpi("Change", deltaCell(test.delta_mean), `median ${test.delta_median >= 0 ? "+" : ""}${f4(test.delta_median)}`,
         test.delta_mean >= 0 ? "" : "warnk"),
@@ -309,16 +310,14 @@
       kpi("Found a tumour slice", pct(test.sensitivity), "of slices with tumour"),
       kpi("Left empty slices empty", pct(test.specificity), "of slices without tumour"),
       kpi("Cut-off used", test.threshold, `best here: ${test.best_threshold}${ev.val ? ` · best on check: ${ev.val.best_threshold}` : ""}`),
-      kpi("Anchors per patient", f2(test.anchors_mean), `${f2(test.rounds_mean)} correction rounds`),
-      kpi("Best round count", test.best_round ?? "—",
-          ev.val && ev.val.best_round ? `best on the check pool: ${ev.val.best_round}` : "on this pool"),
     ].join("");
 
-    const series = [{ name: "test", color: COL.medsam2, points: test.sweep.map((s) => [s.threshold, s.dice3d_mean]) }];
-    if (ev.val) series.push({ name: "check (val)", color: COL.val, dash: "4 3",
+    const series = [{ name: onVal ? "check (val)" : "test", color: onVal ? COL.val : COL.medsam2,
+                      points: test.sweep.map((s) => [s.threshold, s.dice3d_mean]) }];
+    if (ev.val && !onVal) series.push({ name: "check (val)", color: COL.val, dash: "4 3",
       points: ev.val.sweep.map((s) => [s.threshold, s.dice3d_mean]) });
     const markers = [{ x: test.threshold, label: "setting" }];
-    if (ev.val) markers.push({ x: ev.val.best_threshold, label: "best on check" });
+    if (ev.val && !onVal) markers.push({ x: ev.val.best_threshold, label: "best on check" });
     $("chSweep").innerHTML = "";
     Charts.line($("chSweep"), { series, markers, height: 250,
       xLabel: "Cut-off on MedSAM2's confidence (logit; 0 = probability 0.5)",
@@ -330,35 +329,6 @@
         <td class="bad">${d.fn.toLocaleString()}<em>missed</em></td></tr>
       <tr><th>No tumour</th><td class="bad">${d.fp.toLocaleString()}<em>false alarm</em></td>
         <td class="ok">${d.tn.toLocaleString()}<em>correctly empty</em></td></tr></table>`;
-  }
-
-  /* ------------------------------------------------------------------ HITL rounds */
-  function renderRounds() {
-    const ev = S.run && S.run.eval;
-    const part = ev && ev[S.split];
-    $("chRounds").innerHTML = "";
-    $("chAnchors").innerHTML = "";
-    if (!part || !part.by_round || !part.by_round.length) return;
-    const cfg = (S.run && S.run.config) || {};
-    const setting = cfg.hitl && cfg.hitl.rounds;
-    const markers = [];
-    if (part.best_round) markers.push({ x: part.best_round, label: "best here", color: COL.gain });
-    if (setting && setting !== part.best_round) markers.push({ x: setting, label: "setting" });
-    const series = [{ name: `MedSAM2 (${part.patients} patients)`, color: COL.medsam2, dots: true,
-                      points: part.by_round.map((r) => [r.round, r.dice3d_mean]) }];
-    if (part.yolo_dice3d_mean != null) {
-      series.push({ name: "YOLO alone", color: COL.yolo, dash: "4 3",
-                    points: part.by_round.map((r) => [r.round, part.yolo_dice3d_mean]) });
-    }
-    Charts.line($("chRounds"), {
-      height: 280, markers, series,
-      xLabel: "Rounds setting  (round N = N anchors, with anchors.count = 1)",
-      yLabel: `Mean 3D Dice over all ${part.patients} patients`,
-    });
-    Charts.histogram($("chAnchors"), {
-      values: (part.patient_scores || []).map((r) => r.anchors), bins: 10, height: 260,
-      xLabel: "Anchors used", yLabel: "Patients", color: COL.val,
-    });
   }
 
   /* ------------------------------------------------------------------ did it help */
@@ -420,11 +390,10 @@
     });
     Charts.scatter($("chByAnchors"), {
       points: rows.map((r) => ({
-        x: r.anchors, y: r.delta, color: r.delta >= 0 ? COL.gain : COL.loss,
-        tip: `<div class="tt-title">${esc(r.id)}</div>${Charts.row(COL.val, "anchors", r.anchors)}
-              ${Charts.row(COL.yolo, "rounds", r.rounds)}
+        x: r.score_mean, y: r.delta, color: r.delta >= 0 ? COL.gain : COL.loss,
+        tip: `<div class="tt-title">${esc(r.id)}</div>${Charts.row(COL.yolo, "mean YOLO score", f2(r.score_mean))}
               ${Charts.row(COL.medsam2, "change", f4(r.delta))}` })),
-      height: 260, xLabel: "Anchors the patient ended up with", yLabel: "Change in 3D Dice",
+      height: 260, xLabel: "YOLO's mean best-blob score over the patient's slices", yLabel: "Change in 3D Dice",
     });
   }
 
@@ -432,9 +401,9 @@
     const rows = scores();
     if (!rows.length) return;
     const head = ["patient", "yolo_dice3d", "medsam2_dice3d", "delta", "gt_voxels",
-                  "mean_yolo_score", "anchors", "rounds"];
+                  "mean_yolo_score", "start_slice_z"];
     const body = rows.map((r) => [r.id, r.yolo_dice3d, r.dice3d, r.delta, r.gt_total,
-                                  r.score_mean, r.anchors, r.rounds].join(","));
+                                  r.score_mean, r.anchor_z].join(","));
     const blob = new Blob([[head.join(","), ...body].join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -463,12 +432,6 @@
     let prof = null;
     if (which === "best.pt" && (split === "test" || split === "val")) {
       prof = await api(`/api/runs/${S.runId}/eval/${split}?patient=${encodeURIComponent(S.patient)}`).catch(() => null);
-      // A record stored before per-round curves were recorded cannot answer "what did round 1
-      // look like". Fall back to propagating the patient again, which does produce them.
-      if (prof && !(prof.rounds || []).some((r) => r.pred)) {
-        $("profileNote").textContent = "The stored results have no per-round curves — working it out again…";
-        prof = null;
-      }
     }
     if (!prof) {
       prof = await api(`/api/runs/${S.runId}/profile.json?patient=${encodeURIComponent(S.patient)}&which=${which}`)
@@ -476,24 +439,14 @@
     }
     if (!prof) return;
     S.profile = prof;
-    S.round = null;
     drawProfile(prof);
     loadSlice(prof.z[argmax(prof.gt)] ?? prof.z[0]);
   }
   const argmax = (a) => a.reduce((best, v, i) => (v > a[best] ? i : best), 0);
 
-  const sliceDice = (inter, pred, gt) => (pred + gt === 0 ? 1 : (2 * inter) / (pred + gt));
-
   function drawProfile(p) {
     const box = $("chProfile");
     box.innerHTML = "";
-    // A selected round redraws MedSAM2's own curves from that round's counts. Rounds scored
-    // before this was recorded have none, so those fall back to the final round.
-    const r = S.round != null && p.rounds && p.rounds[S.round] && p.rounds[S.round].pred
-      ? p.rounds[S.round] : null;
-    const medPx = r ? r.pred : p.pred;
-    const medDice = r ? p.z.map((z, i) => sliceDice(r.inter[i], r.pred[i], p.gt[i])) : p.dice;
-    const tag = r ? ` (round ${r.round})` : "";
     Charts.dualLine(box, {
       height: 330,
       xLabel: "Slice number (z)", leftLabel: "Dice on this slice", rightLabel: "Tumour pixels on this slice",
@@ -501,79 +454,23 @@
       series: [
         // one colour per model, solid for Dice and dashed for pixels, so a glance tells you
         // whose line it is and the dash tells you which axis it belongs to
-        { name: `Dice — MedSAM2${tag}`, color: COL.medsam2, points: p.z.map((z, i) => [z, medDice[i]]) },
+        { name: "Dice — MedSAM2", color: COL.medsam2, points: p.z.map((z, i) => [z, p.dice[i]]) },
         { name: "Dice — YOLO", color: COL.yolo, points: p.z.map((z, i) => [z, p.yolo_dice[i]]) },
         { name: "pixels — expert", color: COL.gt, axis: "right", points: p.z.map((z, i) => [z, p.gt[i]]) },
-        { name: `pixels — MedSAM2${tag}`, color: COL.medsam2, axis: "right", dash: "5 4",
-          points: p.z.map((z, i) => [z, medPx[i]]) },
+        { name: "pixels — MedSAM2", color: COL.medsam2, axis: "right", dash: "5 4",
+          points: p.z.map((z, i) => [z, p.pred[i]]) },
         { name: "pixels — YOLO", color: COL.yolo, axis: "right", dash: "5 4",
           points: p.z.map((z, i) => [z, p.yolo[i]]) },
       ],
       marker: S.slice ? S.slice.z : null,
       onClick: (x) => loadSlice(Math.round(x)),
-      markers: anchorMarkers(p),
+      markers: (p.anchor_z || []).map((z) => ({ x: z, label: "start slice", color: COL.anchor })),
     });
-    renderRoundsTable(p);
     $("profileNote").innerHTML = `<b>${esc(p.id)}</b> — 3D Dice: MedSAM2 <b>${f4(p.dice3d)}</b>,
       YOLO ${f4(p.yolo_dice3d)} (${deltaCell(p.delta)}). ${p.stored ? "From the stored results of the last scoring pass."
-      : "Worked out just now on the graphics card."} The dashed purple lines are the slices that
-      were prompted (the anchors); everything else was reached by memory. Click the chart to jump to a slice.`;
-  }
-
-  /* Which anchors to mark. With no round picked, all of them; with one picked, only the
-     anchors that round actually had, plus the slice the next round goes on to add. */
-  function anchorMarkers(p) {
-    const rounds = p.rounds || [];
-    if (S.round == null || !rounds[S.round]) {
-      return (p.anchor_z || []).map((z, i) => ({ x: z, label: `anchor ${i + 1}`, color: COL.anchor }));
-    }
-    const here = rounds[S.round].z || [];
-    const out = here.map((z, i) => ({ x: z, label: `anchor ${i + 1}`, color: COL.anchor }));
-    for (const z of newAnchors(rounds, S.round + 1)) {
-      out.push({ x: z, label: "added next", color: COL.gain });
-    }
-    return out;
-  }
-
-  /* The slice(s) a round put an anchor on that the round before did not have. */
-  function newAnchors(rounds, index) {
-    if (!rounds[index]) return [];
-    const before = index ? (rounds[index - 1].z || []) : [];
-    return (rounds[index].z || []).filter((z) => !before.includes(z));
-  }
-
-  function renderRoundsTable(p) {
-    const el = $("roundsTbl");
-    const rounds = p.rounds || [];
-    el.querySelector("thead").innerHTML = `<tr><th>Round</th><th>Anchor slices (z)</th>
-      <th>Added this round</th><th>Next round adds</th>
-      <th class="num">3D Dice</th><th class="num">Same as the round before</th></tr>`;
-    el.querySelector("tbody").innerHTML = rounds.map((r, i) => {
-      const added = newAnchors(rounds, i);
-      const next = newAnchors(rounds, i + 1);
-      return `<tr data-round="${i}" class="${S.round === i ? "sel" : ""}">
-        <td>${r.round}</td><td><code>${(r.z || []).join(", ")}</code></td>
-        <td><code>${i ? added.join(", ") : "&mdash;"}</code></td>
-        <td><code class="next">${next.length ? next.join(", ") : "&mdash;"}</code></td>
-        <td class="num">${f4(r.dice3d)}</td>
-        <td class="num">${r.same_as_previous == null ? "—" : f4(r.same_as_previous)}</td></tr>`;
-    }).join("");
-    el.querySelectorAll("tbody tr").forEach((tr) => tr.addEventListener("click", () => {
-      const i = Number(tr.dataset.round);
-      S.round = S.round === i ? null : i;      // clicking the same row again shows them all
-      drawProfile(p);
-    }));
-    const sel = S.round == null ? null : rounds[S.round];
-    $("roundsNote").innerHTML = !sel
-      ? "Click a round to redraw the chart as it was at that round, with only the anchors it had."
-      : sel.pred
-        ? `Showing round <b>${sel.round}</b>: MedSAM2's blue curves are that round's own answer,
-           from ${(sel.z || []).length} anchor(s) marked in purple. Green marks the slice round
-           ${sel.round + 1} goes on to add. Click the row again for the final round.`
-        : `Showing round <b>${sel.round}</b>'s anchors in purple, and in green the slice round
-           ${sel.round + 1} adds. This run was scored before per-round curves were recorded, so
-           the curves are still the final round's. Click the row again to show all anchors.`;
-    $("roundsWrap").classList.toggle("hidden", !rounds.length);
+      : "Worked out just now on the graphics card."} Every slice was given YOLO's hint; the purple line is the
+      start slice, the one segmented without memory, from which the two passes run up and down.
+      Click the chart to jump to a slice.`;
   }
 
   /* ------------------------------------------------------------------ slice viewer */
@@ -600,8 +497,8 @@
       kpi("YOLO alone", `${f4(info.yolo.dice)}`, `${info.yolo.px.toLocaleString()} px drawn · ${info.yolo.inter.toLocaleString()} right`),
       kpi("YOLO's best blob score", f2(info.yolo_score), `${info.blobs} blob(s)`),
       kpi("MedSAM2 “is there tumour”", f2(info.obj_score), "above 0 means yes"),
-      kpi("This slice", info.is_anchor ? "is an anchor" : "was reached by memory",
-          `anchors at z = ${(info.anchor_z || []).join(", ")}`),
+      kpi("This slice", info.is_anchor ? "is the start slice" : "hint + memory",
+          `start slice at z = ${(info.anchor_z || []).join(", ")}`),
     ].join("");
     if (S.profile) drawProfile(S.profile);
   }
@@ -635,7 +532,6 @@
     S.run = await api(`/api/runs/${S.runId}`).catch(() => null);
     renderLive(S.run);
     renderEval(S.run);
-    renderRounds();
     renderHelp();
     drawCurves();
     await pullLog(true);
@@ -647,11 +543,10 @@
       <b>${S.overview.pools.val}</b> check · <b>${S.overview.pools.test}</b> test patients ·
       ${S.overview.yolo_runs.length} YOLO run(s) available · ${S.overview.runs.length} fine-tune(s) here`;
     const c = S.overview.config;
-    $("howNote").innerHTML = `Right now: prompts come from YOLO run
+    $("howNote").innerHTML = `Right now: hints come from YOLO run
       <code>${esc(c.prompt.yolo_run || "the best scoring one")}</code>, style
-      <b>${esc(c.prompt.variant)}</b>; the first <b>${c.anchors.count}</b> anchor(s) are chosen by
-      the most confident slice, then up to <b>${c.hitl.rounds}</b> correction round(s);
-      MedSAM2 starts from <code>${esc(c.model.checkpoint)}</code> and
+      <b>${esc(c.prompt.variant)}</b>; <b>${esc(c.augment ? c.augment.p : 0)}</b> of the training
+      hints are damaged on purpose; MedSAM2 starts from <code>${esc(c.model.checkpoint)}</code> and
       only <b>${esc(c.train.unfreeze)}</b> may change.`;
     document.querySelectorAll("[data-cfg]").forEach((el) => {
       el.textContent = el.dataset.cfg.split(".").reduce((n, k) => (n == null ? n : n[k]), c);
@@ -674,7 +569,7 @@
     $("btnResume").addEventListener("click", () => act("resume"));
     $("btnRescore").addEventListener("click", () => act("evaluate"));
     $("btnCsv").addEventListener("click", downloadCsv);
-    $("helpSplit").addEventListener("change", () => { S.split = $("helpSplit").value; writeHash(); renderRounds(); renderHelp(); });
+    $("helpSplit").addEventListener("change", () => { S.split = $("helpSplit").value; writeHash(); renderHelp(); });
     $("pSplit").addEventListener("change", () => loadPatients());
     $("pPatient").addEventListener("change", () => { S.patient = $("pPatient").value; writeHash(); });
     $("btnProfile").addEventListener("click", runProfile);
@@ -732,7 +627,7 @@
     renderLive(run);
     if (nowLive) await pullLog(false);
     if (run.epochs_done !== rounds) drawCurves();
-    if (wasLive && !nowLive) { renderEval(run); renderRounds(); renderHelp(); await refresh(); }
+    if (wasLive && !nowLive) { renderEval(run); renderHelp(); await refresh(); }
   }
 
   async function gpu() {

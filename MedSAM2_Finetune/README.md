@@ -1,40 +1,57 @@
 # MedSAM2_Finetune
 
-Fine-tune **MedSAM2** to clean up a **YOLO** guess, on BraTS 2024 glioma MRI — running SAM2
-the way it was designed to run: **the stack of slices is a video**.
-
-A few slices (the **anchors**) are prompted with YOLO's per-voxel probability; the rest of
-the volume is reached by propagating through SAM2's memory, **forwards and backwards**. A
-**HITL** loop then adds another anchor where the result disagrees most with the hint and
-runs the whole thing again. The expert segmentation is only ever the target of the loss —
-never a prompt.
+Fine-tune **MedSAM2** to fix a **YOLO** guess on BraTS 2024 glioma MRI. The stack of slices
+is a video in which **every slice is prompted** with YOLO's own map for that slice, and
+every slice also sees SAM2's **memory** of the slices just before it.
 
 Page: <http://localhost:5000/medsam2/> (the same server as Analytics and YOLO_finetune).
 
 ---
 
+## Why this design (and not the one before it)
+
+Until 2026-09-27 this folder prompted only a few slices (the *anchors*, 1 to 8 per patient)
+and reached everything else through memory, with a HITL loop adding anchors. Three real
+runs of that design all scored **below YOLO alone** on test (0.849-0.863 vs 0.878; about
+three patients hurt for every one helped). Slice by slice, it was below YOLO at every
+distance from an anchor, including on the anchor itself. With 1 to 8 prompted slices out of ~140 it
+had thrown away YOLO's answer on ~95% of the volume and could only copy it, with some loss, through memory.
+
+Cheaper fixes were measured first on that old checkpoint (40 val patients, YOLO 0.8727):
+using the cleaner `prob_f` hint (0.8581, worse), averaging the two passes (0.8604, worse),
+cutting anything far from YOLO's 3D mask (0.8658, +0.002). None of them came close, so
+the core was rewritten.
+
 ## The chain
 
 ```
 patient NIfTI ──► RGB slice (R=T1C, G=T2, B=FLAIR) ──► YOLO best.pt ──► per-pixel probability
-                                                                        + per-blob score
-                                                                                │
-   anchors.initial  picks the slice(s) to prompt  ◄─────────────────────────────┘
-                                │
-                                ▼
-        anchor slice ──► MedSAM2 prompt encoder ──► mask ──► memory
-                                                               │
-             ┌── propagate FORWARD from the lowest anchor ──────┤
-             └── propagate BACKWARD from the highest anchor ────┘
-                                │
-              anchors.next_anchor adds one more, and it runs again  (up to hitl.rounds)
-                                │
-   expert mask ──────────► Dice + BCE on every frame  (training only)
+                                                                               │
+          every slice's hint ◄────────────────────────────────────────────────┘
+                 │
+   start slice (most confident YOLO area): segmented from its hint alone
+                 │
+       ┌── pass UP:   each slice = its hint + memory of the slices below ──┐
+       └── pass DOWN: each slice = its hint + memory of the slices above ──┘
+                 │
+     same again on the left-right mirrored patient, averaged  (evaluate.tta_flip)
+                 │
+     3D specks below evaluate.min_component voxels removed
+                 │
+   expert mask ─► Dice + BCE on every frame  (training only)
 ```
 
-The frame builder is **imported from `YOLO_finetune.common`**, not copied. The prompting
-model must see exactly the pictures it was trained on; a second copy of that code could
-drift and silently feed it the wrong channels.
+SAM2 supports a mask prompt on a *tracked* frame: on any frame that is not the first one, the
+prompt goes to the decoder **and** the image features are memory-conditioned
+(`sam2_base.py`, `_prepare_memory_conditioned_features`). So each slice is "YOLO's guess
+here, corrected with what the neighbours looked like".
+
+Training and inference call **the same function**, `model.track`, which runs the vendored
+`SAM2Train.forward_tracking` with our prompts in place of the ground truth. Training feeds 8-slice clips,
+and inference feeds the two half-volumes.
+
+The frame builder is **imported from `YOLO_finetune.common`**, not copied: the prompting
+model must see exactly the pictures it was trained on.
 
 ## Files
 
@@ -42,12 +59,12 @@ drift and silently feed it the wrong channels.
 |---|---|
 | `config.yaml` | every setting, with the reason for the non-obvious defaults |
 | `common.py` | paths, the vendored `sam2` import, the checkpoint/YOLO-run pickers |
-| `yolo_prompts.py` | YOLO → per-voxel probability; builds and reads `cache/<key>/<patient>.npz` |
-| `anchors.py` | **which slices get prompted** — the first ones and the ones a HITL round adds |
-| `dataset.py` | clips: the anchor plus the slices after it, half of them read backwards |
-| `model.py` | `VideoSAM2` (the vendored `SAM2Train` with our prompts), what trains, the loss |
+| `yolo_prompts.py` | YOLO → per-voxel probability; builds and reads `cache/<key>/<patient>.npz`; hint → logits |
+| `anchors.py` | the start slice, and YOLO's own mask (what MedSAM2 is compared with) |
+| `dataset.py` | clips with a hint on every frame, half read backwards; **hint augmentation** |
+| `model.py` | `track` (shared by training and inference), what trains, the loss |
 | `train.py` | one run: prompts → train → score. Also the CLI |
-| `evaluate.py` | propagation + the HITL loop; scores MedSAM2 **and** the YOLO prompt |
+| `evaluate.py` | the two passes + TTA + clean-up; scores MedSAM2 **and** YOLO on the same patients |
 | `routes.py` | the Flask blueprint behind `/medsam2/` |
 | `templates/`, `static/` | the page. The look and the chart kit are the YOLO_finetune ones |
 
@@ -62,107 +79,86 @@ python -m MedSAM2_Finetune.train --smoke
 ```
 
 ```bash
-python -m MedSAM2_Finetune.train --set train.epochs=30 --set hitl.rounds=5
+python -m MedSAM2_Finetune.train --set train.epochs=10 --set augment.p=0
 ```
 
-`--run <dir>` continues a folder the page made, `--resume` picks up from `last.pt`, and
-`--evaluate-only` re-scores `best.pt`. Everything the page does goes through the same CLI.
+`--run <dir>` continues a folder the page made, `--resume` picks up from `last.pt`,
+`--evaluate-only` re-scores `best.pt`, and `--splits val` scores only the val pool at the
+end (use it while comparing settings, so test is looked at once).
 
-## Training vs inference
+## Hint augmentation
 
-They are deliberately the same shape, at different scale.
+If the hint in training is always YOLO's real answer, the cheapest thing to learn is to copy
+it. So `augment.p` of the training frames get a **worse** hint on purpose: one blob dropped,
+the slice blanked, the outline grown or shrunk (grey dilation/erosion), the map shifted a few
+pixels, or the other confidence cut (`prob` ↔ `prob_f`). The target stays the expert mask.
 
-|  | training | inference |
-|---|---|---|
-| unit | a **clip**: `video.num_frames` consecutive slices, **drawn again every round** | the **whole volume** |
-| anchors | frame 0 of the clip | `anchors.count`, then one per HITL round |
-| direction | forward; `video.reverse_fraction` of clips are fed in descending z, which is how backwards propagation is learned | forward from the lowest anchor, backward from the highest |
-| prompts | YOLO's map on the anchor | the same, on every anchor |
-| loss / score | Dice + BCE on **every** frame, not just the anchor | 3D Dice per patient |
+## Results
 
-The after-every-round check runs the real inference path (one HITL round), so the score
-that picks the best round is the score that gets reported.
+All runs use YOLO `20260923-224333` for the hints. **Val = 245 patients, test = 324.**
+Every setting was chosen on val; test was scored once, at the end.
 
-## The prompt styles
+| run | what changed | val 3D Dice | helped / hurt (val) |
+|---|---|---|---|
+| YOLO alone | — | 0.8644 | — |
+| old anchor design, best (`20260925-082301`, deleted) | 8 HITL rounds | 0.8556 | 40 / 113 |
+| S1 `20260927-221946` | new design, 10 rounds, hints damaged 30% | 0.8861 | 172 / 14 |
+| S2 `20260928-000001` | same, no damage | 0.8859 | 162 / 9 |
+| S3 `20260928-012232` | same as S1, image encoder trained too | 0.8864 | 183 / 10 |
+| **final `20260928-025712`** | S3 settings, 15 rounds, 80-patient check | **0.8898** | 194 / 17 |
+| final + clean-up | `min_component: 100` | 0.8903 | |
 
-| `prompt.variant` | the hint each voxel gets |
-|---|---|
-| `max` | the highest probability any YOLO blob gives it |
-| `max_weighted` | the same, multiplied by that blob's confidence score |
-| `conf_filtered` | blobs below `prompt.score_min` are dropped first |
+**Test (final + clean-up), scored once: MedSAM2 0.9008 vs YOLO 0.8776, +0.0232 ± 0.0016
+(median +0.019). 254 patients helped, 12 hurt, 58 unchanged.** Tumour-slice Dice 0.852;
+found 96.9% of tumour slices and left 96.6% of empty slices empty. The old anchor design's
+best on the same test pool was 0.8605 (158 hurt).
 
-All three are soft maps. Three hard styles were dropped — `binary` (the same mask with the
-shading thrown away), `box` (a filled rectangle per blob) and `none` (no hint at all).
+What the numbers say:
 
-Only `prompt.yolo_run`, `prompt.yolo_conf`, `prompt.score_min` and `data.min_fg_voxels`
-change the cache; switching variant, anchors or HITL settings costs no rebuild.
+- The redesign is the whole gain. Prompting every slice took val from 0.856 to 0.886 in
+  10 rounds, and collapses are gone. The worst loss against YOLO is −0.06 on val and −0.18 on test
+  (one patient; the next is −0.11). The anchor design lost up to −0.74
+  (BraTS-GLI-02208-102) when the memory ran away.
+- Hint damage (S1 vs S2) and training the image encoder (S3 vs S1) both **tie** on the mean
+  (paired differences 0.0002 ± 0.002). Both are kept, because they cost little and S3 helped the most patients.
+- Longer training (15 rounds vs 10) added about 0.003.
+- The clean-up is nearly free and nearly useless: flip TTA +0.0004, removing pieces under 100
+  voxels +0.0005. Cutting anything far from YOLO's 3D mask gained nothing.
 
-## Anchors and HITL
+## Settings that were measured, not guessed
 
-`anchors.pick` chooses the first anchor: `yolo_peak` (biggest confident area — the automatic
-stand-in for the slice a radiologist would start on), `yolo_score` or `spread`. Each HITL
-round then adds the anchor where the prediction disagrees most with **YOLO's** mask.
-
-**Nothing in the anchor or HITL logic ever reads the expert mask.** The old
-`maunal_code/05_infer_multibbox_hitl.py` chose its anchors from the ground truth, which makes
-its Dice an upper bound rather than a result; that mode is deliberately absent here, so every
-score this folder produces is one the pipeline could reproduce on a new patient.
-
-A new anchor is only ever placed on a slice where YOLO **found** something, so it is always a
-positive prompt. Without that rule the loop picked slices where the prediction had drawn and
-YOLO had not, prompted them with a confident "nothing", and the memory carried that erasure
-into the neighbours — round 2 scored below round 1 on three of four patients.
-
-### Three defaults that were measured, not guessed
-
-- **`model.use_mask_input_as_output_without_sam: false`** — SAM2 short-circuits any slice that
-  has a mask prompt and hands the prompt back as the answer, which is right for a mask a
-  person drew and wrong for a YOLO guess. With it on the anchors were never segmented at all:
-  on BraTS-GLI-00008-101 z=70 the output was the prompt pixel for pixel (99.8% identical,
-  1721 px of which 1183 lay outside the head) and scored 0.33 Dice where YOLO's own mask
-  scored 0.76. A checkpoint trained with it *on* cannot simply be re-scored with it off — its
-  decoder has never had to segment an anchor frame (mask prompt, no memory behind it) and
-  returns empty masks; measured 0.7424 -> 0.6970 on that patient. It needs a retrain.
-- **`train.memory_lr: 1.0e-5`** — the memory carries the answer between slices, so it takes
-  smaller steps than the decoder. Both published works that train it at all agree: SurgSAM-2
-  uses 2e-4 / 2e-5 (10x), Medical SAM 2 uses 1e-4 / 1e-8 (10,000x).
-
-- **`prompt.logit_scale: 8.0`** — YOLO's logits reach about ±5.5; SAM2's mask prompt was
-  trained on a wider scale and barely reacts to them raw. On four val patients with the
-  untrained checkpoint: scale 1 → 0.379 Dice, 2 → 0.627, 4 → 0.726, 8 → 0.757, 12 → 0.760
-  (the prompt by itself scores 0.819). Above 8 it stops mattering.
-- **`evaluate.use_obj_score: false`** — gating a slice on SAM2's object head moved 3D Dice
-  by +0.0001 while costing sensitivity: the false alarms are confident, not leaks.
+- **`model.use_mask_input_as_output_without_sam: false`**: SAM2's own default hands a
+  mask prompt straight back as the answer. With a hint on every slice, that would make the
+  output *exactly* YOLO.
+- **`prompt.logit_scale: 8.0`**: YOLO's logits reach about ±5.5, and SAM2's mask prompt barely
+  reacts to them raw (untrained checkpoint: scale 1 → 0.379, 8 → 0.757, 12 → 0.760).
+- **`train.memory_lr: 1.0e-5`**: the memory moves 10× slower than the decoder (the
+  SurgSAM-2 ratio).
+- **`prompt.yolo_run` is pinned** to `20260923-224333` (test 0.8776): its prompt cache
+  exists for all 1,290 patients and every earlier run used it. The newest YOLO,
+  `20260927-010028`, scores 0.8781, which is within noise.
 
 ## Scores
 
 Everything is measured at the slice's own size, so it is comparable with the
 YOLO_finetune page.
 
-- **3D Dice per patient** — the headline, over all of that patient's brain slices.
-- **The same number for the YOLO prompt alone** (blobs at `prompt.score_min`, probability
-  cut at 0.5 — exactly Ultralytics' own mask at that confidence). The whole point of the
-  folder is the difference between the two.
-- Tumour-slice Dice, the old-style slice Dice (empty vs empty = 1.0, for comparison with
-  older numbers), slice-level found/missed/false-alarm, anchors and rounds per patient.
-- A threshold sweep: one propagation gives a logit map, so every cut-off in
-  `evaluate.sweep` is free. **The cut-off may be chosen on val and is only ever reported on
-  test.**
+- **3D Dice per patient**: the headline, over all of that patient's brain slices.
+- **The same number for YOLO alone** (blobs at `prompt.score_min`, probability cut at 0.5).
+  The whole point of the folder is the difference between the two.
+- Tumour-slice Dice, old-style slice Dice, slice-level found/missed/false-alarm, a threshold
+  sweep. **Every setting is chosen on val; test is only reported.**
 
-`runs/<id>/eval/{val,test}.json` keep the per-patient, per-slice record including what each
-HITL round did, so the summary can be recomputed without touching the GPU again.
+`runs/<id>/eval/{val,test}.json` keep the per-patient, per-slice record.
 
 ## Notes
 
-- **Nothing in `MedSAM2/` is edited.** `model.py` subclasses the vendored `SAM2Train` and
-  replaces the prompts it would have taken from the ground truth; `evaluate.py` uses the
-  vendored `SAM2VideoPredictorNPZ` as-is. Two module attributes are swapped at runtime and
-  put back: Ultralytics' `process_mask_native` (to keep the soft mask it discards) and the
-  predictor's `tqdm` (its per-pass progress bar would be hundreds of lines in the run log).
-- A soft prompt survives `add_new_mask` only because it is handed in already at
-  `image_size`: a mask that needs resizing is binarised at 0.5 on the way through.
-- The video predictor writes **-1024** for "no object on this frame". That is below every
-  threshold in the sweep, so such a slice reads as empty without any special case.
+- **Nothing in `MedSAM2/` is edited.** `model.py` builds the vendored `SAM2Train` through a
+  Hydra `_target_` override and hands its `forward_tracking` our prompts.
+- The untrained checkpoint scores 0 in this design: its object head says "no tumour" on
+  almost every slice, and SAM2 then blanks the slice. One training round fixes that.
+- A soft prompt keeps its shading only if it is handed in already at `image_size`. A mask
+  SAM2 has to resize itself gets binarised.
 - The left-right flip is along array axis 0, which is the head's left-right axis (the
-  volumes are `('L','A','S')`) — a flipped slice is still a plausible brain.
+  volumes are `('L','A','S')`), so a flipped slice is still a plausible brain.
 - A run is its own process. Closing the page, or restarting the viewer, does not stop it.

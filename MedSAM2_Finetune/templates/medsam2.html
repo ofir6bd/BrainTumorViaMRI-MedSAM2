@@ -27,7 +27,7 @@
   <nav class="jump" aria-label="Sections">
     <a href="#secHow">How it works</a><a href="#secStart">Start</a><a href="#secLive">Live run</a>
     <a href="#secRuns">Runs</a><a href="#secCurves">Training charts</a><a href="#secEval">Results</a>
-    <a href="#secRounds">Rounds</a><a href="#secHelp">Did it help?</a>
+    <a href="#secHelp">Did it help?</a>
     <a href="#secPatient">One patient</a><a href="#secViewer">See a slice</a>
     <a href="#secWhen">When does it help?</a>
     <span class="jump-keys"><kbd>&larr;</kbd><kbd>&rarr;</kbd> next slice &middot; <kbd>[</kbd><kbd>]</kbd> next patient</span>
@@ -38,8 +38,8 @@
     <section class="card" id="secHow">
       <div class="card-head">
         <h2>How this fine-tune works</h2>
-        <p class="card-sub">The stack of slices is treated as a video: a few slices are pointed at,
-          and the answer travels through the rest.</p>
+        <p class="card-sub">The stack of slices is treated as a video: every slice gets YOLO's hint,
+          and every slice also remembers its neighbours.</p>
       </div>
       <ol class="how">
         <li>
@@ -51,33 +51,32 @@
           We keep the second one — the part YOLO normally throws away.
         </li>
         <li>
-          <b>A few slices get pointed at: the anchors.</b>
-          MedSAM2 does not need a hint on every slice. One slice — the one where YOLO is most
-          sure — is prompted with YOLO's probability map. That is the automatic stand-in for
-          the radiologist who would otherwise draw a box there.
+          <b>Every slice gets YOLO's hint.</b>
+          Each slice is prompted with YOLO's own probability map for that slice. MedSAM2's job is
+          not to find the tumour from scratch &mdash; it is to <b>fix YOLO's guess</b>.
         </li>
         <li>
-          <b>The answer travels through the volume.</b>
-          From the anchor the prediction is carried <b>up</b> through the stack and then
-          <b>down</b> again, using SAM2's memory: each slice sees what the model decided on the
-          slices before it. Nobody prompts those slices — they are reached, not told.
+          <b>The neighbours are in memory.</b>
+          One slice &mdash; the one where YOLO is most sure (the <b>start slice</b>) &mdash; is
+          segmented on its own. From there two passes run <b>up</b> and <b>down</b> the stack, and
+          every slice sees its own hint <em>and</em> SAM2's memory of the slices just before it.
+          So a slice where YOLO missed a piece can borrow it from its neighbours.
         </li>
         <li>
-          <b>Then a correction round: HITL.</b>
-          After a pass we look for the slice where the result disagrees most with the hint,
-          make that slice a new anchor too, and run the whole thing again. This repeats up to
-          <b data-cfg="hitl.rounds"></b> times, or until the answer stops changing — the same
-          loop the older hand-prompted pipeline used, with YOLO in the human's place.
+          <b>Training teaches it to fix, not copy.</b>
+          Training uses short clips (the start slice plus the next few), exactly like one pass.
+          Some hints are made <b>worse on purpose</b> &mdash; a blob dropped, the outline grown or
+          shrunk, the map moved &mdash; while the answer stays the expert mask. Copying the hint
+          then stops paying off; fixing it does. The expert mask is never shown as a prompt.
         </li>
         <li>
-          <b>The expert mask is only the answer sheet.</b>
-          Training works on short clips — the anchor plus the slices after it — and the loss
-          compares <em>every</em> frame of the clip with the expert segmentation, including the
-          ones nobody prompted. The expert mask is never shown to the model as a prompt.
+          <b>Two small extras when running.</b>
+          The mirrored (left-right flipped) patient is run too and the two answers are averaged,
+          and tiny 3D specks can be removed.
         </li>
         <li>
           <b>Every round we check, and we compare against YOLO.</b>
-          The check is the real thing: a full forward-and-backward pass per patient. At the end
+          The check is the real thing: both passes, the flip and the clean-up, per patient. At the end
           both models are scored on the same test patients, so the real question gets a real
           answer: <b>did MedSAM2 make YOLO's guess better or worse?</b>
         </li>
@@ -105,7 +104,7 @@
           <p class="card-sub">The hint YOLO gives</p>
           <label class="fld">Which YOLO makes the hint <em>(prompt.yolo_run)</em>
             <select id="fYoloRun"></select>
-            <small class="hint">Which of your trained YOLOs draws the hint. <b class="eg">For example:</b> leave it automatic and it takes run <code>20260921-200857</code>, the one that scored 0.8767 on the test patients.</small></label>
+            <small class="hint">Which of your trained YOLOs draws the hint. <b class="eg">For example:</b> <code>20260923-224333</code> scored 0.8776 on the test patients; &ldquo;automatic&rdquo; takes whichever scores best at the time.</small></label>
           <label class="fld">Prompt style <em>(prompt.variant)</em>
             <select id="fVariant"></select>
             <small class="hint">YOLO finds several blobs on a slice, each with its own confidence. This decides how they become one number per pixel. <b class="eg">For example:</b> <code>max</code> takes the highest of them, so a weak blob speaks as loudly as a strong one; <code>conf_filtered</code> deletes the blobs under the score threshold first; <code>max_weighted</code> keeps them but dims each one by its own score.</small></label>
@@ -123,7 +122,7 @@
             <small class="hint">What a slice with no hint at all is told. <b class="eg">For example:</b> &minus;8 means &ldquo;almost certainly nothing here&rdquo;; &minus;1 would be a much softer &ldquo;probably not&rdquo;.</small></label>
           <p class="note" id="variantNote"></p>
 
-          <p class="note">The first slice to point at is always the one where YOLO is most sure
+          <p class="note">The start slice is always the one where YOLO is most sure
             and the tumour looks biggest &mdash; when running, and for where training clips start.
             Two safeguards are always on, with no box of their own: the hint is
             <b>silenced outside the head</b> (YOLO sometimes returns a near-random box at the very
@@ -135,27 +134,27 @@
           <p class="card-sub">Who it learns from</p>
           <label class="fld">Patients per round <em>(data.max_train_patients)</em>
             <input id="fMaxTrain" type="number" step="1" min="1" placeholder="all">
-            <small class="hint">How many patients each round learns from, out of the 721 in the training pool. <b class="eg">For example:</b> 300 takes about 9 minutes a round; using all 721 would take roughly twice that.</small></label>
+            <small class="hint">How many patients each round learns from, out of the 721 in the training pool. Empty = all of them. <b class="eg">For example:</b> 300 takes about 40% of the time all 721 take.</small></label>
           <label class="fld">Patients in the round check <em>(data.val_patients)</em>
             <input id="fValPatients" type="number" step="1" min="1" placeholder="all">
-            <small class="hint">Patients scored after every round, to decide which round was best. <b class="eg">For example:</b> 40 patients add about 3 minutes to each round, and make the score wobble by about &plusmn;0.01 &mdash; so a smaller difference between rounds is noise.</small></label>
+            <small class="hint">Patients scored after every round, to decide which round was best. <b class="eg">For example:</b> 40 patients add about 5 minutes to each round, and make the score wobble by about &plusmn;0.01 &mdash; so a smaller difference between rounds is noise.</small></label>
           <label class="fld">Clips per patient <em>(data.clips_per_patient)</em>
             <input id="fClips" type="number" step="1" min="1" max="64">
-            <small class="hint">How many short runs of slices are taken from each patient. New ones are drawn every round. <b class="eg">For example:</b> 4 clips from 300 patients is 1,200 a round, picked out of roughly 39,000 possible positions.</small></label>
+            <small class="hint">How many short runs of slices are taken from each patient. New ones are drawn every round. <b class="eg">For example:</b> 3 clips from 721 patients is 2,163 a round, picked out of roughly 95,000 possible positions.</small></label>
           <label class="fld">Share of clips with tumour <em>(data.tumour_clip_fraction)</em>
             <input id="fTumourClips" type="number" step="any" min="0" max="1">
             <small class="hint">Share of those clips that must start on a slice where YOLO found tumour. The rest start anywhere. <b class="eg">For example:</b> 0.8 means 8 clips in 10 start on tumour; the other 2 teach it to say &ldquo;nothing here&rdquo;.</small></label>
 
-          <p class="card-sub">Clips &mdash; how far the answer has to travel</p>
+          <p class="card-sub">Clips &mdash; how much memory each slice gets to use</p>
           <label class="fld">Slices in a clip <em>(video.num_frames)</em>
             <input id="fNumFrames" type="number" step="1" min="2" max="32">
-            <small class="hint">How many slices are in one training clip. The first is pointed at; the rest must be reached through memory. <b class="eg">For example:</b> 8 means 1 anchor and 7 slices it has to carry the answer through.</small></label>
+            <small class="hint">How many slices are in one training clip. Every slice has its hint; the first has no memory, the rest remember the ones before. <b class="eg">For example:</b> 8 means the start slice plus 7 that use memory.</small></label>
           <label class="fld">Share read backwards <em>(video.reverse_fraction)</em>
             <input id="fReverse" type="number" step="any" min="0" max="1">
-            <small class="hint">Share of clips fed the other way round, from high slice numbers down to low. <b class="eg">For example:</b> 0.5 means half of them &mdash; needed because at inference the answer travels both up and down from the anchor.</small></label>
+            <small class="hint">Share of clips fed the other way round, from high slice numbers down to low. <b class="eg">For example:</b> 0.5 means half of them &mdash; needed because at inference one pass goes up and one goes down from the start slice.</small></label>
           <label class="fld">Clips per step <em>(video.batch)</em>
             <input id="fVideoBatch" type="number" step="1" min="1" max="8">
-            <small class="hint">How many clips go through the graphics card at the same time. <b class="eg">For example:</b> 1 is usually right, because one clip is already 8 pictures; 2 doubles the memory it needs.</small></label>
+            <small class="hint">How many clips go through the graphics card at the same time. <b class="eg">For example:</b> 2 &mdash; one clip is already 8 pictures; 4 would double the memory it needs.</small></label>
 
           <p class="card-sub">How it learns</p>
           <label class="fld">Which weights may change <em>(train.unfreeze)</em>
@@ -163,22 +162,22 @@
             <small class="hint">Which parts of MedSAM2 are allowed to change. <b class="eg">For example:</b> <code>decoder+prompt+memory</code> lets 11.7M of the 39M weights move, while the part that reads the picture (27M) stays exactly as it was.</small></label>
           <label class="fld">Rounds <em>(train.epochs)</em>
             <input id="fEpochs" type="number" step="1" min="1" max="500">
-            <small class="hint">How many times it works through the training patients. <b class="eg">For example:</b> 30 rounds at about 9 minutes each is roughly 4.5 hours.</small></label>
+            <small class="hint">How many times it works through the training patients. <b class="eg">For example:</b> multiply the &ldquo;Time per round&rdquo; shown in the live panel.</small></label>
           <label class="fld">Stop after N quiet rounds <em>(train.patience)</em>
             <input id="fPatience" type="number" step="1" min="0" max="500">
             <small class="hint">Stop early if this many rounds in a row fail to beat the best score so far. <b class="eg">For example:</b> 8 &mdash; with a check that wobbles &plusmn;0.01, stopping after 3 would often quit on noise. 0 never stops early.</small></label>
           <label class="fld">Clips added up before a correction <em>(train.accum)</em>
             <input id="fAccum" type="number" step="1" min="1" max="64">
-            <small class="hint">How many clips are added up before the model is actually nudged. <b class="eg">For example:</b> 1 clip at a time with accum 4 behaves like learning from 4 clips at once, without needing the memory for 4.</small></label>
+            <small class="hint">How many steps are added up before the model is actually nudged. <b class="eg">For example:</b> 2 clips per step with accum 2 behaves like learning from 4 clips at once, without needing the memory for 4.</small></label>
           <label class="fld">Learning rate <em>(train.lr)</em>
             <input id="fLr" type="number" step="any" min="0.0000001" max="0.01">
             <small class="hint">The size of the step the outline-drawing part takes each time it learns. <b class="eg">For example:</b> 1e-4 is the usual choice here; ten times bigger tends to wreck it, ten times smaller barely moves.</small></label>
           <label class="fld">Memory learning rate <em>(train.memory_lr)</em>
             <input id="fMemoryLr" type="number" step="any" min="0.000000001" max="0.01">
-            <small class="hint">The same, for the memory that carries the answer between slices. <b class="eg">For example:</b> 1e-5 &mdash; ten times smaller than the decoder, the ratio SurgSAM-2 uses. A big step here disturbs every slice nobody pointed at.</small></label>
+            <small class="hint">The same, for the memory that carries the answer between slices. <b class="eg">For example:</b> 1e-5 &mdash; ten times smaller than the decoder, the ratio SurgSAM-2 uses. A big step here disturbs every slice at once.</small></label>
           <label class="fld">Image-encoder learning rate <em>(train.vision_lr)</em>
             <input id="fVisionLr" type="number" step="any" min="0.00000001" max="0.001">
-            <small class="hint">The same, for the part that reads the picture. <b class="eg">For example:</b> only used if you choose <code>all</code> above; otherwise that part is frozen and this number is ignored.</small></label>
+            <small class="hint">The same, for the part that reads the picture. <b class="eg">For example:</b> 1e-6, used only if you choose <code>all</code> above; otherwise that part is frozen and this number is ignored.</small></label>
           <label class="fld">Overlap weight <em>(train.dice_weight)</em>
             <input id="fDiceW" type="number" step="any" min="0" max="10">
             <small class="hint">How much it cares that the whole shape matches. <b class="eg">For example:</b> 1 alongside pixel weight 1 treats both equally; raising it favours getting the overall blob right over individual pixels.</small></label>
@@ -188,30 +187,24 @@
           <label class="fld">Left-right flip chance <em>(train.fliplr)</em>
             <input id="fFliplr" type="number" step="any" min="0" max="1">
             <small class="hint">Chance of mirroring a clip left to right before learning from it. <b class="eg">For example:</b> 0.5 means half of them. A mirrored brain is still a plausible brain, and tumours happen on both sides.</small></label>
+          <label class="fld">Hints made worse on purpose <em>(augment.p)</em>
+            <input id="fAugP" type="number" step="any" min="0" max="1">
+            <small class="hint">Share of training slices whose YOLO hint is damaged: a blob dropped, the slice blanked, the outline grown or shrunk, the map moved, or the other confidence cut. The answer it must give stays the expert mask. <b class="eg">For example:</b> 0.3 is about 2 slices in every 8-slice clip; 0 turns it off.</small></label>
           <label class="fld">Reader processes <em>(train.workers)</em>
             <input id="fWorkers" type="number" step="1" min="0" max="16">
             <small class="hint">Background processes that read patient files while the card is busy. <b class="eg">For example:</b> 4 is plenty here; 0 makes the main process do the reading and is slower.</small></label>
 
           <p class="band">Inference only <span class="band-tag infer">how it runs on a new patient</span></p>
 
-          <label class="fld">How many anchors to start with <em>(anchors.count)</em>
-            <input id="fAnchorCount" type="number" step="1" min="1" max="20">
-            <small class="hint">How many slices are pointed at before any correction round. <b class="eg">For example:</b> 1 beats 3 &mdash; measured 0.8194 against 0.8056 &mdash; because the correction rounds place later anchors where the answer is actually wrong, while three chosen up front crowd the same spot.</small></label>
-          <label class="fld">Slices between anchors <em>(anchors.min_gap)</em>
-            <input id="fAnchorGap" type="number" step="1" min="1" max="60">
-            <small class="hint">Two anchors must be at least this many slices apart. <b class="eg">For example:</b> 5 stops three neighbouring slices of the same lump all becoming anchors and saying the same thing three times.</small></label>
-          <label class="fld">Rounds <em>(hitl.rounds)</em>
-            <input id="fHitlRounds" type="number" step="1" min="1" max="40">
-            <small class="hint">How many times one more anchor is added and the whole volume is worked out again. Every patient runs them all. <b class="eg">For example:</b> 15 rounds takes about 65 seconds a patient; 3 takes about 15.</small></label>
           <label class="fld">Tumour cut-off <em>(evaluate.mask_threshold)</em>
             <input id="fThreshold" type="number" step="any" min="-10" max="10">
             <small class="hint">MedSAM2 answers with a confidence for every pixel; above this line counts as tumour. <b class="eg">For example:</b> 0 means &ldquo;more likely than not&rdquo;. Raise it to 1 and it draws less; drop it to &minus;1 and it draws more.</small></label>
-          <p class="note">Each round adds one more anchor, on the slice where the result disagrees
-            most with YOLO &mdash; counted in pixels, and it may be a slice YOLO left empty, which
-            anchors a confident &ldquo;nothing here&rdquo; and is the only way to stop a run-away.
-            Then it propagates the whole volume again. The answer kept is the one after
-            the <b>last</b> round &mdash; the results panel then tells you which round count was
-            best on the check pool, to copy back into this box.</p>
+          <label class="fld">Smallest piece kept <em>(evaluate.min_component)</em>
+            <input id="fMinComp" type="number" step="1" min="0" max="100000">
+            <small class="hint">After the whole patient is done, 3D pieces smaller than this many voxels are removed. <b class="eg">For example:</b> 0 keeps everything; 50 removes specks a few voxels across.</small></label>
+          <p class="note">The mirrored patient is always run too and averaged in
+            (<code>evaluate.tta_flip</code> in <code>config.yaml</code>); it runs in the same batch,
+            so it costs almost no time.</p>
 
           <p class="estimate" id="startEstimate"></p>
           <p class="form-err" id="startErr"></p>
@@ -279,31 +272,8 @@
         </div>
         <div>
           <h3>Slice by slice: did it spot the tumour at all?</h3>
-          <p class="note">Every brain slice of every test patient, counted once.</p>
+          <p class="note">Every brain slice of every patient in the pool scored, counted once.</p>
           <div id="confusion"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ================= HITL ROUNDS ================= -->
-    <section class="card" id="secRounds">
-      <div class="card-head">
-        <h2>What the correction rounds did</h2>
-        <p class="card-sub">Round 1 is the first anchor alone. Each later round added one more anchor
-          and propagated the whole volume again.</p>
-      </div>
-      <div class="curve-grid">
-        <div>
-          <h3>Which rounds setting is best</h3>
-          <p class="note">Every point is the score you would get from the <b>whole pool</b> if
-            <code>hitl.rounds</code> were set to that number &mdash; so the points are directly
-            comparable. A patient that ran out of anchors early keeps answering with its last
-            round, which is exactly what it would do at a higher setting. Round N means N anchors.</p>
-          <div id="chRounds"></div>
-        </div>
-        <div>
-          <h3>How many anchors each patient ended up with</h3>
-          <div id="chAnchors"></div>
         </div>
       </div>
     </section>
@@ -349,7 +319,7 @@
     <section class="card" id="secPatient">
       <div class="card-head">
         <h2>One patient, slice by slice</h2>
-        <p class="card-sub">Propagates the whole volume with the chosen checkpoint (a few seconds).</p>
+        <p class="card-sub">Runs the whole volume with the chosen checkpoint (a few seconds).</p>
       </div>
       <div class="viewer-ctrls">
         <label class="fld">Checkpoint <select id="pWhich">
@@ -361,10 +331,6 @@
       </div>
       <div id="chProfile"></div>
       <p class="note" id="profileNote"></p>
-      <p class="note" id="roundsNote"></p>
-      <div class="table-wrap" id="roundsWrap">
-        <table class="tbl" id="roundsTbl"><thead></thead><tbody></tbody></table>
-      </div>
     </section>
 
     <!-- ================= SLICE VIEWER ================= -->
@@ -402,7 +368,7 @@
           <div id="chBySize"></div>
         </div>
         <div>
-          <h3>Gain vs how many anchors it needed</h3>
+          <h3>Gain vs how sure YOLO was</h3>
           <div id="chByAnchors"></div>
         </div>
       </div>

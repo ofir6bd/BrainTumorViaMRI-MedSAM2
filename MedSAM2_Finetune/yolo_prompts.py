@@ -186,38 +186,44 @@ def load_prompt(cfg, patient_id, keys=None):
         return {k: f[k] for k in (keys or f.files)}
 
 
-def prompt_logits(entry, cfg, index=None):
-    """The prompt MedSAM2 is given, as logits, for one slice (`index`) or all of them.
+FIELDS = {"max": "prob", "max_weighted": "prob_w", "conf_filtered": "prob_f"}
+
+
+def prompt_logits(entry, cfg, index=None, fields=None):
+    """The hint MedSAM2 is given, as logits, for one slice (`index`) or all of them.
 
     Every variant is a soft map: which of the three cached probability maps it reads is the
-    only difference. Three hard ones were dropped — `binary` (the mask with the shading
-    thrown away), `box` (a filled rectangle per blob) and `none` (no hint at all).
+    only difference. `fields` lets the training augmentation pick a different map per slice.
     """
-    p = cfg["prompt"]
-    variant, k = p["variant"], p["empty_logit"]
     n = len(entry["z"])
     idx = np.arange(n) if index is None else np.atleast_1d(index)
-
-    field = {"max": "prob", "max_weighted": "prob_w", "conf_filtered": "prob_f"}[variant]
-    logits = prob_to_logit(entry[field][idx]) * float(p["logit_scale"])
-    empty = entry[field][idx].max(axis=(1, 2)) == 0          # YOLO said nothing on this slice
-    logits[empty] = k
-    return _clip_to_head(logits, entry, cfg, idx)
+    field = FIELDS[cfg["prompt"]["variant"]]
+    prob = np.stack([entry[(fields[j] if fields else field)][k] for j, k in enumerate(idx)])
+    return hint_logits(prob, head_of(entry, idx, cfg), cfg)
 
 
-def _clip_to_head(logits, entry, cfg, idx):
-    """Silence the prompt anywhere the frame has no head in it.
-
-    YOLO is asked for blobs down to `yolo_conf` (0.05), the very bottom of its score list,
-    where boxes are close to random. On BraTS-GLI-00008-101 z=70 that produced a 0.050 blob
-    covering 1669 px, 1184 of them outside the skull — YOLO's own mask, not an artefact, but
-    plainly impossible. A voxel counts as head if *any* channel is non-zero: on 10 val
-    patients that excludes 4 of 734,193 expert tumour voxels (0.001%), where a FLAIR-only
-    test would have excluded 0.166%.
-    """
+def head_of(entry, idx, cfg):
+    """Where the frame has a head in it (None when `prompt.clip_to_head` is off)."""
     if not cfg["prompt"].get("clip_to_head", True):
-        return logits
+        return None
     if "rgb" not in entry:
         raise KeyError("clip_to_head needs the frames: load the patient without a `keys` filter")
-    head = entry["rgb"][idx].max(axis=-1) > 0
-    return np.where(head, logits, float(cfg["prompt"]["empty_logit"])).astype(np.float32)
+    return entry["rgb"][idx].max(axis=-1) > 0
+
+
+def hint_logits(prob, head, cfg):
+    """uint8 probability maps [K, H, W] -> the logits handed to MedSAM2.
+
+    A slice YOLO left empty becomes a confident "nothing" (`prompt.empty_logit`), and so does
+    anywhere outside the head (`prompt.clip_to_head`): YOLO is asked for blobs down to
+    `yolo_conf` (0.05), where boxes are close to random — on BraTS-GLI-00008-101 z=70 a 0.050
+    blob covered 1669 px, 1184 of them outside the skull. A voxel counts as head if *any*
+    channel is non-zero, which excludes 4 of 734,193 expert tumour voxels over 10 val patients.
+    """
+    p = cfg["prompt"]
+    k = float(p["empty_logit"])
+    logits = prob_to_logit(prob) * float(p["logit_scale"])
+    logits[prob.max(axis=(1, 2)) == 0] = k
+    if head is not None:
+        logits = np.where(head, logits, k)
+    return logits.astype(np.float32)

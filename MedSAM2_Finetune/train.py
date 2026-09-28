@@ -9,10 +9,10 @@ From the repo root:
     python -m MedSAM2_Finetune.train --run <dir> --resume      # continue from its last.pt
     python -m MedSAM2_Finetune.train --run <dir> --evaluate-only
 
-Training works on clips: the anchor slice is prompted with YOLO's map and the rest of the
-clip is reached through SAM2's memory, which is exactly what inference does over a whole
-volume. The after-every-round check runs the real thing — a full forward + backward
-propagation per patient — so the score that picks the best round is the score we report.
+Training works on clips in which every slice carries its own YOLO hint and every slice
+after the first also sees the memory of the ones before it — one pass of inference, only
+shorter. The after-every-round check runs the real thing (both passes over whole patients,
+TTA, post-processing), so the score that picks the best round is the score we report.
 
 Each run lives in runs/<YYYYMMDD-HHMMSS>/: run_config.yaml (the exact settings), status.json
 (progress, read by the page), results.csv (one row per round), weights/ and eval/.
@@ -31,7 +31,7 @@ from torch.utils.data import DataLoader
 
 from .common import RUNS_DIR, list_patients, load_config, read_json, write_json, yolo_run
 from .dataset import ClipDataset, PatientShuffle, clip_sources, collate, sample_clips
-from .evaluate import build_predictor, evaluate, quick_dice
+from .evaluate import evaluate, quick_dice
 from .model import Clips, build_train_model, losses, param_groups
 
 SMOKE = {"max_train_patients": 2, "val_patients": 2, "epochs": 1, "max_patients": 2}
@@ -135,13 +135,11 @@ def train(run_dir, cfg, status, resume=False):
           f"fresh each round from {len(sources)} patients; checking on {len(val_patients)} val "
           f"patients", flush=True)
 
-    model = build_train_model(cfg, device=device)
+    model, _ = build_train_model(cfg, device=device)
     optimizer = torch.optim.AdamW(param_groups(model, cfg), weight_decay=float(t["weight_decay"]))
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print(f"[train] training {trainable/1e6:.1f}M of {total/1e6:.1f}M weights ({t['unfreeze']})", flush=True)
-    # the checker is the real inference path, kept alongside and re-synced every round
-    checker, _ = build_predictor(cfg, device=device)
 
     weights_dir = os.path.join(run_dir, "weights")
     os.makedirs(weights_dir, exist_ok=True)
@@ -172,10 +170,10 @@ def train(run_dir, cfg, status, resume=False):
         sums, n, seen, t0, last_report = {}, 0, 0, time.time(), 0.0
         optimizer.zero_grad(set_to_none=True)
         for step, batch in enumerate(loader):
-            clips = Clips(batch["images"], batch["masks"], batch["obj_to_frame_idx"]).to(device)
+            clips = Clips(batch["images"], batch["masks"]).to(device)
             prompts = batch["prompts"].to(device, non_blocking=True)
             with amp:
-                outputs = model(clips, prompts, anchors=[0])
+                outputs = model(clips, prompts)
             loss, parts = losses(outputs, clips, cfg)
             (loss / t["accum"]).backward()
             if (step + 1) % t["accum"] == 0:
@@ -195,8 +193,7 @@ def train(run_dir, cfg, status, resume=False):
         scheduler.step()
 
         model.eval()
-        checker.load_state_dict(model.sam2.state_dict())
-        val_dice3d = quick_dice(checker, cfg, val_patients, device=device)
+        val_dice3d = quick_dice(model, cfg, val_patients, device=device)
         row = {"epoch": epoch + 1, "time": round(time.time() - t0, 1), "val_dice3d": round(val_dice3d, 4),
                "lr": optimizer.param_groups[0]["lr"], "clips": seen,
                **{k: round(v / max(n, 1), 4) for k, v in sums.items()}}
@@ -218,12 +215,12 @@ def train(run_dir, cfg, status, resume=False):
         if t["patience"] and since_best >= t["patience"]:
             print(f"[train] no better round for {since_best} rounds — stopping early", flush=True)
             break
-    del checker
+    del model, optimizer
     torch.cuda.empty_cache()
     return best_path
 
 
-def run(run_dir, resume=False, evaluate_only=False):
+def run(run_dir, resume=False, evaluate_only=False, splits=("val", "test")):
     from .yolo_prompts import ensure_cache, prompt_key
 
     with open(os.path.join(run_dir, "run_config.yaml"), "r", encoding="utf-8") as f:
@@ -235,9 +232,8 @@ def run(run_dir, resume=False, evaluate_only=False):
     try:
         chosen = yolo_run(cfg["prompt"]["yolo_run"])
         status.update(yolo_run=chosen["id"], prompt_key=prompt_key(cfg))
-        print(f"[prompts] YOLO run {chosen['id']} ({chosen['which']}), variant {cfg['prompt']['variant']}; "
-              f"anchors x{cfg['anchors']['count']}, "
-              f"HITL up to {cfg['hitl']['rounds']} round(s)", flush=True)
+        print(f"[prompts] YOLO run {chosen['id']} ({chosen['which']}), variant "
+              f"{cfg['prompt']['variant']}, every slice prompted", flush=True)
         if not evaluate_only:
             train_patients, val_patients = _pools(cfg)
             ensure_cache(cfg, train_patients + val_patients,
@@ -247,7 +243,7 @@ def run(run_dir, resume=False, evaluate_only=False):
 
         # evaluate() builds whatever prompts val and test still need itself.
         status.update(stage="evaluate", eval_done=0, eval_total=None)
-        evaluate(run_dir, cfg, os.path.join(run_dir, "eval"), max_patients=max_patients,
+        evaluate(run_dir, cfg, os.path.join(run_dir, "eval"), splits=splits, max_patients=max_patients,
                  progress=lambda d, t, split: status.update(eval_done=d, eval_total=t, eval_split=split),
                  device=f"cuda:{cfg['train']['device']}" if torch.cuda.is_available() else "cpu")
         status.update(state="done", stage="done", finished=datetime.now().isoformat(timespec="seconds"))
@@ -266,10 +262,13 @@ def main():
     ap.add_argument("--smoke", action="store_true", help="2 patients, 1 round")
     ap.add_argument("--resume", action="store_true", help="continue from the run's last.pt")
     ap.add_argument("--evaluate-only", action="store_true", help="re-score best.pt")
+    ap.add_argument("--splits", default="val,test",
+                    help="pools to score at the end, e.g. `val` while comparing settings")
     args = ap.parse_args()
     run_dir = os.path.abspath(args.run or new_run(args.set, args.smoke))
     print(f"[run] {run_dir}", flush=True)
-    run(run_dir, resume=args.resume, evaluate_only=args.evaluate_only)
+    run(run_dir, resume=args.resume, evaluate_only=args.evaluate_only,
+        splits=tuple(s for s in args.splits.split(",") if s))
 
 
 if __name__ == "__main__":
