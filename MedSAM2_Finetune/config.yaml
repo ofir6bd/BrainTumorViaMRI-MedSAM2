@@ -59,7 +59,9 @@ data:
   val_pool: medsam2_val       #   YOLO trained on yolo_*, so it has never seen these patients
   test_pool: test
   min_fg_voxels: 100          # a slice needs this much brain to be used at all
-  max_train_patients: null    # patients per round from train_pool (null = all 721)
+  max_train_patients: null    # patients per round from train_pool (null = all 500).
+                              #   Learning curve, same settings, val: 250 -> 0.8838, 500 -> 0.8861,
+                              #   721 -> 0.8864 — why 221 of the 721 went to yolo_train on 2026-09-29.
   val_patients: 80            # patients in the after-every-round check (null = all).
                               #   At 40 the check wandered by about +-0.01 round to round, and
                               #   all three 10-round screens "peaked" at round 4 — 80 halves

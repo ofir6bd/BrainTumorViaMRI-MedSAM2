@@ -134,13 +134,13 @@
           <p class="card-sub">Who it learns from</p>
           <label class="fld">Patients per round <em>(data.max_train_patients)</em>
             <input id="fMaxTrain" type="number" step="1" min="1" placeholder="all">
-            <small class="hint">How many patients each round learns from, out of the 721 in the training pool. Empty = all of them. <b class="eg">For example:</b> 300 takes about 40% of the time all 721 take.</small></label>
+            <small class="hint">How many patients each round learns from, out of the 500 in the training pool. Empty = all of them. <b class="eg">For example:</b> 250 scored 0.8838 on the check pool against 0.8861 for all 500.</small></label>
           <label class="fld">Patients in the round check <em>(data.val_patients)</em>
             <input id="fValPatients" type="number" step="1" min="1" placeholder="all">
             <small class="hint">Patients scored after every round, to decide which round was best. <b class="eg">For example:</b> 40 patients add about 5 minutes to each round, and make the score wobble by about &plusmn;0.01 &mdash; so a smaller difference between rounds is noise.</small></label>
           <label class="fld">Clips per patient <em>(data.clips_per_patient)</em>
             <input id="fClips" type="number" step="1" min="1" max="64">
-            <small class="hint">How many short runs of slices are taken from each patient. New ones are drawn every round. <b class="eg">For example:</b> 3 clips from 721 patients is 2,163 a round, picked out of roughly 95,000 possible positions.</small></label>
+            <small class="hint">How many short runs of slices are taken from each patient. New ones are drawn every round. <b class="eg">For example:</b> 3 clips from 500 patients is 1,500 a round, picked out of roughly 66,000 possible positions.</small></label>
           <label class="fld">Share of clips with tumour <em>(data.tumour_clip_fraction)</em>
             <input id="fTumourClips" type="number" step="any" min="0" max="1">
             <small class="hint">Share of those clips that must start on a slice where YOLO found tumour. The rest start anywhere. <b class="eg">For example:</b> 0.8 means 8 clips in 10 start on tumour; the other 2 teach it to say &ldquo;nothing here&rdquo;.</small></label>

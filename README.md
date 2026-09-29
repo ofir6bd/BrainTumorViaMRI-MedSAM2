@@ -168,9 +168,9 @@ is a scan date), and all scans of a person sit in the same pool:
 
 | Pool | Patients | People | Used for |
 |---|---|---|---|
-| `yolo_train` | 250 | 132 | YOLO training |
+| `yolo_train` | 471 | 257 | YOLO training |
 | `yolo_val` | 81 | 41 | YOLO best-epoch choice |
-| `medsam2_train` | 721 | 370 | MedSAM2 training (on YOLO prompts for people YOLO never saw) |
+| `medsam2_train` | 500 | 245 | MedSAM2 training (on YOLO prompts for people YOLO never saw) |
 | `medsam2_val` | 245 | 139 | MedSAM2 best-epoch choice |
 | `test` | 324 | 262 | Final test for both, never trained on |
 
@@ -179,9 +179,17 @@ is a scan date), and all scans of a person sit in the same pool:
 - **2026-09-19 fix:** people who had scans in both train and val of the same model (45 in YOLO,
   138 in MedSAM2) were moved wholly to one side — 49 + 149 folders — keeping the val pools at
   their size. Otherwise each model's val score would be optimistic.
-- **To change the split**, move a patient's folder — always all scans of that person together,
-  never between a YOLO and a MedSAM2 pool — then update `split_manifest.json` (the dashboard's
-  *Manifest vs disk* check flags anything out of date). No statistics recompute is needed.
+- **2026-09-29 rebalance:** 221 scans (125 people, seed 42) moved `medsam2_train` → `yolo_train`
+  (was 250 / 721). Measured first: MedSAM2 on 500 of its patients scored val 0.8861 against 0.8864
+  on all 721 (250 → 0.8838), while YOLO on 125 of its 250 lost 0.0136 ± 0.0034 — YOLO still
+  gains from data, MedSAM2 had more than it needed. Val pools and `test/` were not touched.
+  The move is listed under `moves` in `split_manifest.json`; the previous manifest is
+  `split_manifest.backup-2026-09-29.json`.
+- **To change the split**, move a patient's folder — always all scans of that person together —
+  then update `split_manifest.json` (the dashboard's *Manifest vs disk* check flags anything out
+  of date). No statistics recompute is needed. Moving people between a YOLO and a MedSAM2 pool
+  means **both models must be retrained**: YOLO on its new pool, then MedSAM2 on prompts from
+  that YOLO, so MedSAM2 still only learns from people YOLO never saw.
 
 **Why `test/` still shares people with other pools:** moving any of them would change the test
 set, and every Dice number so far was measured on these exact 324 scans. The overlap was

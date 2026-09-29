@@ -8,6 +8,8 @@ data:
   train_pool: yolo_train       # pools are keys of the project config.yaml -> paths
   val_pool: yolo_val           #   (YOLO never sees the medsam2_* pools)
   test_pool: test
+  max_train_patients: null     # use only the first N scans of train_pool, whole people only
+                               #   (null = all). For learning curves: how much does more data help?
   min_fg_voxels: 100           # a slice needs this many non-zero FLAIR voxels (brain) to be used
   min_mask_area: 5             # tumour pieces smaller than this (pixels) are left out of the labels.
                                #   Measured (test 3D Dice): 50 -> 0.8746, 15 -> 0.8767, 5 -> 0.8781,

@@ -7,7 +7,7 @@ from the project `config.yaml -> paths`.
 
 | Pool | Patients | Role |
 |---|---|---|
-| `yolo_train` | 250 | training |
+| `yolo_train` | 471 | training (250 until 2026-09-29; see the root README) |
 | `yolo_val` | 81 | best-epoch choice (and threshold choice) |
 | `test` | 324 | final score — never trained on, never used for choosing |
 
@@ -76,7 +76,7 @@ None of the retrains beats the old weights beyond noise (best: +0.0022 ± 0.0021
 better / 71 worse), and picking the round by a 30-patient Dice check was *worse* than
 Ultralytics' mAP pick on two of three runs. So the model stays `20260927-010028`, now scored
 with the extras. Six earlier runs (model size m/x, `min_mask_area` 0-50) had already all
-landed within 0.8746-0.8781 on test: this YOLO is limited by its 250 training patients, not by
+landed within 0.8746-0.8781 on test: this YOLO was limited by its 250 training patients, not by
 its settings — every run's val loss bottoms out around round 16-19 and then rises.
 
 **Test, scored once: 0.8805 vs 0.8781 before (+0.0024 ± 0.0021, median +0.0024; 113 patients
