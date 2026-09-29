@@ -66,7 +66,7 @@ model must see exactly the pictures it was trained on.
 | `train.py` | one run: prompts → train → score. Also the CLI |
 | `evaluate.py` | the two passes + TTA + clean-up; scores MedSAM2 **and** YOLO on the same patients |
 | `routes.py` | the Flask blueprint behind `/medsam2/` |
-| `templates/`, `static/` | the page. The look and the chart kit are the YOLO_finetune ones |
+| `templates/medsam2.html`, `static/medsam2.js` | the page, on the viewer's shared shell and kit (`Frontend/static/kit/`): live run, runs + settings diff, training charts, results, "did it help?", one patient slice by slice, a slice viewer with play, and a start dialog built from `routes.EDITABLE` |
 
 Generated (git-ignored): `cache/` (prompt maps, ~5 MB per patient) and `runs/`.
 

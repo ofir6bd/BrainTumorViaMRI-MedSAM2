@@ -34,13 +34,14 @@ BrainTumorViaMRI-MedSAM2/
 ├── maunal_code/            # pipeline scripts
 │   ├── 01_acquire_data.py
 │   └── 05_infer_multibbox_hitl.py
-├── Frontend/               # web viewer: the Analytics dashboard
+├── Frontend/               # web viewer: Analytics + Results pages, and the shell of every page
 │   ├── run_web.bat         #   launches it (localhost, live-reload)
 │   ├── app.py              #   Flask backend: dashboard API + slice images
+│   ├── results.py          #   the Results page's API (reads every run's saved scores)
 │   ├── dataset_stats.py    #   per-patient tumour statistics + cache (also runnable)
-│   ├── serve.py            #   dev server with browser live-reload
-│   ├── templates/index.html
-│   └── static/             #   app.js (shell), dashboard.js, style.css
+│   ├── serve.py            #   dev server with browser live-reload (--port for a second copy)
+│   ├── templates/          #   base.html (shared shell), index.html, results.html
+│   └── static/             #   kit/ (kit.css, kit.js, charts.js — shared by all pages), pages/
 ├── YOLO_finetune/          # YOLO11m-seg fine-tuning + its page at /finetune/ (see its README.md)
 ├── MedSAM2_Finetune/       # MedSAM2 fine-tuned on YOLO prompts + its page at /medsam2/ (see its README.md)
 ├── data/                   # all INPUTS (git-ignored)
@@ -101,43 +102,58 @@ For the interactive viewer, use `Frontend\run_web.bat` (see below) instead of a 
 ## Web viewer
 
 Double-click **`Frontend\run_web.bat`** (or run it from a terminal). It starts a local server and
-opens `http://localhost:5000` in your browser. It reads patients from `config.yaml` →
-`paths.dataset`, and knows each patient's pool from the folder it sits in. All pages are on this
-one server; switch between them in the sidebar:
+opens `http://localhost:5000`. It reads patients from `config.yaml` → `paths.dataset` and knows
+each patient's pool from the folder it sits in — if folders are moved while it runs, it notices
+and re-lists them (no restart needed). All pages share one shell: the sidebar (pages, sections of
+the current page, GPU readout), light / dark theme, a command palette (**Ctrl+K**: jump to a
+section, open a patient or a run, run an action), keyboard help (**?**), saved views (★ Views)
+and *Copy link* — every page keeps its whole view in the URL.
 
-- **Analytics** (`/`) — below.
-- **YOLO_finetune** (`/finetune/`) — start, follow and analyse YOLO11m-seg fine-tune runs; see
-  `YOLO_finetune/README.md`.
-- **MedSAM2_Finetune** (`/medsam2/`) — fine-tune MedSAM2 on YOLO's per-voxel probability as its
-  prompt, and see, patient by patient, whether it improved YOLO's guess; see
-  `MedSAM2_Finetune/README.md`.
+| Page | What it answers |
+|---|---|
+| **Analytics** (`/`) | What is in the dataset, and is the split clean? |
+| **Results** (`/results/`) | How good is each YOLO and MedSAM2 run, and where does each one fail? |
+| **YOLO_finetune** (`/finetune/`) | Start, follow and analyse YOLO11-seg fine-tunes — `YOLO_finetune/README.md` |
+| **MedSAM2_Finetune** (`/medsam2/`) | Start, follow and analyse MedSAM2 fine-tunes on YOLO hints — `MedSAM2_Finetune/README.md` |
 
-**Analytics** is a dashboard over every patient's real tumour statistics (WT/TC and
-per-label volumes, % of brain, tumour slices, connected parts, extent, location, side). They are
-computed from the `-seg` and FLAIR volumes on first open (a few minutes, with a progress bar)
-and cached in `outputs/dashboard/dataset_stats.json`; later only new or changed patients are
-recomputed, and moving a folder between pools needs no recompute
-(`python Frontend\dataset_stats.py` builds the cache from a terminal). It shows split integrity
-(subjects shared between pools — YOLO↔MedSAM2 must be 0 — and manifest vs disk), pool sizes,
-scans per subject, per-pool box plots with a KS test against `test`, a brushable histogram,
-label make-up and presence, a scatter explorer with box selection, a tumour-location heatmap,
-the mean tumour profile along the head, and a sortable patient table. Every chart filters the
-others. The URL holds the whole view (*Copy link*), and *Export CSV* saves the filtered patients.
+**Analytics** — every patient's real tumour statistics (WT/TC and per-label volumes, % of brain,
+tumour slices, pieces, extent, location, side), computed from the `-seg` and FLAIR volumes on
+first open and cached in `outputs/dashboard/dataset_stats.json` (`python Frontend\dataset_stats.py`
+builds it from a terminal). Sections: split integrity (people shared between pools — a YOLO and a
+MedSAM2 pool must share nobody — manifest vs folders, and every re-split so far), pool sizes and
+scans per person, each pool against `test` (box + strip plots, Kolmogorov–Smirnov table), one
+measure in detail (histogram or cumulative curve), **brushable mini-histograms of ten measures that
+cross-filter each other**, tumour-part make-up / presence / combinations, a scatter explorer
+(box-select, shift-drag zoom, colour by pool / side / pieces / cavity / scan number, trend line)
+with a **Spearman correlation matrix** that sets its axes, tumour-centre heatmaps and the tumour
+profile along the head, an **automatic list of unusual patients**, and the patient table (sort,
+search, column picker, CSV). Every chart-made filter shows as a removable chip.
+A patient opens in a **drawer**: T1C / T1 / T2 / FLAIR / T1C − T1 or all five, labels on/off,
+a slice slider and **Play** (cine through the tumour slices), the tumour profile (click to jump),
+parts, measurements with percentile ranks, and a timeline of the person's scans. **☆ Compare**
+pins up to four patients for a side-by-side table, images and profiles.
 
-Clicking a patient opens a **drawer**: a slice viewer, measurements, the tumour profile (click it
-to jump to a slice), and the person's other scans. The slice viewer shows **T1C, T1, T2, FLAIR,
-T1C − T1** (contrast enhancement; negative values set to 0), or **All** five side by side at the
-same slice, with the labels on or off. Images are axial slices in radiological view (patient's
-right on the left).
+**Results** — joins every run's saved per-patient scores (no GPU) with the dataset statistics.
+Pick a pool (`test`, `medsam2_val`, `yolo_val`), a YOLO run and a MedSAM2 run (and their cut-offs).
+It shows the headline with bootstrap 95% ranges and a Wilcoxon test of MedSAM2 against its own
+YOLO hint, a leaderboard of every scored run, MedSAM2-vs-reference per patient, the change
+histogram, cumulative score curves, cut-off sweeps, **scores split by tumour size, parts, cavity,
+side, pieces or position** (with per-group tests), score against size, missed / false slices,
+a **run-against-run** paired comparison, and a per-patient panel (slice-by-slice Dice of YOLO,
+the hint and MedSAM2; the expert labels; and, on request, the models' own pictures of a slice).
 
-Keys: `/` search, `Esc` close, `←`/`→` previous/next patient, `1`–`6` image (T1C, T1, T2, FLAIR,
-T1C − T1, All), `L` labels on/off, `R` reset filters.
+Keys (on any page): `Ctrl+K` palette, `?` shortcuts, `T` theme, `G` next page; per page e.g.
+`/` search, `Esc` close, `←`/`→` previous / next patient or slice, `[`/`]` slice or patient,
+`P` play, `L` labels, `1`–`6` image, `C` compare, `R` reset, `N` new run. Label colours are the
+same everywhere: NETC red, SNFH green, ET violet, RC yellow; model colours: YOLO blue, MedSAM2
+orange, test green. Every chart saves as PNG / SVG / CSV from its corner.
 
-Label colours are the same everywhere: NETC red, SNFH green, ET violet, RC yellow.
-
-The site is served with **live-reload**: while it's running, editing any file under `Frontend/`
-or `YOLO_finetune/templates|static/` makes the browser refresh automatically. (Backend changes
-in `Frontend/*.py` or `YOLO_finetune/*.py` take effect after re-running the bat.)
+The code: `Frontend/static/kit/` (the shared design `kit.css`, helpers `kit.js`, chart library
+`charts.js`), `Frontend/templates/base.html` (the shell every page extends) and one script per page
+(`Frontend/static/pages/`, `YOLO_finetune/static/finetune.js`, `MedSAM2_Finetune/static/medsam2.js`).
+The site is served with **live-reload**: editing a template or script refreshes the browser.
+Backend changes (`*.py`) take effect after re-running the bat. A second copy can run next to it
+with `python Frontend\serve.py --port 5001`.
 
 ## Prerequisites the code expects
 

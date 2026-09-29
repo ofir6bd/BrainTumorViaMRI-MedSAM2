@@ -31,6 +31,8 @@ MODELS = ["yolo11n-seg.pt", "yolo11s-seg.pt", "yolo11m-seg.pt", "yolo11l-seg.pt"
 # Settings a run may override from the UI: (type, min, max).
 EDITABLE = {"train.epochs": (int, 1, 1000), "train.patience": (int, 0, 1000),
             "train.imgsz": (int, 64, 2048), "train.batch": (int, 1, 256),
+            "train.mosaic": (float, 0.0, 1.0), "train.scale": (float, 0.0, 0.9),
+            "train.degrees": (float, 0.0, 45.0), "train.fliplr": (float, 0.0, 1.0),
             # changing either of these builds a new set of pictures (they are in the dataset key)
             "data.min_mask_area": (int, 0, 5000), "data.min_fg_voxels": (int, 0, 50000)}
 LIVE = ("queued", "running")
@@ -152,6 +154,12 @@ def index():
     return render_template("finetune.html")
 
 
+@finetune_bp.route("/api/active")
+def api_active():
+    """Which run is going right now (the navigation shows a "running" badge)."""
+    return jsonify({"active": active_run()})
+
+
 @finetune_bp.route("/api/overview")
 def api_overview():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -173,12 +181,16 @@ def api_start():
             try:
                 v = typ(body["overrides"][key])
             except (TypeError, ValueError):
-                abort(400, f"{key} must be a whole number")
+                abort(400, f"{key} must be a {'whole ' if typ is int else ''}number")
             if not lo <= v <= hi:
                 abort(400, f"{key} must be between {lo} and {hi}")
             if key == "train.imgsz" and v % 32:
                 abort(400, "train.imgsz must be a multiple of 32")
             overrides.append(f"{key}={v}")
+    if body.get("select_by") in ("map", "dice3d"):
+        overrides.append(f"select.by={body['select_by']}")
+    if body.get("cos_lr") is not None:
+        overrides.append(f"train.cos_lr={'true' if body['cos_lr'] else 'false'}")
     model = body.get("model")
     if model:
         if model not in MODELS:
@@ -202,7 +214,18 @@ def api_run(run_id):
         cfg_text = f.read()
     return jsonify({**run_summary(run_id), "status": st, "config": run_config(run_id),
                     "config_text": cfg_text, "results": results(run_id), "dataset": meta,
-                    "eval": read_json(os.path.join(d, "eval", "summary.json")), "plots": plots})
+                    "eval": read_json(os.path.join(d, "eval", "summary.json")), "plots": plots,
+                    "dice_check": _dice_check(d)})
+
+
+def _dice_check(d):
+    """dice_check.csv (select.by = dice3d): the 3D Dice of every round's weights."""
+    path = os.path.join(d, "dice_check.csv")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    return {"epoch": [int(r["epoch"]) for r in rows], "dice3d": [float(r["dice3d"]) for r in rows]}
 
 
 @finetune_bp.route("/api/runs/<run_id>/eval/<split>")
@@ -332,6 +355,8 @@ def _predict(run_id, split, patient_id, z, conf):
     patient = _patient_of(cfg, split, patient_id)
     vols = _cached(_volumes, patient["dir"], lambda: load_volumes(patient), 3)
     zs = brain_slices(vols["FLAIR"], cfg["data"]["min_fg_voxels"])
+    if z is None:  # no slice asked for: open on the one with the most expert tumour
+        z = max(zs, key=lambda v: int((vols["SEG"][:, :, v] > 0).sum())) if zs else 0
     z = min(zs, key=lambda v: abs(v - z)) if zs else z
     rgb = rgb_slice(vols, z, cfg["data"]["min_fg_voxels"])
 
@@ -350,9 +375,10 @@ def _predict(run_id, split, patient_id, z, conf):
 
 
 def _args():
-    """split, patient, z, conf from the query; an empty z means "pick the first slice"."""
+    """split, patient, z, conf from the query; no z means "the slice with the most tumour"."""
     try:
-        return (request.args["split"], request.args["patient"], int(request.args.get("z") or 0),
+        z = request.args.get("z")
+        return (request.args["split"], request.args["patient"], int(z) if z not in (None, "") else None,
                 float(request.args.get("conf") or 0.25))
     except (KeyError, ValueError):
         abort(400, "need split, patient, and numeric z / conf")

@@ -97,28 +97,28 @@ are kept in `runs/20260927-010028/eval_conf025_noextras/`. The three retrain scr
 
 ## The page
 
-- **Start** — model, epochs, patience, image size, batch, smoke test; the full `config.yaml`
-  shown alongside.
-- **Live run** — stage stepper with progress (patients / epoch + batch / patients), elapsed,
-  time per epoch, time left (estimate), best epoch and epochs since best (vs patience), live log
-  with filter, and a live GPU readout.
-- **Runs** — every run with its state and scores; tick up to 3 to overlay their curves.
-- **Training curves** — losses (train vs val), mask and box metrics, learning rate; one synced
-  crosshair across all charts, best-epoch marker, and a note on where val loss bottomed out.
-- **Dataset** — slices per split with / without tumour, tumour-size distribution.
-- **Evaluation** (val / test) — KPIs, threshold sweep, 3D Dice histogram (click a bar to filter
-  the table), Dice vs tumour size, Dice by size bucket, slice-level confusion table, sortable
-  patient table, per-patient CSV export.
-- **See a slice** — pick **any finished model** (any run's `best.pt`), a pool (val / test) and a
-  patient, and run it now: the RGB input next to FLAIR with found / missed / false tumour pixels,
-  and a confidence slider. **Run this patient** sends every brain slice through that model
-  (a few seconds) and draws one chart with two scales — Dice per slice on the left (0–1), expert
-  and predicted tumour pixels on the right — plus that patient's 3D Dice. Click the chart to jump
-  to a slice. Results are cached per model / patient / threshold.
-- **Plots** — everything Ultralytics saved (PR curves, confusion matrix, batches).
+Built on the viewer's shared kit (`Frontend/static/kit/`, shell `Frontend/templates/base.html`).
 
-The URL keeps the view (run, split, patient, slice, threshold, compared runs) — **Copy link**.
-Keys: `/` search, `←`/`→` slice, `[`/`]` patient.
+- **Live run** — stage stepper with progress, time per round and time left, best val mAP and
+  rounds since, the 3D Dice check when `select.by: dice3d`, a live round-by-round chart, and the
+  log (filter, follow, progress bars on/off, colour for errors / scores, save).
+- **Runs** — sortable table (status, model, rounds, best mAP, val / test 3D Dice, time); tick up to
+  four to overlay their curves, and **Compare settings** lists exactly the settings that differ.
+- **This run** — headline scores with sparklines; resume, score again, rounds CSV, settings, and a
+  link to the run on the Results page.
+- **Training charts** — errors / mask scores / box scores / learning rate, crosshair synced across
+  charts, drag to zoom, best-round marker, and a note on where the val mask error bottomed out.
+- **Pictures** — slices per pool with / without tumour, tumour size per slice.
+- **Results** (val / test, any confidence) — scores with a bootstrap range, the confidence sweep
+  (click a point to switch), the per-patient histogram (drag to filter the table), score against
+  tumour size with trend, mean score by size with ranges, slice-level found / missed / false, and
+  the patient table.
+- **See a slice** — any trained model, pool, patient, slice and confidence; opens on the slice
+  with the most tumour; **Whole patient** draws Dice and pixel counts for every slice.
+- **More charts** — everything Ultralytics saved, click to enlarge.
+- **▶ New run** opens the start dialog: model, rounds, patience, picture size, batch, the two
+  picture settings, mosaic / zoom / rotation / flip, cosine learning rate, which round to keep,
+  quick test — with an estimate and the full `config.yaml`.
 
 ## Files
 
@@ -130,4 +130,4 @@ Keys: `/` search, `←`/`→` slice, `[`/`]` patient.
 | `train.py` | one run: dataset → training → evaluation; CLI (`python -m YOLO_finetune.train`) |
 | `evaluate.py` | val + test scoring and threshold sweep |
 | `routes.py` | the page's API — a Flask blueprint the viewer mounts at `/finetune/` |
-| `templates/finetune.html`, `static/` | the page |
+| `templates/finetune.html`, `static/finetune.js` | the page (extends the viewer's shared shell and kit) |

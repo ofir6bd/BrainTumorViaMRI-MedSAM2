@@ -22,8 +22,8 @@ from PIL import Image
 from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from werkzeug.exceptions import HTTPException
 
-from .common import (PROMPT_VARIANTS, ROOT, RUNS_DIR, UNFREEZE, checkpoints, list_patients,
-                     load_config, read_json, write_json, yolo_runs)
+from .common import (CONFIG_PATH, PROMPT_VARIANTS, ROOT, RUNS_DIR, UNFREEZE, checkpoints,
+                     list_patients, load_config, read_json, write_json, yolo_runs)
 from .train import new_run
 
 LIVE = ("queued", "running")
@@ -185,6 +185,12 @@ def index():
     return render_template("medsam2.html")
 
 
+@medsam2_bp.route("/api/active")
+def api_active():
+    """Which run is going right now (the navigation shows a "running" badge)."""
+    return jsonify({"active": active_run()})
+
+
 @medsam2_bp.route("/api/overview")
 def api_overview():
     cfg = load_config()
@@ -196,7 +202,9 @@ def api_overview():
             pools[k] = None
     editable = {k: ({"kind": v[0], "choices": _choices()[v[1]]} if v[0] == "choice"
                     else {"kind": v[0], "min": v[1], "max": v[2]}) for k, v in EDITABLE.items()}
-    return jsonify({"config": cfg, "editable": editable, "rebuilds": REBUILDS,
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        config_text = f.read()
+    return jsonify({"config": cfg, "config_text": config_text, "editable": editable, "rebuilds": REBUILDS,
                     "variants": PROMPT_VARIANTS, "unfreeze": UNFREEZE, "pools": pools,
                     "yolo_runs": yolo_runs(), "checkpoints": checkpoints(),
                     "active": active_run(), "runs": [run_summary(r) for r in run_ids()]})

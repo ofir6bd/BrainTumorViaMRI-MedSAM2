@@ -1,642 +1,505 @@
-/* MedSAM2_Finetune page.
-   Charts come from the YOLO_finetune chart kit (window.Charts) — one copy, one look.
-   Every number on this page is measured; nothing here invents or smooths data. */
-(() => {
+/* MedSAM2_Finetune page — start runs, follow the live one, and analyse what MedSAM2 added
+ * on top of its YOLO hint, patient by patient and slice by slice.
+ *
+ * Everything comes from the run folders (status.json, results.csv, eval/*.json). The start
+ * dialog is built from the server's own list of editable settings (routes.EDITABLE), so it
+ * can never offer a setting the server would refuse. The view lives in the URL.
+ */
+(function () {
   "use strict";
-  const BASE = document.body.dataset.base.replace(/\/$/, "");
-  const $ = (id) => document.getElementById(id);
-  const api = (path) => fetch(BASE + path).then(async (r) => {
-    const body = await r.json().catch(() => ({ error: r.statusText }));
-    if (!r.ok) throw new Error(body.error || r.statusText);
-    return body;
-  });
-  const post = (path, body) => fetch(BASE + path, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  }).then(async (r) => {
-    const out = await r.json().catch(() => ({ error: r.statusText }));
-    if (!r.ok) throw new Error(out.error || r.statusText);
-    return out;
-  });
-  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-  const f4 = (v) => (v == null ? "—" : Number(v).toFixed(4));
-  const f2 = (v) => (v == null ? "—" : Number(v).toFixed(2));
-  const pct = (v) => (v == null ? "—" : (v * 100).toFixed(1) + "%");
-  const secs = (s) => (s == null ? "—" : s < 90 ? `${Math.round(s)} s`
-    : s < 5400 ? `${Math.floor(s / 60)} min ${Math.round(s % 60)} s` : `${(s / 3600).toFixed(1)} h`);
-  const COL = { medsam2: "#3987e5", yolo: "#e0803c", gt: "#8fe08f", gain: "#2fa84f", loss: "#d03b3b",
-                muted: "#7f7f9c", val: "#9085e9", anchor: "#c08bff" };
-
-  const S = {           // everything the page knows, in one place
-    overview: null, runId: null, run: null, compare: new Set(), split: "test",
-    patients: [], patient: null, slice: null, logOffset: 0, profile: null,
+  const K = Kit, $ = K.id, esc = K.esc, St = K.stats;
+  const BASE = document.body.dataset.base;  // "/medsam2/"
+  const LIVE = ["queued", "running"];
+  const WORD = { queued: "starting", running: "running", done: "finished", failed: "failed", stopped: "stopped", interrupted: "cut off" };
+  const CMP = ["var(--medsam2)", "var(--yolo)", "var(--test)", "var(--et)"];
+  const badge = (st) => `<span class="badge ${st || ""}">${esc(WORD[st] || st || "–")}</span>`;
+  // plain words for the settings the start dialog offers
+  const LABELS = {
+    "prompt.yolo_run": "YOLO that makes the hints", "prompt.variant": "Hint style", "prompt.yolo_conf": "Lowest YOLO confidence kept",
+    "prompt.score_min": "Blob counts as YOLO's answer at", "prompt.logit_scale": "How loud the hint is", "prompt.empty_logit": "'Nothing here' value",
+    "augment.p": "Hints damaged on purpose", "model.checkpoint": "Starting checkpoint", "data.max_train_patients": "Training patients (empty = all)",
+    "data.val_patients": "Patients in the round check", "data.clips_per_patient": "Clips per patient", "data.tumour_clip_fraction": "Share of clips on tumour",
+    "data.min_fg_voxels": "Least brain on a slice", "video.num_frames": "Slices per clip", "video.reverse_fraction": "Share read backwards",
+    "video.batch": "Clips per step", "train.epochs": "Rounds", "train.patience": "Stop after N quiet rounds", "train.accum": "Steps added up",
+    "train.lr": "Learning rate", "train.memory_lr": "Memory learning rate", "train.vision_lr": "Image-encoder learning rate", "train.unfreeze": "Which weights may change",
+    "train.dice_weight": "Overlap weight", "train.bce_weight": "Pixel weight", "train.iou_weight": "Quality-head weight", "train.obj_weight": "Object-head weight",
+    "train.fliplr": "Left-right flip", "train.workers": "Reader processes", "evaluate.mask_threshold": "Tumour cut-off (logit)", "evaluate.min_component": "Smallest piece kept (voxels)",
   };
+  const GROUP = { prompt: "The YOLO hint", augment: "The YOLO hint", model: "Model", data: "Who it learns from", video: "Clips", train: "How it learns", evaluate: "When running" };
 
-  /* ------------------------------------------------------------------ hash state */
-  function readHash() {
-    const p = new URLSearchParams(location.hash.slice(1));
-    S.runId = p.get("run") || S.runId;
-    S.split = p.get("pool") || S.split;
-    S.patient = p.get("patient") || S.patient;
-  }
-  function writeHash() {
-    const p = new URLSearchParams();
-    if (S.runId) p.set("run", S.runId);
-    if (S.split) p.set("pool", S.split);
-    if (S.patient) p.set("patient", S.patient);
-    history.replaceState(null, "", "#" + p.toString());
-  }
-
-  /* ------------------------------------------------------------------ the start form */
-  const FIELDS = {
-    "prompt.yolo_run": "fYoloRun", "prompt.variant": "fVariant", "prompt.yolo_conf": "fYoloConf",
-    "prompt.score_min": "fScoreMin", "prompt.logit_scale": "fLogitScale",
-    "prompt.empty_logit": "fEmptyLogit",
-    "augment.p": "fAugP",
-    "model.checkpoint": "fCheckpoint",
-    "data.max_train_patients": "fMaxTrain", "data.val_patients": "fValPatients",
-    "data.clips_per_patient": "fClips", "data.tumour_clip_fraction": "fTumourClips",
-    "data.min_fg_voxels": "fMinFg",
-    "video.num_frames": "fNumFrames", "video.reverse_fraction": "fReverse",
-    "video.batch": "fVideoBatch",
-    "train.unfreeze": "fUnfreeze", "train.epochs": "fEpochs", "train.patience": "fPatience",
-    "train.accum": "fAccum", "train.lr": "fLr", "train.memory_lr": "fMemoryLr",
-    "train.vision_lr": "fVisionLr", "train.dice_weight": "fDiceW", "train.bce_weight": "fBceW",
-    "train.fliplr": "fFliplr", "train.workers": "fWorkers",
-    "evaluate.mask_threshold": "fThreshold", "evaluate.min_component": "fMinComp",
+  const S = {
+    ov: null, runs: [], active: null, sel: null, run: null, cache: {}, cmp: new Set(), split: "test", evalData: {}, range: null,
+    pSplit: "test", pPatient: null, which: "best.pt", prof: null, z: null, patients: {}, logRun: null, logOffset: 0, tables: {}, charts: {},
   };
-  const cfgValue = (cfg, dotted) => dotted.split(".").reduce((n, k) => (n == null ? n : n[k]), cfg);
+  const api = (p, o) => K.api(BASE + p, o);
+  const runApi = (id, p) => api(`api/runs/${encodeURIComponent(id)}${p || ""}`);
 
-  function fillForm(ov) {
-    const runs = ov.yolo_runs.map((r) => ({
-      value: r.id,
-      label: `${r.id} — ${r.training ? "STILL TRAINING, do not use"
-        : r.test_dice3d != null ? "test 3D Dice " + f4(r.test_dice3d) : "not scored"}`,
-    }));
-    runs.unshift({ value: "", label: "best scoring run (automatic)" });
-    fillSelect($("fYoloRun"), runs);
-    fillSelect($("fVariant"), Object.keys(ov.variants).map((k) => ({ value: k, label: k })));
-    fillSelect($("fCheckpoint"), ov.checkpoints.map((k) => ({ value: k, label: k })));
-    fillSelect($("fUnfreeze"), Object.keys(ov.unfreeze).map((k) => ({ value: k, label: k })));
-    resetForm();
-    $("fVariant").addEventListener("change", showVariantNote);
-    Object.values(FIELDS).forEach((id) => $(id).addEventListener("change", showEstimate));
-    showVariantNote();
+  // ------------------------------------------------------------------ URL
+  function toHash() {
+    K.hashSet({ run: S.sel, split: S.split !== "test" ? S.split : "", cmp: [...S.cmp].join(","), pool: S.pSplit, patient: S.pPatient, which: S.which !== "best.pt" ? S.which : "", z: S.z });
   }
-  function fillSelect(sel, items) {
-    sel.innerHTML = items.map((i) => `<option value="${esc(i.value)}">${esc(i.label)}</option>`).join("");
-  }
-  function resetForm() {
-    const cfg = S.overview.config;
-    for (const [key, id] of Object.entries(FIELDS)) {
-      const v = cfgValue(cfg, key);
-      $(id).value = v == null ? "" : v;
-    }
-    showVariantNote();
-    showEstimate();
-  }
-  function showVariantNote() {
-    const ov = S.overview;
-    const v = $("fVariant").value;
-    $("variantNote").innerHTML = `<b>${esc(v)}</b> — ${esc(ov.variants[v] || "")}`;
-  }
-  function showEstimate() {
-    const ov = S.overview;
-    const changed = Object.entries(FIELDS).filter(([key, id]) => {
-      const now = $(id).value;
-      const was = cfgValue(ov.config, key);
-      return String(was == null ? "" : was) !== String(now);
-    }).map(([key]) => key);
-    const rebuild = changed.filter((k) => ov.rebuilds.includes(k));
-    const n = Number($("fMaxTrain").value || ov.pools.train || 0);
-    const clips = n * Number($("fClips").value || 1);
-    const checks = Number($("fValPatients").value || ov.pools.val || 0);
-    const parts = [`About <b>${n}</b> patients per round = <b>${clips}</b> clips of
-      ${esc($("fNumFrames").value)} slices. The check after each round runs
-      <b>${checks}</b> whole patients.`];
-    if (rebuild.length) {
-      parts.push(`<b>The hints will be worked out again</b> (you changed ${rebuild.map(esc).join(", ")}) —
-        that is a YOLO pass over every slice of every patient used, which takes a while the first time.`);
-    }
-    $("startEstimate").innerHTML = parts.join(" ");
-  }
-  function overrides() {
-    const out = {};
-    for (const [key, id] of Object.entries(FIELDS)) {
-      const el = $(id);
-      const was = cfgValue(S.overview.config, key);
-      const now = el.value;
-      if (String(was == null ? "" : was) !== String(now)) out[key] = now;
-    }
-    return out;
+  function fromHash() {
+    const q = K.hashGet();
+    S.sel = q.run || null;
+    S.split = q.split === "val" ? "val" : "test";
+    S.cmp = new Set((q.cmp || "").split(",").filter(Boolean));
+    S.pSplit = ["test", "val", "train"].includes(q.pool) ? q.pool : "test";
+    S.pPatient = q.patient || null;
+    S.which = q.which === "last.pt" ? "last.pt" : "best.pt";
+    S.z = q.z ? +q.z : null;
   }
 
-  /* ------------------------------------------------------------------ runs table */
-  const RUN_COLS = [
-    ["compare", "", (r) => `<input type="checkbox" class="cmp" data-id="${esc(r.id)}" ${S.compare.has(r.id) ? "checked" : ""}>`],
-    ["id", "Run", (r) => `<code>${esc(r.id)}</code>${r.smoke ? ' <span class="badge smoke">quick</span>' : ""}`],
-    ["state", "Status", (r) => `<span class="badge ${stateClass(r.state)}">${esc(stateWord(r.state))}</span>`],
-    ["variant", "Prompt style", (r) => esc(r.variant)],
-    ["yolo_run", "From YOLO", (r) => `<code>${esc(r.yolo_run)}</code>`],
-    ["unfreeze", "Weights changed", (r) => esc(r.unfreeze)],
-    ["augment", "Hints damaged", (r) => (r.augment == null ? "—" : f2(r.augment)), true],
-    ["rounds", "Training rounds", (r) => `${r.epochs_done}/${r.epochs_cfg}`, true],
-    ["best", "Best check score", (r) => (r.best ? `${f4(r.best.val_dice3d)} <span class="dim">@${r.best.epoch}</span>` : "—"), true],
-    ["test", "Test 3D Dice", (r) => (r.test ? `<b>${f4(r.test.dice3d_mean)}</b>` : "—"), true],
-    ["yolo", "YOLO alone", (r) => (r.test ? f4(r.test.yolo_dice3d_mean) : "—"), true],
-    ["delta", "Change", (r) => (r.test ? deltaCell(r.test.delta_mean) : "—"), true],
-    ["time", "Training time", (r) => secs(r.train_seconds), true],
-    ["created", "Started", (r) => esc((r.created || "").replace("T", " ")), true],
-  ];
-  const stateWord = (s) => ({ done: "finished", running: "running", queued: "starting",
-    failed: "failed", stopped: "stopped", interrupted: "cut off" }[s] || s || "—");
-  const stateClass = (s) => ({ done: "st-done", running: "st-running", failed: "st-failed",
-    stopped: "st-stopped", interrupted: "st-failed" }[s] || "");
-  const deltaCell = (d) => d == null ? "—"
-    : `<span style="color:${d >= 0 ? COL.gain : COL.loss}">${d >= 0 ? "+" : ""}${f4(d)}</span>`;
-
+  // ------------------------------------------------------------------ overview + runs
+  async function loadOverview() {
+    const ov = await api("api/overview");
+    S.ov = ov; S.runs = ov.runs; S.active = ov.active;
+    const c = ov.config;
+    $("pageSub").innerHTML = `${esc(c.model.checkpoint)} · hints from YOLO <code>${esc(c.prompt.yolo_run || "best")}</code> · train <code>${esc(c.data.train_pool)}</code> (${ov.pools.train}) · check <code>${esc(c.data.val_pool)}</code> (${ov.pools.val}) · test (${ov.pools.test}) · ${ov.runs.length} run(s)`;
+    for (const n of K.$$("[data-cfg]")) n.textContent = n.dataset.cfg.split(".").reduce((o, k) => (o == null ? o : o[k]), c);
+    $("newRunBtn").disabled = !!S.active;
+    renderRuns();
+    if (!S.sel && S.runs.length) selectRun(S.active || S.runs[0].id, true);
+  }
   function renderRuns() {
-    const tbl = $("runsTbl");
-    tbl.querySelector("thead").innerHTML = "<tr>" + RUN_COLS
-      .map(([, label, , num]) => `<th class="${num ? "num" : ""}">${esc(label)}</th>`).join("") + "</tr>";
-    tbl.querySelector("tbody").innerHTML = S.overview.runs.map((r) => `<tr data-id="${esc(r.id)}"
-      class="${r.id === S.runId ? "sel" : ""}">` + RUN_COLS
-      .map(([, , cell, num]) => `<td class="${num ? "num" : ""}">${cell(r)}</td>`).join("") + "</tr>").join("")
-      || `<tr><td colspan="${RUN_COLS.length}" class="dim">No runs yet — start one above.</td></tr>`;
-    tbl.querySelectorAll("tbody tr").forEach((tr) => tr.addEventListener("click", (e) => {
-      if (e.target.classList.contains("cmp")) return;
-      if (tr.dataset.id) selectRun(tr.dataset.id);
-    }));
-    tbl.querySelectorAll(".cmp").forEach((box) => box.addEventListener("change", () => {
-      if (box.checked && S.compare.size >= 3) { box.checked = false; return; }
-      box.checked ? S.compare.add(box.dataset.id) : S.compare.delete(box.dataset.id);
-      drawCurves();
-    }));
+    const cols = [
+      { k: "cmp", label: "⊞", nosort: true, html: (v, r) => `<input type="checkbox" class="cmp" data-id="${esc(r.id)}" ${S.cmp.has(r.id) ? "checked" : ""} aria-label="Compare ${esc(r.id)}">` },
+      { k: "id", label: "Run", html: (v, r) => `<span class="mono">${esc(v)}</span>${r.smoke ? ' <span class="badge">quick</span>' : ""}${v === S.sel ? " ◀" : ""}` },
+      { k: "state", label: "Status", html: (v, r) => `${badge(v)}${r.error ? ` <span class="bad" title="${esc(r.error)}">!</span>` : ""}` },
+      { k: "unfreeze", label: "Weights changed" },
+      { k: "augment", label: "Hints damaged", num: true, fmt: (v) => (v == null ? "–" : K.f2(v)) },
+      { k: "yolo_run", label: "Hint YOLO", html: (v) => `<span class="mono">${esc(v || "–")}</span>`, hidden: true },
+      { k: "rounds", label: "Rounds", num: true, get: (r) => r.epochs_done, html: (v, r) => `${v}/${r.epochs_cfg}` },
+      { k: "best", label: "Best check", num: true, get: (r) => (r.best ? r.best.val_dice3d : null), html: (v, r) => (v == null ? "–" : `${K.f4(v)} <span class="faint">@${r.best.epoch}</span>`) },
+      { k: "val", label: "Val 3D Dice", num: true, get: (r) => (r.val ? r.val.dice3d_mean : null), fmt: K.f4 },
+      { k: "test", label: "Test 3D Dice", num: true, get: (r) => (r.test ? r.test.dice3d_mean : null), fmt: K.f4, bar: { max: 1, color: "var(--medsam2)" } },
+      { k: "gain", label: "Test gain", num: true, get: (r) => (r.test ? r.test.delta_mean : null), html: (v) => (v == null ? "–" : K.deltaHtml(v)) },
+      { k: "hh", label: "Helped / hurt", get: (r) => (r.test ? `${r.test.helped} / ${r.test.hurt}` : "–") },
+      { k: "time", label: "Train time", num: true, get: (r) => r.train_seconds, fmt: K.secs },
+      { k: "created", label: "Started", get: (r) => K.when(r.created) },
+    ];
+    if (!S.tables.runs) {
+      S.tables.runs = K.table($("runsTable"), cols, { rows: S.runs, key: (r) => r.id, exportName: "medsam2_runs", short: true, pageSize: 25, selected: S.sel,
+        onRow: (r, e) => { if (!e.target.closest(".cmp")) selectRun(r.id); } });
+      $("runsTable").addEventListener("change", (e) => {
+        const cb = e.target.closest(".cmp");
+        if (!cb) return;
+        if (cb.checked && S.cmp.size >= 4) { cb.checked = false; return K.toast("Up to 4 runs at a time."); }
+        cb.checked ? S.cmp.add(cb.dataset.id) : S.cmp.delete(cb.dataset.id);
+        toHash(); renderCurves(); $("cmpNote").textContent = S.cmp.size ? `Ticked: ${[...S.cmp].join(", ")}` : "";
+      });
+    } else { S.tables.runs.state.selected = S.sel; S.tables.runs.update(S.runs); }
+  }
+  async function loadRun(id) { const r = await runApi(id); S.cache[id] = r; return r; }
+  async function selectRun(id, keep) {
+    if (S.sel !== id && !keep) { S.prof = null; S.z = null; }
+    S.sel = id; S.evalData = {}; S.range = null;
+    toHash();
+    if (S.tables.runs) { S.tables.runs.state.selected = id; S.tables.runs.render(); }
+    try { S.run = await loadRun(id); } catch (e) { K.fail(e); return; }
+    renderAnalysis();
   }
 
-  /* ------------------------------------------------------------------ live run */
-  const STAGES = [["prompts", "1. Work out the hints"], ["train", "2. Train"],
-                  ["evaluate", "3. Final check"], ["done", "4. Done"]];
-
-  function renderLive(run) {
-    const st = (run && run.status) || {};
-    const live = ["queued", "running"].includes(st.state);
-    $("liveId").textContent = run ? run.id : "";
-    $("liveSub").innerHTML = run
-      ? `<span class="badge ${stateClass(st.state)}">${esc(stateWord(st.state))}</span>
-         ${esc(run.checkpoint)} · prompt <b>${esc(run.variant)}</b> from YOLO <code>${esc(run.yolo_run)}</code>
-         · started ${esc((st.started || run.created || "").replace("T", " "))}
-         ${st.error ? `<span class="err">${esc(st.error)}</span>` : ""}`
-      : "No run yet.";
-    const at = STAGES.findIndex(([k]) => k === (st.stage || "prompts"));
-    const finished = st.state === "done";
-    $("stepper").innerHTML = STAGES.map(([key, label], i) => {
-      // A finished run has every stage behind it, including "Done" itself — without this the
-      // last bar sits at the half-way default, because no branch below fills it in.
-      let pctDone = finished ? 100 : i < at ? 100 : i > at ? 0 : 50;
-      let sub = "";
-      if (key === "prompts" && st.prompt_total) {
-        pctDone = i === at ? (100 * st.prompt_done) / st.prompt_total : pctDone;
-        sub = `${st.prompt_done} of ${st.prompt_total} patients`;
-      } else if (key === "train" && st.epochs) {
-        pctDone = i === at ? (100 * (st.epoch - 1 + (st.batch || 0) / (st.batches || 1))) / st.epochs : pctDone;
-        sub = `round ${st.epoch} of ${st.epochs}${st.batches ? ` · step ${st.batch} of ${st.batches}` : ""}`;
-      } else if (key === "evaluate" && st.eval_total) {
-        pctDone = i === at ? (100 * st.eval_done) / st.eval_total : pctDone;
-        sub = `${st.eval_done} of ${st.eval_total} patients (${esc(st.eval_split || "")})`;
-      }
-      const bad = st.state === "failed" || st.state === "interrupted";
-      const cls = bad && i === at ? "bad" : finished || i < at ? "done" : i === at ? "cur" : "";
-      return `<li class="${cls}"><b>${esc(label)}</b>
-        <div class="step-bar"><i style="width:${Math.max(0, Math.min(100, pctDone))}%"></i></div>
-        <em>${esc(sub)}</em></li>`;
-    }).join("");
-
-    const k = [];
-    if (st.started) {
-      const end = st.finished ? new Date(st.finished) : new Date();
-      k.push(["Time so far", secs((end - new Date(st.started)) / 1000)]);
-    }
-    if (st.epoch_time) k.push(["Time per round", secs(st.epoch_time), `${st.epoch || 0} rounds done`]);
-    if (st.epoch_time && st.epochs && st.epoch) {
-      k.push(["Training time left", secs(st.epoch_time * (st.epochs - st.epoch)), "a guess; it can stop earlier"]);
-    }
-    if (st.loss != null) k.push(["Loss now", f4(st.loss), "lower is better"]);
-    if (st.best_val_dice3d != null) k.push(["Best check score", f4(st.best_val_dice3d), "3D Dice on the check pool"]);
-    if (st.since_best != null) k.push(["Rounds since the best", st.since_best, `stops at ${run.config ? run.config.train.patience : "—"}`]);
-    if (st.train_clips) k.push(["Clips per round", st.train_clips.toLocaleString(), `${st.train_patients} patients`]);
-    $("liveKpis").innerHTML = k.map(([l, v, s]) => kpi(l, v, s)).join("");
-    $("btnStop").disabled = !live;
-    $("btnResume").disabled = !run || live || !run.has_last;
-    $("btnRescore").disabled = !run || live || !run.has_best;
-  }
-  const kpi = (label, value, sub, cls) => `<div class="kpi ${cls || ""}"><span class="kpi-l">${esc(label)}</span>
-    <span class="kpi-v">${value}</span>${sub ? `<span class="kpi-s">${esc(sub)}</span>` : ""}</div>`;
-
-  async function pullLog(force) {
-    if (!S.runId) return;
-    const r = await api(`/api/runs/${S.runId}/log?offset=${force ? 0 : S.logOffset}`).catch(() => null);
+  // ------------------------------------------------------------------ analysis
+  function renderAnalysis() {
+    const r = S.run;
     if (!r) return;
-    const pre = $("log");
-    if (force) pre.textContent = "";
-    S.logOffset = r.offset;
-    if (r.text) {
-      const filter = $("logFilter").value.trim();
-      const text = filter ? r.text.split("\n").filter((l) => l.includes(filter)).join("\n") : r.text;
-      pre.textContent = (force ? "" : pre.textContent) + text;
-      if ($("logFollow").checked) pre.scrollTop = pre.scrollHeight;
-    }
-    if (!pre.textContent) pre.textContent = "(nothing yet)";
+    $("analysis").classList.remove("hidden");
+    $("selId").textContent = r.id;
+    const c = r.config;
+    $("selSub").innerHTML = `${badge(r.state)} ${esc(c.model.checkpoint)} · ${esc(c.train.unfreeze)} · hints from YOLO <code>${esc(c.prompt.yolo_run)}</code> at conf ${c.prompt.yolo_conf} · ${r.epochs_done} round(s)${r.smoke ? " · quick test" : ""}${r.error ? ` · <span class="bad">${esc(r.error)}</span>` : ""}`;
+    $("toResults").href = `/results/#pool=test&m=${encodeURIComponent(r.id)}`;
+    const t = r.eval && r.eval.test, v = r.eval && r.eval.val, res = r.results || {};
+    $("kpis").innerHTML = [
+      K.kpi("Test 3D Dice", t ? K.f4(t.dice3d_mean) : "–", t ? `YOLO hint ${K.f4(t.yolo_dice3d_mean)} · ${t.patients} patients` : "after the final check", { hero: true }),
+      K.kpi("Test gain over the hint", t ? K.deltaHtml(t.delta_mean) : "–", t ? `median ${K.signed(t.delta_median)} · helped ${t.helped} / hurt ${t.hurt}` : ""),
+      K.kpi("Val 3D Dice", v ? K.f4(v.dice3d_mean) : "–", v ? `hint ${K.f4(v.yolo_dice3d_mean)} · best cut-off ${v.best_threshold}` : ""),
+      K.kpi("Best round check", r.best ? K.f4(r.best.val_dice3d) : "–", r.best ? `round ${r.best.epoch} · ${c.data.val_patients} check patients` : "", { spark: res.val_dice3d, sparkColor: "var(--medsam2)" }),
+      K.kpi("Tumour slices found", t ? K.pct(t.sensitivity) : "–", t ? `empty kept empty ${K.pct(t.specificity)}` : ""),
+      K.kpi("Training time", K.secs(r.train_seconds), r.epochs_done ? `${K.secs(r.train_seconds / r.epochs_done)} per round` : ""),
+    ].join("");
+    renderCurves(); renderEval();
+    loadPatients();
   }
-
-  /* ------------------------------------------------------------------ training curves */
-  function drawCurves() {
-    const ids = S.compare.size ? [...S.compare] : (S.runId ? [S.runId] : []);
-    Promise.all(ids.map((id) => api(`/api/runs/${id}`).catch(() => null))).then((runs) => {
-      const got = runs.filter((r) => r && r.results && r.results.epoch);
-      const box = $("curves");
-      box.innerHTML = "";
-      if (!got.length) { box.innerHTML = '<p class="dim">No rounds finished yet.</p>'; return; }
-      const palette = [COL.medsam2, COL.yolo, COL.val];
-      const chart = (title, cols, yLabel, extra) => {
-        const div = document.createElement("div");
-        div.innerHTML = `<h3>${esc(title)}</h3>`;
-        box.appendChild(div);
-        const target = document.createElement("div");
-        div.appendChild(target);
-        const series = [];
-        got.forEach((r, i) => cols.forEach(([key, name], j) => {
-          if (!r.results[key]) return;
-          series.push({
-            name: got.length > 1 ? `${r.id.slice(-6)} ${name}` : name,
-            color: cols.length > 1 ? [COL.medsam2, COL.yolo, COL.gt, COL.val][j] : palette[i % 3],
-            dash: got.length > 1 && i ? (i === 1 ? "4 3" : "1 3") : null,
-            points: r.results.epoch.map((e, n) => [e, r.results[key][n]]),
-          });
-        }));
-        Charts.line(target, { series, height: 230, xLabel: "Round (epoch)", yLabel, ...(extra || {}) });
-      };
-      chart("Check score after each round", [["val_dice3d", "3D Dice on the check pool"]], "3D Dice (higher is better)");
-      chart("Total loss", [["loss", "loss"]], "Loss (lower is better)");
-      chart("What the loss is made of", [["dice", "overlap (Dice)"], ["bce", "per pixel (BCE)"],
-        ["iou", "quality head"], ["obj", "is there tumour"]], "Loss part");
-      chart("Learning rate", [["lr", "learning rate"]], "Step size");
-      chart("Seconds per round", [["time", "seconds"]], "Seconds");
+  async function renderCurves() {
+    const ids = [...S.cmp];
+    const comparing = ids.length >= 2;
+    const runs = comparing ? await Promise.all(ids.map((id) => S.cache[id] || loadRun(id).catch(() => null))) : [S.run];
+    const valid = runs.filter((r) => r && r.results && r.results.epoch && r.results.epoch.length);
+    const charts = [["val_dice3d", "Check score (3D Dice on the check pool)", "3D Dice"], ["loss", "Total loss", "Loss"], ["dice", "Overlap loss (Dice part)", "Loss"],
+                    ["bce", "Pixel loss (BCE part)", "Loss"], ["obj", "Is there tumour? (object head)", "Loss"], ["lr", "Learning rate", "Step size"]];
+    $("curves").innerHTML = charts.map((c, i) => `<div class="s6"><h3>${esc(c[1])}</h3><div id="mc${i}"></div></div>`).join("");
+    $("curvesSub").textContent = comparing ? `Comparing ${valid.length} runs: ${ids.join(", ")}.` : "One point per round; hover one chart to read all of them; drag to zoom.";
+    if (!valid.length) { $("curves").innerHTML = `<div class="s12 empty">No round has finished yet.</div>`; return; }
+    charts.forEach(([col, , y], i) => {
+      const series = valid.map((r, k) => ({ name: comparing ? r.id : col, color: comparing ? CMP[k] : i ? "var(--medsam2)" : "var(--test)", dash: k ? ["6 4", "2 3", "8 3 2 3"][k - 1] : null, dots: true,
+        points: r.results.epoch.map((e, j) => [e, (r.results[col] || [])[j]]) }));
+      const best = !comparing && S.run.best ? [{ x: S.run.best.epoch, label: `best: ${S.run.best.epoch}` }] : [];
+      Charts.line($(`mc${i}`), { series, sync: "med-rounds", height: 210, xName: "round", xLabel: "Round", yLabel: y, markers: best, legend: comparing, exportName: `${S.sel}_${col}`,
+        yFmt: col === "lr" ? (v) => v.toExponential(1) : undefined });
     });
   }
-
-  /* ------------------------------------------------------------------ results */
-  function renderEval(run) {
-    $("evalRunId").textContent = run ? run.id : "";
-    const ev = run && run.eval;
-    // A run compared on val only (`--splits val`) has no test pool: show its val numbers.
-    const onVal = !!(ev && !ev.test && ev.val);
-    const test = ev && (ev.test || ev.val);
-    const kp = $("evalKpis");
-    if (!test) {
-      kp.innerHTML = '<p class="dim">This run has not been scored yet. Press “Score again” once it has a best round.</p>';
-      $("chSweep").innerHTML = "";
-      $("confusion").innerHTML = "";
-      return;
-    }
-    kp.innerHTML = [
-      kpi("3D Dice — MedSAM2", `<b>${f4(test.dice3d_mean)}</b>`, `${test.patients} ${onVal ? "val (not scored on test)" : "test"} patients · median ${f4(test.dice3d_median)}`, "hero"),
-      kpi("3D Dice — YOLO alone", f4(test.yolo_dice3d_mean), `median ${f4(test.yolo_dice3d_median)}`),
-      kpi("Change", deltaCell(test.delta_mean), `median ${test.delta_median >= 0 ? "+" : ""}${f4(test.delta_median)}`,
-        test.delta_mean >= 0 ? "" : "warnk"),
-      kpi("Patients helped", `${test.helped}`, `${test.hurt} hurt · ${test.unchanged} unchanged`),
-      kpi("Tumour-slice Dice", f4(test.tumour_slice_dice), "slices that really have tumour"),
-      kpi("Old-style slice Dice", f4(test.legacy_slice_dice), `YOLO alone: ${f4(test.yolo_legacy_slice_dice)}`),
-      kpi("Found a tumour slice", pct(test.sensitivity), "of slices with tumour"),
-      kpi("Left empty slices empty", pct(test.specificity), "of slices without tumour"),
-      kpi("Cut-off used", test.threshold, `best here: ${test.best_threshold}${ev.val ? ` · best on check: ${ev.val.best_threshold}` : ""}`),
+  const evalData = (split) => (S.evalData[split] ||= runApi(S.sel, `/eval/${split}`).catch(() => null));
+  async function renderEval() {
+    K.$$("#splitSeg button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.split));
+    const r = S.run, ev = r.eval, sum = ev && ev[S.split];
+    const clear = (msg) => { $("evalKpis").innerHTML = `<p class="empty">${msg}</p>`; ["sweepChart", "confusion", "pairChart", "deltaChart", "sizeGain", "scoreGain", "patTable"].forEach((id) => { $(id).innerHTML = ""; }); };
+    if (!sum) return clear(LIVE.includes(r.state) ? "The final check runs after training." : "This run has not been scored on this pool.");
+    const data = await evalData(S.split);
+    if (!data) return clear("The result files were not found.");
+    const recs = data.patients;
+    S.recs = recs;
+    const d = recs.map((p) => p.delta), c = St.bootCI(d), w = St.wilcoxon(d);
+    $("evalKpis").innerHTML = [
+      K.kpi(`MedSAM2 · ${S.split}`, K.f4(sum.dice3d_mean), `median ${K.f4(sum.dice3d_median)} · ${sum.patients} patients`, { hero: true }),
+      K.kpi("YOLO hint alone", K.f4(sum.yolo_dice3d_mean), `median ${K.f4(sum.yolo_dice3d_median)}`),
+      K.kpi("Gain", K.deltaHtml(sum.delta_mean), c ? `95% range ${K.signed(c[0])} … ${K.signed(c[1])}` : ""),
+      K.kpi("Is the gain real?", w ? St.pfmt(w.p) : "–", w ? `Wilcoxon, n = ${w.n}` : ""),
+      K.kpi("Helped / hurt", `${sum.helped} / ${sum.hurt}`, `${sum.unchanged} about the same (±0.01)`),
+      K.kpi("Tumour-slice Dice", K.f4(sum.tumour_slice_dice), `old-style ${K.f4(sum.legacy_slice_dice)} · YOLO ${K.f4(sum.yolo_legacy_slice_dice)}`),
+      K.kpi("Cut-off", sum.threshold, `best here ${sum.best_threshold}${ev.val ? ` · best on val ${ev.val.best_threshold}` : ""}`),
     ].join("");
-
-    const series = [{ name: onVal ? "check (val)" : "test", color: onVal ? COL.val : COL.medsam2,
-                      points: test.sweep.map((s) => [s.threshold, s.dice3d_mean]) }];
-    if (ev.val && !onVal) series.push({ name: "check (val)", color: COL.val, dash: "4 3",
-      points: ev.val.sweep.map((s) => [s.threshold, s.dice3d_mean]) });
-    const markers = [{ x: test.threshold, label: "setting" }];
-    if (ev.val && !onVal) markers.push({ x: ev.val.best_threshold, label: "best on check" });
-    $("chSweep").innerHTML = "";
-    Charts.line($("chSweep"), { series, markers, height: 250,
-      xLabel: "Cut-off on MedSAM2's confidence (logit; 0 = probability 0.5)",
-      yLabel: "Mean 3D Dice per patient" });
-
-    const d = test.detection;
-    $("confusion").innerHTML = `<table class="confusion"><tr><th></th><th>MedSAM2 drew something</th><th>MedSAM2 drew nothing</th></tr>
-      <tr><th>Tumour is there</th><td class="ok">${d.tp.toLocaleString()}<em>found</em></td>
-        <td class="bad">${d.fn.toLocaleString()}<em>missed</em></td></tr>
-      <tr><th>No tumour</th><td class="bad">${d.fp.toLocaleString()}<em>false alarm</em></td>
-        <td class="ok">${d.tn.toLocaleString()}<em>correctly empty</em></td></tr></table>`;
+    const series = ["val", "test"].filter((s) => ev[s]).map((s) => ({ name: `${s} pool`, color: s === "test" ? "var(--test)" : "var(--medsam2)", dash: s === "val" ? "6 4" : null, dots: true, points: ev[s].sweep.map((p) => [p.threshold, p.dice3d_mean]) }));
+    Charts.line($("sweepChart"), { series, height: 240, xLabel: "Cut-off on MedSAM2's logit (0 = probability 0.5)", yLabel: "Mean 3D Dice", exportName: `${S.sel}_sweep`,
+      markers: [{ x: sum.threshold, label: "setting" }, ...(ev.val && ev.val.best_threshold !== sum.threshold ? [{ x: ev.val.best_threshold, label: "best on val", color: "var(--medsam2)" }] : [])] });
+    const dd = sum.detection;
+    $("confusion").innerHTML = `<div class="tbl-wrap short"><table class="tbl"><thead><tr><th></th><th class="num">MedSAM2 drew</th><th class="num">drew nothing</th></tr></thead><tbody>
+      <tr><td>has tumour</td><td class="num good">${dd.tp.toLocaleString()} found</td><td class="num bad">${dd.fn.toLocaleString()} missed</td></tr>
+      <tr><td>no tumour</td><td class="num bad">${dd.fp.toLocaleString()} false</td><td class="num good">${dd.tn.toLocaleString()} empty</td></tr></tbody></table></div>`;
+    $("confNote").textContent = `Found ${K.pct(sum.sensitivity)} of tumour slices; left ${K.pct(sum.specificity)} of empty slices empty. Every brain slice of every ${S.split} patient, counted once.`;
+    renderHelp();
   }
-
-  /* ------------------------------------------------------------------ did it help */
-  function scores() {
-    const ev = S.run && S.run.eval;
-    const part = ev && ev[S.split];
-    return (part && part.patient_scores) || [];
-  }
-
   function renderHelp() {
-    const rows = scores();
-    const paired = $("chPaired");
-    const delta = $("chDelta");
-    paired.innerHTML = delta.innerHTML = "";
-    if (!rows.length) {
-      paired.innerHTML = '<p class="dim">Nothing scored on this pool yet.</p>';
-      $("bestTbl").querySelector("tbody").innerHTML = "";
-      $("worstTbl").querySelector("tbody").innerHTML = "";
-      $("chBySize").innerHTML = $("chByAnchors").innerHTML = "";
-      return;
-    }
-    // The grey "no change" line: points where MedSAM2 scored exactly what YOLO scored.
-    const diagonal = Array.from({ length: 51 }, (_, i) => ({ x: i / 50, y: i / 50, color: COL.muted }));
-    const dots = rows.map((r) => ({
-      x: r.yolo_dice3d, y: r.dice3d, color: r.delta >= 0 ? COL.gain : COL.loss, id: r.id,
-      tip: `<div class="tt-title">${esc(r.id)}</div>
-        ${Charts.row(COL.yolo, "YOLO alone", f4(r.yolo_dice3d))}
-        ${Charts.row(COL.medsam2, "MedSAM2", f4(r.dice3d))}
-        ${Charts.row(r.delta >= 0 ? COL.gain : COL.loss, "change", (r.delta >= 0 ? "+" : "") + f4(r.delta))}`,
-    }));
-    Charts.scatter(paired, { points: [...diagonal, ...dots], height: 300, yMin: 0, yMax: 1,
-      xLabel: "3D Dice — YOLO alone", yLabel: "3D Dice — after MedSAM2",
-      onClick: (p) => { if (p.id) { S.patient = p.id; $("pSplit").value = S.split; loadPatients().then(runProfile); } } });
-    Charts.histogram(delta, { values: rows.map((r) => r.delta), bins: 31, height: 300,
-      xLabel: "Change in 3D Dice (MedSAM2 minus YOLO)", yLabel: "Patients", color: COL.medsam2 });
-
-    const table = (el, list) => {
-      el.querySelector("thead").innerHTML = `<tr><th>Patient</th><th class="num">YOLO</th>
-        <th class="num">MedSAM2</th><th class="num">Change</th><th class="num">Tumour (voxels)</th></tr>`;
-      el.querySelector("tbody").innerHTML = list.map((r) => `<tr data-id="${esc(r.id)}">
-        <td><code>${esc(r.id)}</code></td><td class="num">${f4(r.yolo_dice3d)}</td>
-        <td class="num">${f4(r.dice3d)}</td><td class="num">${deltaCell(r.delta)}</td>
-        <td class="num">${r.gt_total.toLocaleString()}</td></tr>`).join("");
-      el.querySelectorAll("tbody tr").forEach((tr) => tr.addEventListener("click", () => {
-        S.patient = tr.dataset.id; $("pSplit").value = S.split; loadPatients().then(runProfile);
-      }));
-    };
-    const sorted = [...rows].sort((a, b) => b.delta - a.delta);
-    table($("bestTbl"), sorted.slice(0, 10));
-    table($("worstTbl"), sorted.slice(-10).reverse());
-
-    $("chBySize").innerHTML = $("chByAnchors").innerHTML = "";
-    Charts.scatter($("chBySize"), {
-      points: rows.filter((r) => r.gt_total > 0).map((r) => ({
-        x: r.gt_total, y: r.delta, color: r.delta >= 0 ? COL.gain : COL.loss,
-        tip: `<div class="tt-title">${esc(r.id)}</div>${Charts.row(COL.medsam2, "change", f4(r.delta))}
-              ${Charts.row(COL.gt, "tumour voxels", r.gt_total.toLocaleString())}` })),
-      logX: true, height: 260, xLabel: "Tumour size (voxels, log scale)", yLabel: "Change in 3D Dice",
-    });
-    Charts.scatter($("chByAnchors"), {
-      points: rows.map((r) => ({
-        x: r.score_mean, y: r.delta, color: r.delta >= 0 ? COL.gain : COL.loss,
-        tip: `<div class="tt-title">${esc(r.id)}</div>${Charts.row(COL.yolo, "mean YOLO score", f2(r.score_mean))}
-              ${Charts.row(COL.medsam2, "change", f4(r.delta))}` })),
-      height: 260, xLabel: "YOLO's mean best-blob score over the patient's slices", yLabel: "Change in 3D Dice",
-    });
+    const recs = S.recs || [];
+    const col = (x) => (x > 0.01 ? "var(--good)" : x < -0.01 ? "var(--bad)" : "var(--neutral)");
+    const tip = (p) => `${K.tipTitle(p.id)}${K.tipRow(K.color("var(--neutral)"), "YOLO hint", K.f4(p.yolo_dice3d))}${K.tipRow(K.color("var(--medsam2)"), "MedSAM2", K.f4(p.dice3d))}${K.tipRow(K.color(col(p.delta)), "change", K.signed(p.delta))}${K.tipRow(K.color("var(--faint)"), "tumour", `${K.fmt(p.gt_total / 1000)} mL`)}`;
+    Charts.scatter($("pairChart"), { points: recs.map((p) => ({ x: p.yolo_dice3d, y: p.dice3d, id: p.id, color: col(p.delta), tip: tip(p) })), diagonal: true, xMin: 0, xMax: 1, yMin: 0, yMax: 1,
+      xLabel: "YOLO hint 3D Dice", yLabel: "MedSAM2 3D Dice", height: 320, highlight: S.pPatient, exportName: `${S.sel}_pairs`, onClick: (p) => openPatient(p.id),
+      legend: [{ name: "helped", color: "var(--good)" }, { name: "about the same", color: "var(--neutral)" }, { name: "hurt", color: "var(--bad)" }] });
+    Charts.hist($("deltaChart"), { series: [{ name: "patients", color: "var(--medsam2)", values: recs.map((p) => p.delta) }], bins: 41, xLabel: "Change in 3D Dice (MedSAM2 − hint)", yLabel: "Patients",
+      height: 320, brush: true, range: S.range, markers: [{ x: 0, label: "no change", color: "var(--faint)" }, { x: St.mean(recs.map((p) => p.delta)), label: "mean", color: "var(--medsam2)" }],
+      exportName: `${S.sel}_change`, onBrush: (lo, hi) => { S.range = lo == null ? null : [lo, hi]; renderPatTable(); } });
+    const buckets = [[0, 10], [10, 30], [30, 60], [60, 100], [100, Infinity]];
+    const byB = buckets.map(([a, b]) => recs.filter((p) => p.gt_total / 1000 >= a && p.gt_total / 1000 < b));
+    Charts.bars($("sizeGain"), { cats: buckets.map(([a, b], i) => `${b === Infinity ? `≥ ${a}` : `${a}–${b}`} mL (n=${byB[i].length})`), yLabel: "Mean 3D Dice", yMin: 0, yMax: 1, fmt: K.f3, height: 260, legend: true, exportName: `${S.sel}_gain_by_size`,
+      series: [{ name: "YOLO hint", color: "var(--neutral)", stripes: true, values: byB.map((g) => St.mean(g.map((p) => p.yolo_dice3d))), err: byB.map((g) => St.bootCI(g.map((p) => p.yolo_dice3d), St.mean, 400)) },
+               { name: "MedSAM2", color: "var(--medsam2)", values: byB.map((g) => St.mean(g.map((p) => p.dice3d))), err: byB.map((g) => St.bootCI(g.map((p) => p.dice3d), St.mean, 400)) }] });
+    Charts.scatter($("scoreGain"), { points: recs.map((p) => ({ x: St.mean(p.score.filter((s) => s > 0)) || 0, y: p.delta, id: p.id, color: col(p.delta), tip: tip(p) })), trend: true, hlines: [{ y: 0 }],
+      xLabel: "YOLO's mean blob score on slices it drew", yLabel: "Change in 3D Dice", height: 260, exportName: `${S.sel}_gain_vs_score`, onClick: (p) => openPatient(p.id) });
+    renderPatTable();
+  }
+  function renderPatTable() {
+    const rows = (S.recs || []).filter((p) => !S.range || (p.delta >= S.range[0] && p.delta <= S.range[1]));
+    const cols = [
+      { k: "id", label: "Patient", html: (v) => `<span class="mono">${esc(v)}</span>` },
+      { k: "yolo_dice3d", label: "YOLO hint", num: true, fmt: K.f4 },
+      { k: "dice3d", label: "MedSAM2", num: true, fmt: K.f4, bar: { max: 1, color: "var(--medsam2)" } },
+      { k: "delta", label: "Change", num: true, html: (v) => K.deltaHtml(v), raw: (r) => r.delta },
+      { k: "gt_total", label: "Tumour (mL)", num: true, get: (p) => p.gt_total / 1000, fmt: K.fmt },
+      { k: "anchor", label: "Start slice", num: true, get: (p) => (p.anchor_z || [])[0] },
+      { k: "missed", label: "Missed slices", num: true, get: (p) => p.gt.filter((g, i) => g && !p.pred[i]).length },
+      { k: "false", label: "False slices", num: true, get: (p) => p.gt.filter((g, i) => !g && p.pred[i]).length },
+    ];
+    if (!S.tables.pat) S.tables.pat = K.table($("patTable"), cols, { rows, key: (p) => p.id, onRow: (p) => openPatient(p.id), exportName: `${S.sel}_${S.split}_patients`, sort: { k: "delta", dir: 1 }, selected: S.pPatient });
+    else { S.tables.pat.state.selected = S.pPatient; S.tables.pat.update(rows); }
   }
 
-  function downloadCsv() {
-    const rows = scores();
-    if (!rows.length) return;
-    const head = ["patient", "yolo_dice3d", "medsam2_dice3d", "delta", "gt_voxels",
-                  "mean_yolo_score", "start_slice_z"];
-    const body = rows.map((r) => [r.id, r.yolo_dice3d, r.dice3d, r.delta, r.gt_total,
-                                  r.score_mean, r.anchor_z].join(","));
-    const blob = new Blob([[head.join(","), ...body].join("\n")], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${S.runId}_${S.split}_per_patient.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
-  /* ------------------------------------------------------------------ one patient */
+  // ------------------------------------------------------------------ one patient + slices
   async function loadPatients() {
-    const split = $("pSplit").value;
-    const r = await api(`/api/pool_patients?split=${split}`).catch(() => ({ patients: [] }));
-    S.patients = r.patients;
-    const keep = S.patients.includes(S.patient) ? S.patient : S.patients[0];
-    S.patient = keep;
-    fillSelect($("pPatient"), S.patients.map((p) => ({ value: p, label: p })));
-    $("pPatient").value = keep || "";
-    writeHash();
+    const ids = await (S.patients[S.pSplit] ||= api(`api/pool_patients?split=${S.pSplit}`).then((d) => d.patients).catch(() => []));
+    if (!S.pPatient || !ids.includes(S.pPatient)) S.pPatient = null;
+    $("pSplit").value = S.pSplit;
+    $("pWhich").value = S.which;
+    $("pPatient").innerHTML = ids.map((id) => `<option ${id === S.pPatient ? "selected" : ""}>${esc(id)}</option>`).join("");
+    if (S.pPatient && (!S.prof || S.prof.id !== S.pPatient)) showPatient();
   }
-
-  async function runProfile() {
-    if (!S.runId || !S.patient) return;
-    const which = $("pWhich").value;
-    const split = $("pSplit").value;
-    $("profileNote").textContent = "Working…";
-    let prof = null;
-    if (which === "best.pt" && (split === "test" || split === "val")) {
-      prof = await api(`/api/runs/${S.runId}/eval/${split}?patient=${encodeURIComponent(S.patient)}`).catch(() => null);
+  function openPatient(id) {
+    S.pSplit = S.split; S.pPatient = id; S.z = null;
+    loadPatients().then(showPatient);
+    $("secPatient").scrollIntoView({ behavior: "smooth" });
+  }
+  async function showPatient() {
+    S.pPatient = $("pPatient").value || S.pPatient;
+    if (!S.pPatient || !S.sel) return;
+    toHash();
+    $("profNote").textContent = "Working…";
+    let p = null;
+    if (S.which === "best.pt" && (S.pSplit === "test" || S.pSplit === "val")) p = await runApi(S.sel, `/eval/${S.pSplit}?patient=${encodeURIComponent(S.pPatient)}`).catch(() => null);
+    if (!p) {
+      try { p = await runApi(S.sel, `/profile.json?patient=${encodeURIComponent(S.pPatient)}&which=${S.which}`); }
+      catch (e) { $("profNote").innerHTML = `<span class="bad">${esc(e.message)}</span>`; return; }
     }
-    if (!prof) {
-      prof = await api(`/api/runs/${S.runId}/profile.json?patient=${encodeURIComponent(S.patient)}&which=${which}`)
-        .catch((e) => { $("profileNote").textContent = e.message; return null; });
-    }
-    if (!prof) return;
-    S.profile = prof;
-    drawProfile(prof);
-    loadSlice(prof.z[argmax(prof.gt)] ?? prof.z[0]);
-  }
-  const argmax = (a) => a.reduce((best, v, i) => (v > a[best] ? i : best), 0);
-
-  function drawProfile(p) {
-    const box = $("chProfile");
-    box.innerHTML = "";
-    Charts.dualLine(box, {
-      height: 330,
-      xLabel: "Slice number (z)", leftLabel: "Dice on this slice", rightLabel: "Tumour pixels on this slice",
-      leftMin: 0, leftMax: 1,
-      series: [
-        // one colour per model, solid for Dice and dashed for pixels, so a glance tells you
-        // whose line it is and the dash tells you which axis it belongs to
-        { name: "Dice — MedSAM2", color: COL.medsam2, points: p.z.map((z, i) => [z, p.dice[i]]) },
-        { name: "Dice — YOLO", color: COL.yolo, points: p.z.map((z, i) => [z, p.yolo_dice[i]]) },
-        { name: "pixels — expert", color: COL.gt, axis: "right", points: p.z.map((z, i) => [z, p.gt[i]]) },
-        { name: "pixels — MedSAM2", color: COL.medsam2, axis: "right", dash: "5 4",
-          points: p.z.map((z, i) => [z, p.pred[i]]) },
-        { name: "pixels — YOLO", color: COL.yolo, axis: "right", dash: "5 4",
-          points: p.z.map((z, i) => [z, p.yolo[i]]) },
-      ],
-      marker: S.slice ? S.slice.z : null,
-      onClick: (x) => loadSlice(Math.round(x)),
-      markers: (p.anchor_z || []).map((z) => ({ x: z, label: "start slice", color: COL.anchor })),
-    });
-    $("profileNote").innerHTML = `<b>${esc(p.id)}</b> — 3D Dice: MedSAM2 <b>${f4(p.dice3d)}</b>,
-      YOLO ${f4(p.yolo_dice3d)} (${deltaCell(p.delta)}). ${p.stored ? "From the stored results of the last scoring pass."
-      : "Worked out just now on the graphics card."} Every slice was given YOLO's hint; the purple line is the
-      start slice, the one segmented without memory, from which the two passes run up and down.
-      Click the chart to jump to a slice.`;
-  }
-
-  /* ------------------------------------------------------------------ slice viewer */
-  const panels = () => [...document.querySelectorAll(".panel")].filter((c) => c.checked).map((c) => c.value);
-
-  async function loadSlice(z) {
-    if (!S.runId || !S.patient) return;
-    const which = $("pWhich").value;
-    const q = `patient=${encodeURIComponent(S.patient)}&which=${which}${z != null ? `&z=${z}` : ""}`;
-    const info = await api(`/api/runs/${S.runId}/slice.json?${q}`).catch((e) => {
-      $("sliceSide").innerHTML = `<p class="err">${esc(e.message)}</p>`; return null;
-    });
-    if (!info) return;
-    S.slice = info;
-    const range = $("zRange");
-    range.min = 0;
-    range.max = info.brain_slices.length - 1;
-    range.value = info.brain_slices.indexOf(info.z);
-    $("zLabel").textContent = `z = ${info.z}`;
-    $("sliceImg").src = `${BASE}/api/runs/${S.runId}/slice.png?${q}&panels=${panels().join(",")}&_=${Date.now()}`;
-    $("sliceSide").innerHTML = `<h3>Slice ${info.z}</h3>` + [
-      kpi("Expert tumour pixels", info.gt.toLocaleString()),
-      kpi("MedSAM2", `${f4(info.medsam2.dice)}`, `${info.medsam2.px.toLocaleString()} px drawn · ${info.medsam2.inter.toLocaleString()} right`),
-      kpi("YOLO alone", `${f4(info.yolo.dice)}`, `${info.yolo.px.toLocaleString()} px drawn · ${info.yolo.inter.toLocaleString()} right`),
-      kpi("YOLO's best blob score", f2(info.yolo_score), `${info.blobs} blob(s)`),
-      kpi("MedSAM2 “is there tumour”", f2(info.obj_score), "above 0 means yes"),
-      kpi("This slice", info.is_anchor ? "is the start slice" : "hint + memory",
-          `start slice at z = ${(info.anchor_z || []).join(", ")}`),
+    S.prof = p;
+    $("profNote").innerHTML = p.stored ? "From the stored results of the last scoring pass (no GPU)." : "Worked out just now on the graphics card.";
+    $("profKpis").innerHTML = [
+      K.kpi("MedSAM2 3D Dice", K.f4(p.dice3d), `${esc(p.id)}`, { hero: true }),
+      K.kpi("YOLO hint", K.f4(p.yolo_dice3d), "same slices"),
+      K.kpi("Change", K.deltaHtml(p.delta), ""),
+      K.kpi("Expert tumour", `${K.fmt(p.gt_total / 1000)} mL`, `${p.gt.filter((g) => g).length} slices`),
+      K.kpi("Start slice", (p.anchor_z || []).join(", ") || "–", "segmented without memory"),
     ].join("");
-    if (S.profile) drawProfile(S.profile);
+    const peak = p.z[p.gt.indexOf(Math.max(...p.gt))];
+    if (S.z == null || !p.z.includes(S.z)) S.z = peak;
+    drawProfile();
+    setupSlices();
+  }
+  function drawProfile() {
+    const p = S.prof;
+    if (!p) return;
+    S.charts.prof = Charts.line($("profChart"), { height: 290, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", yMin: 0, yMax: 1, exportName: `${p.id}_slices`,
+      series: [{ name: "Dice · MedSAM2", color: "var(--medsam2)", points: p.z.map((z, i) => [z, p.gt[i] + p.pred[i] ? p.dice[i] : null]) },
+               { name: "Dice · YOLO hint", color: "var(--neutral)", dash: "5 4", points: p.z.map((z, i) => [z, p.gt[i] + p.yolo[i] ? p.yolo_dice[i] : null]) },
+               { name: "expert pixels", color: "var(--gt)", axis: "right", area: true, points: p.z.map((z, i) => [z, p.gt[i]]) },
+               { name: "MedSAM2 pixels", color: "var(--medsam2)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.pred[i]]) }],
+      markers: [{ x: S.z, label: `z ${S.z}`, color: "var(--accent)", solid: true }, ...(p.anchor_z || []).map((z) => ({ x: z, label: "start", color: "var(--medsam2)" }))],
+      onClick: (x) => setZ(Math.round(x)) });
+  }
+  function setupSlices() {
+    const p = S.prof;
+    $("zRange").min = 0; $("zRange").max = p.z.length - 1; $("zRange").value = Math.max(0, p.z.indexOf(S.z));
+    loadSlice();
+  }
+  function setZ(z) {
+    const p = S.prof;
+    if (!p) return;
+    S.z = p.z.reduce((b, v) => (Math.abs(v - z) < Math.abs(b - z) ? v : b), p.z[0]);
+    $("zRange").value = p.z.indexOf(S.z);
+    if (S.charts.prof) S.charts.prof.update({ markers: [{ x: S.z, label: `z ${S.z}`, color: "var(--accent)", solid: true }, ...(p.anchor_z || []).map((zz) => ({ x: zz, label: "start", color: "var(--medsam2)" }))] });
+    toHash();
+    loadSlice();
+  }
+  const panels = () => K.$$(".panel").filter((c) => c.checked).map((c) => c.value);
+  const loadSlice = K.debounce(async () => {
+    if (!S.prof || S.z == null) return;
+    const q = `patient=${encodeURIComponent(S.prof.id)}&which=${S.which}&z=${S.z}`;
+    $("zLabel").textContent = `z = ${S.z}`;
+    $("sliceLoading").classList.remove("hidden");
+    const img = $("sliceImg");
+    img.onload = () => $("sliceLoading").classList.add("hidden");
+    img.onerror = () => { $("sliceLoading").textContent = "This slice could not be drawn."; };
+    img.src = `${BASE}api/runs/${encodeURIComponent(S.sel)}/slice.png?${q}&panels=${panels().join(",")}`;
+    try {
+      const i = await runApi(S.sel, `/slice.json?${q}`);
+      $("sliceSide").innerHTML = [
+        K.kpi("Expert", `${i.gt.toLocaleString()} px`, `slice ${i.z}`),
+        K.kpi("MedSAM2", K.f3(i.medsam2.dice), `${i.medsam2.px.toLocaleString()} px drawn · ${i.medsam2.inter.toLocaleString()} right`, { hero: true }),
+        K.kpi("YOLO", K.f3(i.yolo.dice), `${i.yolo.px.toLocaleString()} px drawn · ${i.yolo.inter.toLocaleString()} right`),
+        K.kpi("YOLO's best blob", K.f2(i.yolo_score), `${i.blobs} blob(s)`),
+        K.kpi("MedSAM2 “tumour here?”", K.f2(i.obj_score), "above 0 = yes"),
+        K.kpi("This slice", i.is_anchor ? "start slice" : "hint + memory", `start at z = ${(i.anchor_z || []).join(", ")}`),
+      ].join("");
+    } catch (e) { $("sliceSide").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+  }, 150);
+  let cine = null;
+  function play() {
+    if (cine) { clearInterval(cine); cine = null; $("zPlay").textContent = "▶ Play"; return; }
+    const p = S.prof;
+    if (!p) return;
+    const tz = p.z.filter((z, i) => p.gt[i] || p.pred[i]);
+    if (!tz.length) return;
+    let k = Math.max(0, tz.indexOf(S.z));
+    $("zPlay").textContent = "■ Stop";
+    cine = setInterval(() => { k = (k + 1) % tz.length; setZ(tz[k]); }, 700);
   }
 
-  function stepSlice(d) {
-    if (!S.slice) return;
-    const i = S.slice.brain_slices.indexOf(S.slice.z) + d;
-    if (i >= 0 && i < S.slice.brain_slices.length) loadSlice(S.slice.brain_slices[i]);
+  // ------------------------------------------------------------------ live
+  function renderLive(run) {
+    const st = run ? run.status : null;
+    const live = st && LIVE.includes(run.state);
+    $("stopBtn").disabled = !live;
+    $("resumeBtn").disabled = !run || live || !!S.active || !run.has_last || run.state === "done";
+    $("rescoreBtn").disabled = !run || live || !!S.active || !run.has_best;
+    $("liveId").textContent = run ? run.id : "";
+    if (!run) { $("liveSub").textContent = "Nothing is running."; $("liveKpis").innerHTML = ""; return; }
+    const stages = ["prompts", "train", "evaluate", "done"];
+    const cur = run.state === "done" ? 3 : Math.max(0, stages.indexOf(st.stage || "prompts"));
+    const prog = { prompts: st.prompt_total ? st.prompt_done / st.prompt_total : 0, train: st.epochs ? ((st.epoch || 1) - 1 + (st.batches ? (st.batch || 0) / st.batches : 0)) / st.epochs : 0,
+      evaluate: st.eval_total ? st.eval_done / st.eval_total : 0, done: run.state === "done" ? 1 : 0 };
+    const txt = { prompts: st.prompt_total ? `${st.prompt_done} of ${st.prompt_total} patients` : "", train: st.epochs ? `round ${st.epoch} of ${st.epochs}${st.batches && cur === 1 ? ` · step ${st.batch}/${st.batches}` : ""}` : "",
+      evaluate: st.eval_total ? `${st.eval_done} of ${st.eval_total}${st.eval_split ? ` (${st.eval_split})` : ""}` : "", done: run.state === "done" ? K.when(st.finished) : "" };
+    K.$$("#stepper li").forEach((li, i) => {
+      const k = li.dataset.stage, bad = !live && run.state !== "done" && i === cur;
+      li.className = i < cur || run.state === "done" ? "done" : i === cur ? (bad ? "bad" : "cur") : "";
+      K.$("i", li).style.width = `${(i < cur ? 1 : i === cur ? prog[k] : 0) * 100}%`;
+      K.$("em", li).textContent = txt[k];
+    });
+    const res = run.results || {};
+    const left = st.epoch_time && st.epochs && cur === 1 ? (st.epochs - (st.epoch || 1) + 1 - (st.batches ? (st.batch || 0) / st.batches : 0)) * st.epoch_time : null;
+    $("liveSub").innerHTML = `${badge(run.state)} weights: ${esc(run.config.train.unfreeze)} · hints from <code>${esc(run.config.prompt.yolo_run)}</code>${run.smoke ? " · quick test" : ""} · started ${esc(K.when(st.started))} (${K.ago(st.started)})${st.error ? ` · <span class="bad">${esc(st.error)}</span>` : ""}`;
+    $("liveKpis").innerHTML = [
+      K.kpi("Time per round", st.epoch_time ? K.secs(st.epoch_time) : "–", `${(res.epoch || []).length} round(s) done`),
+      K.kpi("Time left", left != null ? `≈ ${K.secs(left)}` : "–", left != null ? "a guess; it can stop earlier" : ""),
+      K.kpi("Best check score", st.best_val_dice3d != null ? K.f4(st.best_val_dice3d) : "–", st.val_dice3d != null ? `last ${K.f4(st.val_dice3d)}` : "", { spark: res.val_dice3d, sparkColor: "var(--medsam2)" }),
+      K.kpi("Rounds since the best", st.since_best != null ? st.since_best : "–", `stops at ${run.config.train.patience}`),
+      K.kpi("Loss now", st.loss != null ? K.f4(st.loss) : "–", "lower is better"),
+      K.kpi("Clips per round", st.train_clips ? st.train_clips.toLocaleString() : "–", st.train_patients ? `${st.train_patients} patients` : ""),
+    ].join("");
+    Charts.line($("liveChart"), { height: 230, xLabel: "Round", yLabel: "3D Dice (check)", y2Label: "loss", zoom: false, exportName: `${run.id}_live`, empty: "Waiting for the first round.",
+      series: [{ name: "check 3D Dice", color: "var(--medsam2)", dots: true, points: (res.epoch || []).map((e, j) => [e, res.val_dice3d[j]]) },
+               { name: "loss", color: "var(--faint)", axis: "right", dash: "5 4", points: (res.epoch || []).map((e, j) => [e, res.loss[j]]) }] });
+  }
+  async function pollLog(id) {
+    if (S.logRun !== id) { S.logRun = id; S.logOffset = 0; $("log").textContent = ""; S.logText = ""; }
+    const r = await runApi(id, `/log?offset=${S.logOffset}`);
+    if (r.offset < S.logOffset) S.logText = "";
+    S.logOffset = r.offset;
+    if (r.text) S.logText = ((S.logText || "") + r.text).split("\n").filter((l) => !/Warning|warnings\.warn|forward_call|scaled_dot|Falling back/.test(l)).slice(-3000).join("\n");
+    renderLog();
+  }
+  function renderLog() {
+    const f = $("logFilter").value.trim().toLowerCase();
+    const lines = (S.logText || "").split("\n").filter((l) => !f || l.toLowerCase().includes(f)).slice(-1500);
+    $("log").innerHTML = lines.map((l) => {
+      const cls = /Traceback|Error|failed/i.test(l) ? "err" : /\[eval\]|\(best\)/.test(l) ? "ok" : /^=====|\[run\]/.test(l) ? "hi" : "";
+      return cls ? `<span class="${cls}">${esc(l)}</span>` : esc(l);
+    }).join("\n") || "(nothing yet)";
+    if ($("logFollow").checked) $("log").scrollTop = $("log").scrollHeight;
+  }
+
+  // ------------------------------------------------------------------ start dialog (built from routes.EDITABLE)
+  function openStart() {
+    const ov = S.ov;
+    if (!ov) return;
+    const cfg = ov.config;
+    const val = (k) => k.split(".").reduce((o, p) => (o == null ? o : o[p]), cfg);
+    const groups = {};
+    for (const [k, spec] of Object.entries(ov.editable)) (groups[GROUP[k.split(".")[0]] || "Other"] ||= []).push([k, spec]);
+    const field = ([k, spec]) => {
+      const v = val(k);
+      const id = `f_${k.replace(/\./g, "_")}`;
+      const rb = ov.rebuilds.includes(k) ? ' <span class="warn" title="Changing this rebuilds the YOLO hints">⟳</span>' : "";
+      if (spec.kind === "choice") {
+        const opts = spec.choices.map((c) => `<option value="${esc(c)}" ${String(c) === String(v ?? "") ? "selected" : ""}>${esc(c === "" ? "best scoring (automatic)" : c)}</option>`).join("");
+        return `<label class="field"><span>${esc(LABELS[k] || k)}${rb}</span><select id="${id}" data-k="${k}">${opts}</select><span class="hint mono">${esc(k)}</span></label>`;
+      }
+      return `<label class="field"><span>${esc(LABELS[k] || k)}${rb}</span><input id="${id}" data-k="${k}" type="${spec.kind === "int?" ? "text" : "number"}" step="any" value="${v == null ? "" : v}" ${spec.kind !== "int?" ? `min="${spec.min}" max="${spec.max}"` : `placeholder="all"`}>
+        <span class="hint mono">${esc(k)}</span></label>`;
+    };
+    const html = `<form id="startForm">${Object.entries(groups).map(([g, fs]) => `<h4 style="margin:10px 0 8px">${esc(g)}</h4><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">${fs.map(field).join("")}</div>`).join("")}
+      <div class="row" style="margin-top:12px"><label class="inline"><input type="checkbox" id="fSmoke"> quick test (2 patients, 1 round)</label></div>
+      <p class="callout" id="estimate" style="margin-top:10px"></p><p class="bad" id="formErr"></p>
+      <div class="row"><button class="primary big" type="submit">▶ Start</button><span class="note">Runs as its own process — closing this page does not stop it.</span></div></form>
+      <details style="margin-top:12px"><summary class="dim" style="cursor:pointer">Why each default is what it is — MedSAM2_Finetune/config.yaml</summary><pre class="yaml" id="cfgText" style="margin-top:8px"></pre></details>`;
+    const m = K.modal("Start a MedSAM2 fine-tune", html, { wide: true });
+    const changed = () => K.$$("[data-k]", m.el).filter((el) => String(el.value) !== String(val(el.dataset.k) ?? "")).map((el) => el.dataset.k);
+    const est = () => {
+      const ch = changed();
+      const n = +(K.$('[data-k="data.max_train_patients"]', m.el) || {}).value || ov.pools.train;
+      const clips = n * +(K.$('[data-k="data.clips_per_patient"]', m.el) || { value: 1 }).value;
+      K.$("#estimate", m.el).innerHTML = `About <b>${n}</b> patients per round = <b>${clips.toLocaleString()}</b> clips of ${esc((K.$('[data-k="video.num_frames"]', m.el) || {}).value)} slices. ` +
+        (ch.length ? `Changed: ${ch.map((k) => `<code>${esc(k)}</code>`).join(", ")}.` : "Everything as in config.yaml.") +
+        (ch.some((k) => ov.rebuilds.includes(k)) ? " <b>The YOLO hints will be worked out again</b> for every patient used." : "");
+    };
+    m.el.addEventListener("input", est);
+    est();
+    K.$("#startForm", m.el).addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const overrides = {};
+      for (const k of changed()) overrides[k] = K.$(`[data-k="${k}"]`, m.el).value;
+      const smoke = K.$("#fSmoke", m.el).checked;
+      if (!confirm(`Start ${smoke ? "a quick test" : "a MedSAM2 fine-tune"}${Object.keys(overrides).length ? ` with ${Object.keys(overrides).length} changed setting(s)` : ""}? It uses the GPU until it finishes or you press Stop.`)) return;
+      try {
+        const r = await api("api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overrides, smoke }) });
+        m.close(); K.toast(`Started run <b>${esc(r.id)}</b>.`, "good");
+        await loadOverview(); selectRun(r.id); $("secLive").scrollIntoView({ behavior: "smooth" });
+      } catch (err) { K.$("#formErr", m.el).textContent = err.message; }
+    });
+    K.$("#cfgText", m.el).textContent = ov.config_text || "";
+  }
+  async function diffSettings() {
+    const ids = [...S.cmp].slice(0, 4);
+    if (ids.length < 2) return K.toast("Tick at least two runs first.");
+    const runs = await Promise.all(ids.map((id) => S.cache[id] || loadRun(id)));
+    const flat = (o, p = "") => Object.entries(o || {}).flatMap(([k, v]) => (v && typeof v === "object" && !Array.isArray(v) ? flat(v, `${p}${k}.`) : [[`${p}${k}`, JSON.stringify(v)]]));
+    const maps = runs.map((r) => Object.fromEntries(flat(r.config).filter(([k]) => !k.startsWith("run."))));
+    const keys = [...new Set(maps.flatMap((m) => Object.keys(m)))].filter((k) => new Set(maps.map((m) => m[k])).size > 1).sort();
+    K.modal("Settings that differ", keys.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Setting</th>${ids.map((id) => `<th class="mono">${esc(id)}</th>`).join("")}</tr></thead><tbody>
+      ${keys.map((k) => `<tr><td class="mono">${esc(k)}</td>${maps.map((m) => `<td class="mono">${esc(m[k] ?? "–")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      <p class="note">Test 3D Dice: ${runs.map((r) => `${esc(r.id)} ${r.test ? K.f4(r.test.dice3d_mean) : "–"}`).join(" · ")}. For a paired test of two runs use the Results page (Run against run).</p>` : "<p>These runs used the same settings.</p>", { wide: true });
+  }
+
+  // ------------------------------------------------------------------ polling
+  let pollT = null;
+  async function poll() {
+    clearTimeout(pollT);
+    try {
+      const was = S.active;
+      await loadOverview();
+      if (was && !S.active) K.toast(`Run <b>${esc(was)}</b> has ended.`, "good", 9000);
+      const liveId = S.active || S.sel;
+      if (liveId) {
+        const run = await loadRun(liveId);
+        renderLive(run);
+        await pollLog(liveId);
+        if (liveId === S.sel) {
+          const prev = S.run;
+          S.run = run;
+          if (!prev || prev.epochs_done !== run.epochs_done || prev.state !== run.state || !!prev.eval !== !!run.eval) {
+            if (prev && !!prev.eval !== !!run.eval) S.evalData = {};
+            renderAnalysis();
+          }
+        }
+      }
+      document.title = S.active ? "● MedSAM2_Finetune · BraTS viewer" : "MedSAM2_Finetune · BraTS viewer";
+    } catch (e) { console.error(e); }
+    pollT = setTimeout(poll, document.hidden ? 15000 : S.active ? 3000 : 9000);
+  }
+
+  // ------------------------------------------------------------------ wiring
+  function wire() {
+    $("newRunBtn").addEventListener("click", openStart);
+    $("diffBtn").addEventListener("click", diffSettings);
+    $("splitSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b && b.dataset.v !== S.split) { S.split = b.dataset.v; S.range = null; toHash(); renderEval(); } });
+    $("cfgBtn").addEventListener("click", () => S.run && K.modal(`Settings of ${S.run.id}`, `<pre class="yaml">${esc(JSON.stringify(S.run.config, null, 2))}</pre>`, { wide: true }));
+    $("csvBtn").addEventListener("click", () => {
+      const rows = S.recs || [];
+      K.download(`${S.sel}_${S.split}_patients.csv`, K.csv(rows, [{ k: "id", label: "patient" }, { k: "yolo_dice3d", label: "yolo_hint_dice3d" }, { k: "dice3d", label: "medsam2_dice3d" },
+        { k: "delta", label: "change" }, { label: "gt_ml", raw: (p) => p.gt_total / 1000 }, { label: "start_slice", raw: (p) => (p.anchor_z || [])[0] }]), "text/csv");
+    });
+    const act = async (kind, q) => {
+      if (!confirm(q)) return;
+      try { await api(`api/runs/${encodeURIComponent(S.sel)}/${kind}`, { method: "POST" }); K.toast("Started.", "good"); poll(); } catch (e) { K.fail(e); }
+    };
+    $("resumeBtn").addEventListener("click", () => act("resume", "Continue training from last.pt?"));
+    $("rescoreBtn").addEventListener("click", () => act("evaluate", "Score best.pt again on the whole val and test pools?"));
+    $("stopBtn").addEventListener("click", async () => {
+      const id = S.active;
+      if (!id || !confirm(`Stop run ${id}? You can continue it later with Resume.`)) return;
+      try { await api(`api/runs/${encodeURIComponent(id)}/stop`, { method: "POST" }); K.toast(`Stopped ${esc(id)}.`); } catch (e) { K.fail(e); }
+      poll();
+    });
+    $("logFilter").addEventListener("input", renderLog);
+    $("logDl").addEventListener("click", () => K.download(`${S.logRun || "run"}_log.txt`, S.logText || ""));
+    $("pSplit").addEventListener("change", (e) => { S.pSplit = e.target.value; S.pPatient = null; loadPatients(); });
+    $("pWhich").addEventListener("change", (e) => { S.which = e.target.value; showPatient(); });
+    $("pPatient").addEventListener("change", (e) => { S.pPatient = e.target.value; S.z = null; toHash(); });
+    $("pRun").addEventListener("click", () => { S.z = null; showPatient(); });
+    $("zRange").addEventListener("input", (e) => S.prof && setZ(S.prof.z[+e.target.value]));
+    $("zPlay").addEventListener("click", play);
+    K.$$(".panel").forEach((c) => c.addEventListener("change", loadSlice));
+    K.key("n", "Start a new run", () => !$("newRunBtn").disabled && openStart());
+    K.key("arrowleft", "Previous slice", () => S.prof && setZ(S.prof.z[Math.max(0, S.prof.z.indexOf(S.z) - 1)]));
+    K.key("arrowright", "Next slice", () => S.prof && setZ(S.prof.z[Math.min(S.prof.z.length - 1, S.prof.z.indexOf(S.z) + 1)]));
+    K.key("p", "Play / stop the slices", play);
+    K.key("[", "Previous patient", () => stepPatient(-1));
+    K.key("]", "Next patient", () => stepPatient(1));
+    K.command("Start a new MedSAM2 run", openStart, { group: "MedSAM2", hint: "N" });
+    K.command("Compare settings of the ticked runs", diffSettings, { group: "MedSAM2" });
+    K.provider((q) => [
+      ...S.runs.filter((r) => r.id.includes(q)).slice(0, 6).map((r) => ({ label: `Open run ${r.id}`, hint: r.test ? `test ${K.f4(r.test.dice3d_mean)}` : WORD[r.state], group: "Runs", run: () => selectRun(r.id) })),
+      ...(S.recs || []).filter((p) => p.id.toLowerCase().includes(q)).slice(0, 8).map((p) => ({ label: `Open patient ${p.id}`, hint: `change ${K.signed(p.delta, 3)}`, group: "Patients", run: () => openPatient(p.id) })),
+    ]);
+    window.addEventListener("hashchange", () => { const was = S.sel; fromHash(); if (S.sel && S.sel !== was) selectRun(S.sel, true); });
   }
   function stepPatient(d) {
-    const i = S.patients.indexOf(S.patient) + d;
-    if (i >= 0 && i < S.patients.length) {
-      S.patient = S.patients[i];
-      $("pPatient").value = S.patient;
-      writeHash();
-      runProfile();
-    }
+    const opts = [...$("pPatient").options].map((o) => o.value);
+    const i = opts.indexOf(S.pPatient) + d;
+    if (i >= 0 && i < opts.length) { S.pPatient = opts[i]; $("pPatient").value = opts[i]; S.z = null; showPatient(); }
   }
 
-  /* ------------------------------------------------------------------ wiring */
-  async function selectRun(id) {
-    S.runId = id;
-    S.logOffset = 0;
-    writeHash();
-    renderRuns();
-    await loadRun();
-  }
-
-  async function loadRun() {
-    if (!S.runId) { renderLive(null); renderEval(null); return; }
-    S.run = await api(`/api/runs/${S.runId}`).catch(() => null);
-    renderLive(S.run);
-    renderEval(S.run);
-    renderHelp();
-    drawCurves();
-    await pullLog(true);
-  }
-
-  async function refresh() {
-    S.overview = await api("/api/overview");
-    $("topSub").innerHTML = `Pools: <b>${S.overview.pools.train}</b> train ·
-      <b>${S.overview.pools.val}</b> check · <b>${S.overview.pools.test}</b> test patients ·
-      ${S.overview.yolo_runs.length} YOLO run(s) available · ${S.overview.runs.length} fine-tune(s) here`;
-    const c = S.overview.config;
-    $("howNote").innerHTML = `Right now: hints come from YOLO run
-      <code>${esc(c.prompt.yolo_run || "the best scoring one")}</code>, style
-      <b>${esc(c.prompt.variant)}</b>; <b>${esc(c.augment ? c.augment.p : 0)}</b> of the training
-      hints are damaged on purpose; MedSAM2 starts from <code>${esc(c.model.checkpoint)}</code> and
-      only <b>${esc(c.train.unfreeze)}</b> may change.`;
-    document.querySelectorAll("[data-cfg]").forEach((el) => {
-      el.textContent = el.dataset.cfg.split(".").reduce((n, k) => (n == null ? n : n[k]), c);
-    });
-    renderRuns();
-    if (!S.runId && S.overview.runs.length) S.runId = S.overview.active || S.overview.runs[0].id;
-  }
-
-  async function boot() {
-    readHash();
-    await refresh();
-    fillForm(S.overview);
-    await loadRun();
-    await loadPatients();
-
-    $("startForm").addEventListener("submit", (e) => { e.preventDefault(); start(false); });
-    $("btnSmoke").addEventListener("click", () => start(true));
-    $("btnReset").addEventListener("click", resetForm);
-    $("btnStop").addEventListener("click", () => act("stop"));
-    $("btnResume").addEventListener("click", () => act("resume"));
-    $("btnRescore").addEventListener("click", () => act("evaluate"));
-    $("btnCsv").addEventListener("click", downloadCsv);
-    $("helpSplit").addEventListener("change", () => { S.split = $("helpSplit").value; writeHash(); renderHelp(); });
-    $("pSplit").addEventListener("change", () => loadPatients());
-    $("pPatient").addEventListener("change", () => { S.patient = $("pPatient").value; writeHash(); });
-    $("btnProfile").addEventListener("click", runProfile);
-    $("pWhich").addEventListener("change", runProfile);
-    $("logFilter").addEventListener("input", () => pullLog(true));
-    $("zRange").addEventListener("input", () => {
-      if (S.slice) loadSlice(S.slice.brain_slices[Number($("zRange").value)]);
-    });
-    document.querySelectorAll(".panel").forEach((c) => c.addEventListener("change", () => loadSlice(S.slice && S.slice.z)));
-    document.addEventListener("keydown", (e) => {
-      if (/input|select|textarea/i.test(e.target.tagName)) return;
-      if (e.key === "ArrowLeft") stepSlice(-1);
-      else if (e.key === "ArrowRight") stepSlice(1);
-      else if (e.key === "[") stepPatient(-1);
-      else if (e.key === "]") stepPatient(1);
-    });
-
-    setInterval(tick, 2000);
-    setInterval(gpu, 3000);
-    setInterval(refresh, 15000);
-    gpu();
-  }
-
-  async function start(smoke) {
-    $("startErr").textContent = "";
-    try {
-      const r = await post("/api/runs", { overrides: overrides(), smoke });
-      await refresh();
-      await selectRun(r.id);
-      $("secLive").scrollIntoView({ behavior: "smooth" });
-    } catch (e) {
-      $("startErr").textContent = e.message;
-    }
-  }
-
-  async function act(what) {
-    if (!S.runId) return;
-    try {
-      await post(`/api/runs/${S.runId}/${what}`);
-      await refresh();
-      await loadRun();
-    } catch (e) {
-      $("liveSub").innerHTML += ` <span class="err">${esc(e.message)}</span>`;
-    }
-  }
-
-  async function tick() {
-    if (!S.runId) return;
-    const run = await api(`/api/runs/${S.runId}`).catch(() => null);
-    if (!run) return;
-    const wasLive = S.run && ["queued", "running"].includes((S.run.status || {}).state);
-    const nowLive = ["queued", "running"].includes((run.status || {}).state);
-    const rounds = S.run ? S.run.epochs_done : -1;
-    S.run = run;
-    renderLive(run);
-    if (nowLive) await pullLog(false);
-    if (run.epochs_done !== rounds) drawCurves();
-    if (wasLive && !nowLive) { renderEval(run); renderHelp(); await refresh(); }
-  }
-
-  async function gpu() {
-    const g = await api("/api/gpu").catch(() => ({ available: false }));
-    $("gpu").innerHTML = g.available
-      ? `<span class="dim">${esc(g.name)}</span> <div class="gbar"><i style="width:${g.util || 0}%"></i></div>
-         <span>${g.util || 0}%</span> <span class="dim">${Math.round(g.mem_used || 0)} / ${Math.round(g.mem_total || 0)} MB</span>`
-      : '<span class="dim">no GPU reading</span>';
-  }
-
-  boot().catch((e) => { $("topSub").innerHTML = `<span class="err">${esc(e.message)}</span>`; });
+  document.addEventListener("DOMContentLoaded", () => {
+    wire();
+    fromHash();
+    if (S.sel) selectRun(S.sel, true).catch(() => { S.sel = null; });
+    poll();
+  });
 })();
