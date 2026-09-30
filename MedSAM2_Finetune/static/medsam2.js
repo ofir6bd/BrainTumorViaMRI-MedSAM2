@@ -273,8 +273,22 @@
     loadSlice();
   }
   const panels = () => K.$$(".panel").filter((c) => c.checked).map((c) => c.value);
+  const lg = (c, t) => `<span class="lg" style="--c:${c}">${t}</span>`;
+  const RESULT = `${lg("var(--tp)", "found")} ${lg("var(--fn)", "missed")} ${lg("var(--fp)", "drawn, not tumour")}`;
+  const PANEL_KEY = {
+    frame: ["The picture", `${lg("#e33", "T1C")} ${lg("#3c3", "T2")} ${lg("#46f", "FLAIR")}, mixed as colours`],
+    prompt: ["YOLO's hint (on FLAIR)", `how sure YOLO is: ${lg("#7a3fa0", "barely")} ${lg("#f08a00", "maybe")} ${lg("#e33", "sure")} · none = FLAIR only`],
+    yolo: ["YOLO's own mask", RESULT],
+    medsam2: ["MedSAM2's answer", RESULT],
+  };
+  function panelKey() {
+    const ps = panels();
+    $("panelKey").style.gridTemplateColumns = `repeat(${ps.length || 1}, minmax(0, 1fr))`;
+    $("panelKey").innerHTML = ps.map((p) => `<div><b>${PANEL_KEY[p][0]}</b><br>${PANEL_KEY[p][1]}</div>`).join("");
+  }
   const loadSlice = K.debounce(async () => {
     if (!S.prof || S.z == null) return;
+    panelKey();
     const q = `patient=${encodeURIComponent(S.prof.id)}&which=${S.which}&z=${S.z}`;
     $("zLabel").textContent = `z = ${S.z}`;
     $("sliceLoading").classList.remove("hidden");
