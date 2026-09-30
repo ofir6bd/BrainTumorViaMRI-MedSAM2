@@ -419,7 +419,7 @@
     S.slices = d;
     const base = d.series[0];
     const zs = base.z;
-    const dice = (s) => s.z.map((z, i) => [z, s.gt[i] + s.pred[i] ? (2 * s.inter[i]) / (s.gt[i] + s.pred[i]) : null]);
+    const dice = (s) => s.z.map((z, i) => [z, s.gt[i] + s.pred[i] ? (2 * s.inter[i]) / (s.gt[i] + s.pred[i]) : 1]);
     const colK = { yolo: "yolo", hint: "hint", medsam2: "med" };
     const series = d.series.map((s) => ({ name: `Dice · ${NAME[colK[s.model]]}`, color: COL[colK[s.model]], points: dice(s), dash: s.model === "hint" ? "5 4" : null, width: 1.8 }));
     series.push({ name: "expert tumour px", color: "var(--gt)", axis: "right", area: true, points: zs.map((z, i) => [z, base.gt[i]]), width: 1.2 });

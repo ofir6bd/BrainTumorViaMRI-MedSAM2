@@ -229,7 +229,11 @@
       catch (e) { $("profNote").innerHTML = `<span class="bad">${esc(e.message)}</span>`; return; }
     }
     S.prof = p;
-    $("profNote").innerHTML = p.stored ? "From the stored results of the last scoring pass (no GPU)." : "Worked out just now on the graphics card.";
+    const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+    const tum = (xs) => xs.filter((_, i) => p.gt[i] > 0);
+    $("profNote").innerHTML = `${p.stored ? "From the stored results of the last scoring pass (no GPU)." : "Worked out just now on the graphics card."}
+      Mean slice Dice over all ${p.z.length} slices: MedSAM2 <b>${K.f4(mean(p.dice))}</b>, YOLO hint ${K.f4(mean(p.yolo_dice))};
+      over the ${tum(p.dice).length} tumour slices: MedSAM2 <b>${K.f4(mean(tum(p.dice)))}</b>, YOLO hint ${K.f4(mean(tum(p.yolo_dice)))}. A slice where both are empty scores 1.`;
     $("profKpis").innerHTML = [
       K.kpi("MedSAM2 3D Dice", K.f4(p.dice3d), `${esc(p.id)}`, { hero: true }),
       K.kpi("YOLO hint", K.f4(p.yolo_dice3d), "same slices"),
@@ -246,10 +250,11 @@
     const p = S.prof;
     if (!p) return;
     S.charts.prof = Charts.line($("profChart"), { height: 290, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", y2Min: 0, yMin: 0, yMax: 1, exportName: `${p.id}_slices`,
-      series: [{ name: "Dice · MedSAM2", color: "var(--medsam2)", points: p.z.map((z, i) => [z, p.gt[i] + p.pred[i] ? p.dice[i] : null]) },
-               { name: "Dice · YOLO hint", color: "var(--neutral)", dash: "5 4", points: p.z.map((z, i) => [z, p.gt[i] + p.yolo[i] ? p.yolo_dice[i] : null]) },
+      series: [{ name: "Dice · MedSAM2", color: "var(--medsam2)", points: p.z.map((z, i) => [z, p.dice[i]]) },
+               { name: "Dice · YOLO hint", color: "var(--neutral)", dash: "5 4", points: p.z.map((z, i) => [z, p.yolo_dice[i]]) },
                { name: "expert pixels", color: "var(--gt)", axis: "right", area: true, points: p.z.map((z, i) => [z, p.gt[i]]) },
-               { name: "MedSAM2 pixels", color: "var(--medsam2)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.pred[i]]) }],
+               { name: "MedSAM2 pixels", color: "var(--medsam2)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.pred[i]]) },
+               { name: "YOLO pixels", color: "var(--yolo)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.yolo[i]]) }],
       markers: [{ x: S.z, label: `z ${S.z}`, color: "var(--accent)", solid: true }, ...(p.anchor_z || []).map((z) => ({ x: z, label: "start", color: "var(--medsam2)" }))],
       onClick: (x) => setZ(Math.round(x)) });
   }
