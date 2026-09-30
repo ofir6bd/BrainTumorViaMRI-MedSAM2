@@ -317,7 +317,9 @@
     try {
       const d = await api(`api/runs/${encodeURIComponent(S.vModel)}/profile.json?split=${S.vSplit}&patient=${encodeURIComponent(S.vPatient)}&conf=${S.vConf}`);
       S.profile = { key, data: d };
-      $("vNote").innerHTML = `<b>${esc(S.vPatient)}</b>: 3D Dice <b>${K.f4(d.dice3d)}</b> · expert ${K.fmt(d.gt_total / 1000)} mL · YOLO ${K.fmt(d.pred_total / 1000)} mL · ${d.z.length} slices.`;
+      const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+      const tum = d.dice.filter((_, i) => d.gt[i] > 0);
+      $("vNote").innerHTML = `<b>${esc(S.vPatient)}</b>: 3D Dice <b>${K.f4(d.dice3d)}</b> · mean slice Dice ${K.f4(mean(d.dice))} (all ${d.z.length} slices), ${K.f4(mean(tum))} (${tum.length} tumour slices) · expert ${K.fmt(d.gt_total / 1000)} mL · YOLO ${K.fmt(d.pred_total / 1000)} mL. A slice where both are empty scores 1.`;
       drawProfile();
     } catch (e) { $("vNote").innerHTML = `<span class="bad">${esc(e.message)}</span>`; } finally { $("vRun").disabled = false; }
   }
@@ -325,7 +327,7 @@
     const p = S.profile && S.profile.key === pkey() ? S.profile.data : null;
     if (!p) { $("vProfile").innerHTML = `<p class="empty">Press <b>Whole patient</b> to run every slice.</p>`; return; }
     S.charts.prof = Charts.line($("vProfile"), { height: 260, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", yMin: 0, yMax: 1, exportName: `${S.vPatient}_profile`,
-      series: [{ name: "Dice", color: "var(--yolo)", points: p.z.map((z, i) => [z, p.gt[i] + p.pred[i] ? p.dice[i] : null]) },
+      series: [{ name: "Dice", color: "var(--yolo)", points: p.z.map((z, i) => [z, p.dice[i]]) },
                { name: "expert pixels", color: "var(--gt)", axis: "right", area: true, points: p.z.map((z, i) => [z, p.gt[i]]) },
                { name: "YOLO pixels", color: "var(--medsam2)", axis: "right", dash: "5 4", points: p.z.map((z, i) => [z, p.pred[i]]) }],
       markers: [{ x: S.vZ, label: `z ${S.vZ}`, color: "var(--accent)", solid: true }], onClick: (z) => { S.vZ = z; showSlice(); } });
