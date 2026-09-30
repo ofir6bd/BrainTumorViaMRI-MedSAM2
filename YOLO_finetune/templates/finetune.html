@@ -94,7 +94,11 @@
         <button class="primary" id="vRun">▶ Whole patient</button>
       </div>
       <div class="viewer">
-        <div><div class="imgbox"><img id="vImg" alt=""><div class="loading hidden" id="vLoading">Asking YOLO…</div></div></div>
+        <div><div class="imgbox"><img id="vImg" alt=""><div class="loading hidden" id="vLoading">Asking YOLO…</div></div>
+          <div class="row note" style="justify-content:space-between;margin:6px 0 0">
+            <span><b>Left</b> (what YOLO sees): <span class="lg" style="--c:#e33">T1C</span> <span class="lg" style="--c:#3c3">T2</span> <span class="lg" style="--c:#46f">FLAIR</span></span>
+            <span><b>Right</b> (FLAIR): <span class="lg" style="--c:var(--tp)">found</span> <span class="lg" style="--c:var(--fn)">missed</span> <span class="lg" style="--c:var(--fp)">false</span></span>
+          </div></div>
         <div><div class="kpis" id="vStats"></div><h3 style="margin-top:12px">This patient, slice by slice</h3><div id="vProfile"></div><p class="note" id="vNote"></p></div>
       </div>
     </section>
