@@ -46,7 +46,7 @@
     subjScans: {}, subjByPool: {},
     f: { pools: new Set(), labels: new Set(), side: "", q: "", ranges: {}, sel: null, cell: null, shared: null, combo: null },
     dm: "wt", dl: true, hm: "wt", hl: true, hmode: "hist", hby: "all", sx: "wt", sy: "et", sxl: true, syl: true,
-    scol: "pool", trend: false, plane: "axial", punit: "scans",
+    scol: "pool", trend: false, plane: "axial", punit: "scans", cut: 100,
     open: null, z: null, img: "flair", ov: true, cmp: [], order: [],
     charts: {}, tables: {},
   };
@@ -223,7 +223,7 @@
     renderKpis(rows);
     renderLeak(); renderManifest(); renderPools(); renderTimepoints(rows);
     renderDist(); renderHist(); renderMinis();
-    renderShare(rows); renderPresence(rows); renderCombos();
+    renderShare(rows); renderPresence(rows); renderCombos(); renderPieces(rows);
     renderScatter(); renderCorr(rows);
     renderHeat(); renderZ(rows); renderSides(rows);
     renderOutliers(rows); renderTable(rows);
@@ -419,6 +419,49 @@
       series: [{ name: "patients", color: "var(--accent)", values: combos.map(([, n]) => n) }],
       onClick: (ci) => { const c = combos[ci][0]; S.f.combo = S.f.combo === c ? null : c; update(); },
     });
+  }
+
+  function renderPieces(rows) {
+    const cut = S.cut;
+    $("pieceCut").value = cut;
+    K.$$("#pieceCutSeg button").forEach((b) => b.classList.toggle("on", +b.dataset.v === cut));
+    const has = rows.filter((r) => r.cc_vox && r.cc_vox.length);
+    if (!has.length) { $("pieceKpis").innerHTML = `<p class="empty">No piece sizes yet: press <b>Measure again</b>.</p>`; return; }
+    const main = has.map((r) => r.cc_vox[0]), extra = has.flatMap((r) => r.cc_vox.slice(1));
+    const all = main.concat(extra);
+    let small = 0, lostVox = 0, totVox = 0, hit = [];
+    for (const r of has) {
+      const T = r.cc_vox.reduce((a, b) => a + b, 0);
+      const s = r.cc_vox.filter((v) => v < cut);
+      const lost = s.reduce((a, b) => a + b, 0);
+      small += s.length; lostVox += lost; totVox += T;
+      if (s.length) hit.push({ id: r.id, pool: r.pool, pieces: r.cc_vox.length, small: s.length, lost, share: lost / T,
+                               best: (2 * (T - lost)) / (2 * T - lost), whole: r.cc_vox[0] < cut });
+    }
+    const whole = hit.filter((h) => h.whole).length;
+    $("pieceKpis").innerHTML = [
+      K.kpi("Pieces", K.int(all.length), `${K.int(has.length)} scans · ${K.int(extra.length)} beyond the biggest`),
+      K.kpi(`Under ${K.int(cut)} voxels`, K.int(small), `${K.pct(small / all.length, 1)} of all pieces`),
+      K.kpi("Scans affected", K.int(hit.length), `${K.pct(hit.length / has.length, 1)} have a piece that small`),
+      K.kpi("Tumour in them", K.pct(lostVox / totVox, 2), `${K.int(lostVox)} of ${K.int(totVox)} voxels`),
+      K.kpi("Whole tumour that small", K.int(whole), whole ? "the filter would delete everything" : "no scan loses its whole tumour"),
+      K.kpi("Worst best-possible Dice", hit.length ? K.f4(Math.min(...hit.map((h) => h.best))) : "1", "if the model were otherwise perfect"),
+    ].join("");
+    S.charts.pieces = Charts.hist($("pieceChart"), {
+      series: [{ name: "biggest piece of a scan", color: "var(--accent)", values: main }, { name: "extra pieces", color: "var(--medsam2)", values: extra }],
+      log: true, bins: 36, xLabel: "Piece size (voxels = mm³, log scale)", yLabel: "Pieces", height: 280, exportName: "expert_piece_sizes",
+      markers: [{ x: cut, label: `cut-off ${K.int(cut)}`, color: "var(--bad)" }],
+    });
+    const cols = [
+      { k: "id", label: "Patient", html: (v) => `<span class="mono">${esc(v)}</span>` },
+      { k: "pool", label: "Pool" },
+      { k: "small", label: "Small pieces", num: true, get: (r) => r.small, fmt: (v, r) => `${v} of ${r.pieces}` },
+      { k: "lost", label: "Voxels lost", num: true, fmt: K.int },
+      { k: "share", label: "Share of tumour", num: true, fmt: (v) => K.pct(v, 2) },
+      { k: "best", label: "Best possible Dice", num: true, fmt: K.f4 },
+    ];
+    if (!S.tables.pieces) S.tables.pieces = K.table($("pieceTable"), cols, { rows: hit, key: (r) => r.id, onRow: (r) => openPatient(r.id), exportName: "small_expert_pieces", pageSize: 10, sort: { k: "best", dir: 1 }, short: true });
+    else S.tables.pieces.update(hit);
   }
 
   // ------------------------------------------------------------------ relationships
@@ -794,6 +837,8 @@
     bindSel("scTrend", (t) => { S.trend = t.checked; });
     const seg = (id, key) => $(id).addEventListener("click", (e) => { const b = e.target.closest("button[data-v]"); if (b) { S[key] = b.dataset.v; update(); } });
     seg("histMode", "hmode"); seg("histBy", "hby"); seg("planeSeg", "plane"); seg("poolUnit", "punit");
+    $("pieceCutSeg").addEventListener("click", (e) => { const b = e.target.closest("button[data-v]"); if (b) { S.cut = +b.dataset.v; renderPieces(rowsOf()); } });
+    $("pieceCut").addEventListener("change", (e) => { const v = Math.max(0, Math.round(+e.target.value || 0)); S.cut = v; renderPieces(rowsOf()); });
     $("drClose").addEventListener("click", closeDrawer);
     $("drPrev").addEventListener("click", () => step(-1));
     $("drNext").addEventListener("click", () => step(1));

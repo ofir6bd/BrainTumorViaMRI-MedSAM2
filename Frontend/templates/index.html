@@ -108,6 +108,19 @@
         <p class="card-sub">Every combination of parts, and how many patients have exactly that combination. Click a bar to keep those patients.</p></div></div>
       <div id="comboChart"></div>
     </section>
+    <section class="card s12" id="secPieces">
+      <div class="card-head"><div class="grow"><h3>Tumour pieces and the speck filter</h3>
+        <p class="card-sub">Every separate 3D piece of the expert's whole-tumour mask, by size (1 voxel = 1 mm³; pieces touch when they share a face, the same rule the models use).
+          The models delete their <em>own</em> pieces smaller than the cut-off (MedSAM2 100, YOLO 200 voxels). This shows how many <em>real</em> expert pieces are that small. Click a row to open the patient.</p></div>
+        <div class="card-tools"><label class="inline">cut-off <input type="number" id="pieceCut" min="0" step="10" value="100" style="width:80px" aria-label="Speck cut-off in voxels"> voxels</label>
+          <div class="seg" id="pieceCutSeg"><button data-v="100">MedSAM2 100</button><button data-v="200">YOLO 200</button></div></div></div>
+      <div class="kpis" id="pieceKpis"></div>
+      <div class="two" style="margin-top:12px;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)">
+        <div><div id="pieceChart"></div></div>
+        <div><h4 style="margin:0 0 6px">Patients who would lose real tumour</h4><div id="pieceTable"></div>
+          <p class="note">"Best possible Dice" = the score even a perfect model would get once its copy of these small pieces is deleted.</p></div>
+      </div>
+    </section>
   </div>
 
   <!-- ============ RELATIONSHIPS ============ -->
