@@ -326,7 +326,7 @@
   function drawProfile() {
     const p = S.profile && S.profile.key === pkey() ? S.profile.data : null;
     if (!p) { $("vProfile").innerHTML = `<p class="empty">Press <b>Whole patient</b> to run every slice.</p>`; return; }
-    S.charts.prof = Charts.line($("vProfile"), { height: 260, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", yMin: 0, yMax: 1, exportName: `${S.vPatient}_profile`,
+    S.charts.prof = Charts.line($("vProfile"), { height: 260, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", y2Min: 0, yMin: 0, yMax: 1, exportName: `${S.vPatient}_profile`,
       series: [{ name: "Dice", color: "var(--yolo)", points: p.z.map((z, i) => [z, p.dice[i]]) },
                { name: "expert pixels", color: "var(--gt)", axis: "right", area: true, points: p.z.map((z, i) => [z, p.gt[i]]) },
                { name: "YOLO pixels", color: "var(--medsam2)", axis: "right", dash: "5 4", points: p.z.map((z, i) => [z, p.pred[i]]) }],

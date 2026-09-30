@@ -245,7 +245,7 @@
   function drawProfile() {
     const p = S.prof;
     if (!p) return;
-    S.charts.prof = Charts.line($("profChart"), { height: 290, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", yMin: 0, yMax: 1, exportName: `${p.id}_slices`,
+    S.charts.prof = Charts.line($("profChart"), { height: 290, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", y2Min: 0, yMin: 0, yMax: 1, exportName: `${p.id}_slices`,
       series: [{ name: "Dice · MedSAM2", color: "var(--medsam2)", points: p.z.map((z, i) => [z, p.gt[i] + p.pred[i] ? p.dice[i] : null]) },
                { name: "Dice · YOLO hint", color: "var(--neutral)", dash: "5 4", points: p.z.map((z, i) => [z, p.gt[i] + p.yolo[i] ? p.yolo_dice[i] : null]) },
                { name: "expert pixels", color: "var(--gt)", axis: "right", area: true, points: p.z.map((z, i) => [z, p.gt[i]]) },

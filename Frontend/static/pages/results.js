@@ -427,7 +427,7 @@
     $("drProf").classList.remove("skeleton");
     const peak = zs[base.gt.indexOf(Math.max(...base.gt))];
     if (S.z == null) S.z = peak;
-    S.charts.prof = Charts.line($("drProf"), { series, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Expert tumour pixels", yMin: 0, yMax: 1, height: 280, zoom: true,
+    S.charts.prof = Charts.line($("drProf"), { series, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Expert tumour pixels", y2Min: 0, yMin: 0, yMax: 1, height: 280, zoom: true,
       markers: [{ x: S.z, label: `z ${S.z}`, color: "var(--accent)", solid: true }, ...(anchor ? anchor.map((z) => ({ x: z, label: "MedSAM2 start", color: "var(--medsam2)" })) : [])],
       exportName: `${S.open}_slices`, onClick: (x) => setZ(Math.round(x)) });
     const zr = $("drZ");
