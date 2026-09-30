@@ -158,7 +158,8 @@
     if (!items || !items.length) { L.innerHTML = ""; return; }
     L.innerHTML = items.map((it) => `<span data-n="${K.esc(it.name)}" class="${handle.state.hidden.has(it.name) ? "off" : ""}"
       title="Click to hide / show">${it.kind === "pt" ? `<i class="pt" style="${it.ring ? `border:2px solid ${C(it.color)};background:none` : `background:${C(it.color)}`}"></i>`
-      : it.kind === "box" ? `<i class="box" style="background:${C(it.color)}"></i>` : `<i style="background:${C(it.color)};${it.dash ? "opacity:.7" : ""}"></i>`}${K.esc(it.name)}</span>`).join("");
+      : it.kind === "box" ? `<i class="box" style="background:${C(it.color)}"></i>` : it.dash ? `<i style="width:18px;background:repeating-linear-gradient(90deg,${C(it.color)} 0 3px,transparent 3px 6px)"></i>`
+      : `<i style="background:${C(it.color)}"></i>`}${K.esc(it.name)}</span>`).join("");
     if (onToggle) L.onclick = (e) => {
       const s = e.target.closest("span[data-n]");
       if (!s) return;

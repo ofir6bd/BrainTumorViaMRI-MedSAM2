@@ -251,7 +251,7 @@
     if (!p) return;
     S.charts.prof = Charts.line($("profChart"), { height: 290, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", y2Min: 0, yMin: 0, yMax: 1, exportName: `${p.id}_slices`,
       series: [{ name: "Dice · MedSAM2", color: "var(--medsam2)", points: p.z.map((z, i) => [z, p.dice[i]]) },
-               { name: "Dice · YOLO hint", color: "var(--neutral)", dash: "5 4", points: p.z.map((z, i) => [z, p.yolo_dice[i]]) },
+               { name: "Dice · YOLO hint", color: "var(--yolo)", points: p.z.map((z, i) => [z, p.yolo_dice[i]]) },
                { name: "expert pixels", color: "var(--gt)", axis: "right", area: true, points: p.z.map((z, i) => [z, p.gt[i]]) },
                { name: "MedSAM2 pixels", color: "var(--medsam2)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.pred[i]]) },
                { name: "YOLO pixels", color: "var(--yolo)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.yolo[i]]) }],
