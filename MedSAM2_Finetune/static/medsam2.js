@@ -142,7 +142,7 @@
   async function renderEval() {
     K.$$("#splitSeg button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.split));
     const r = S.run, ev = r.eval, sum = ev && ev[S.split];
-    const clear = (msg) => { $("evalKpis").innerHTML = `<p class="empty">${msg}</p>`; ["sweepChart", "confusion", "pairChart", "deltaChart", "sizeGain", "scoreGain", "patTable"].forEach((id) => { $(id).innerHTML = ""; }); };
+    const clear = (msg) => { $("evalKpis").innerHTML = `<p class="empty">${msg}</p>`; ["sweepChart", "confusion", "pairChart", "deltaChart", "sizeGain", "scoreGain", "sideGain", "patTable"].forEach((id) => { $(id).innerHTML = ""; }); };
     if (!sum) return clear(LIVE.includes(r.state) ? "The final check runs after training." : "This run has not been scored on this pool.");
     const data = await evalData(S.split);
     if (!data) return clear("The result files were not found.");
@@ -183,9 +183,25 @@
     Charts.bars($("sizeGain"), { cats: buckets.map(([a, b], i) => `${b === Infinity ? `≥ ${a}` : `${a}–${b}`} mL (n=${byB[i].length})`), yLabel: "Mean 3D Dice", yMin: 0, yMax: 1, fmt: K.f3, height: 260, legend: true, exportName: `${S.sel}_gain_by_size`,
       series: [{ name: "YOLO hint", color: "var(--neutral)", stripes: true, values: byB.map((g) => St.mean(g.map((p) => p.yolo_dice3d))), err: byB.map((g) => St.bootCI(g.map((p) => p.yolo_dice3d), St.mean, 400)) },
                { name: "MedSAM2", color: "var(--medsam2)", values: byB.map((g) => St.mean(g.map((p) => p.dice3d))), err: byB.map((g) => St.bootCI(g.map((p) => p.dice3d), St.mean, 400)) }] });
+    renderSides(recs);
     Charts.scatter($("scoreGain"), { points: recs.map((p) => ({ x: St.mean(p.score.filter((s) => s > 0)) || 0, y: p.delta, id: p.id, color: col(p.delta), tip: tip(p) })), trend: true, hlines: [{ y: 0 }],
       xLabel: "YOLO's mean blob score on slices it drew", yLabel: "Change in 3D Dice", height: 260, exportName: `${S.sel}_gain_vs_score`, onClick: (p) => openPatient(p.id) });
     renderPatTable();
+  }
+  let sides = null;   // patient id -> share of the tumour on the patient's left, from Analytics
+  async function renderSides(recs) {
+    if (!sides) sides = await K.api("/api/dashboard/sides").catch(() => ({}));
+    const sideOf = (f) => (f == null ? null : f > 2 / 3 ? "left" : f < 1 / 3 ? "right" : "both");
+    const groups = ["left", "right", "both"].map((g) => recs.filter((p) => sideOf(sides[p.id]) === g));
+    const unknown = recs.filter((p) => sideOf(sides[p.id]) == null).length;
+    if (!groups.some((g) => g.length)) { $("sideGain").innerHTML = `<p class="empty">No side data yet: open Analytics once so every patient is measured.</p>`; return; }
+    const bar = (key) => groups.map((g) => St.mean(g.map((p) => p[key])));
+    const ci = (key) => groups.map((g) => St.bootCI(g.map((p) => p[key]), St.mean, 400));
+    Charts.bars($("sideGain"), { cats: ["Left", "Right", "Both"].map((c, i) => `${c} (n=${groups[i].length})`), yLabel: "Mean 3D Dice", yMin: 0, yMax: 1, fmt: K.f3, height: 260, legend: true,
+      exportName: `${S.sel}_dice_by_side`,
+      series: [{ name: "YOLO hint", color: "var(--yolo)", stripes: true, values: bar("yolo_dice3d"), err: ci("yolo_dice3d") },
+               { name: "MedSAM2", color: "var(--medsam2)", values: bar("dice3d"), err: ci("dice3d") }] });
+    if (unknown) $("sideGain").insertAdjacentHTML("beforeend", `<p class="note">${unknown} patient(s) without side data left out.</p>`);
   }
   function renderPatTable() {
     const rows = (S.recs || []).filter((p) => !S.range || (p.delta >= S.range[0] && p.delta <= S.range[1]));

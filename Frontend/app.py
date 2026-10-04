@@ -253,6 +253,12 @@ def api_dashboard_recompute():
     return jsonify({"started": started, **stats_store.status(PATIENTS)})
 
 
+@app.route("/api/dashboard/sides")
+def api_dashboard_sides():
+    """Share of each patient's tumour on the patient's left (0..1), for the model pages."""
+    return jsonify({pid: rec.get("left_frac") for pid, rec in stats_store.records.items()})
+
+
 @app.route("/api/dashboard/data")
 def api_dashboard_data():
     refresh_patients()
