@@ -142,7 +142,7 @@
   async function renderEval() {
     K.$$("#splitSeg button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.split));
     const r = S.run, ev = r.eval, sum = ev && ev[S.split];
-    const clear = (msg) => { $("evalKpis").innerHTML = `<p class="empty">${msg}</p>`; ["sweepChart", "confusion", "pairChart", "deltaChart", "sizeGain", "scoreGain", "sideGain", "patTable"].forEach((id) => { $(id).innerHTML = ""; }); };
+    const clear = (msg) => { $("evalKpis").innerHTML = `<p class="empty">${msg}</p>`; ["sweepChart", "confusion", "pairChart", "deltaChart", "sizeGain", "scoreGain", "sideGain", "sideScatter", "patTable"].forEach((id) => { $(id).innerHTML = ""; }); };
     if (!sum) return clear(LIVE.includes(r.state) ? "The final check runs after training." : "This run has not been scored on this pool.");
     const data = await evalData(S.split);
     if (!data) return clear("The result files were not found.");
@@ -197,11 +197,19 @@
     if (!groups.some((g) => g.length)) { $("sideGain").innerHTML = `<p class="empty">No side data yet: open Analytics once so every patient is measured.</p>`; return; }
     const bar = (key) => groups.map((g) => St.mean(g.map((p) => p[key])));
     const ci = (key) => groups.map((g) => St.bootCI(g.map((p) => p[key]), St.mean, 400));
-    Charts.bars($("sideGain"), { cats: ["Left", "Right", "Both"].map((c, i) => `${c} (n=${groups[i].length})`), yLabel: "Mean 3D Dice", yMin: 0, yMax: 1, fmt: K.f3, height: 260, legend: true,
+    Charts.bars($("sideGain"), { cats: ["Left", "Right", "Both"].map((c, i) => `${c} (n=${groups[i].length})`), yLabel: "Mean 3D Dice", yMin: 0, yMax: 1, fmt: K.f3, height: 260, legend: true, showValues: "inside",
       exportName: `${S.sel}_dice_by_side`,
       series: [{ name: "YOLO hint", color: "var(--yolo)", stripes: true, values: bar("yolo_dice3d"), err: ci("yolo_dice3d") },
                { name: "MedSAM2", color: "var(--medsam2)", values: bar("dice3d"), err: ci("dice3d") }] });
     if (unknown) $("sideGain").insertAdjacentHTML("beforeend", `<p class="note">${unknown} patient(s) without side data left out.</p>`);
+    const SIDE_COL = { left: "var(--yolo)", right: "var(--medsam2)", both: "var(--test)" };
+    const known = recs.filter((p) => sideOf(sides[p.id]) != null);
+    Charts.scatter($("sideScatter"), {
+      points: known.map((p) => ({ x: sides[p.id], y: p.dice3d, id: p.id, color: SIDE_COL[sideOf(sides[p.id])],
+        tip: `${K.tipTitle(p.id)}${K.tipRow(K.color(SIDE_COL[sideOf(sides[p.id])]), "on the left", K.pct(sides[p.id], 0))}${K.tipRow(K.color("var(--medsam2)"), "MedSAM2", K.f4(p.dice3d))}${K.tipRow(K.color("var(--neutral)"), "YOLO hint", K.f4(p.yolo_dice3d))}` })),
+      xMin: 0, xMax: 1, yMin: 0, yMax: 1, xFmt: (v) => K.pct(v, 0), vlines: [{ x: 1 / 3 }, { x: 2 / 3 }], height: 260, highlight: S.pPatient,
+      xLabel: "Share of the tumour on the patient's left", yLabel: "MedSAM2 3D Dice", exportName: `${S.sel}_dice_by_side_scatter`, onClick: (p) => openPatient(p.id),
+      legend: [{ name: "right", color: SIDE_COL.right }, { name: "both", color: SIDE_COL.both }, { name: "left", color: SIDE_COL.left }] });
   }
   function renderPatTable() {
     const rows = (S.recs || []).filter((p) => !S.range || (p.delta >= S.range[0] && p.delta <= S.range[1]));

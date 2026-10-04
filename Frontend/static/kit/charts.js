@@ -402,7 +402,11 @@
           el("line", { x1: ex, x2: ex, y1: y(s.err[ci][0]), y2: y(s.err[ci][1]), stroke: C("var(--text)"), "stroke-width": 1.2 }, svg);
           for (const e2 of s.err[ci]) el("line", { x1: ex - 4, x2: ex + 4, y1: y(e2), y2: y(e2), stroke: C("var(--text)"), "stroke-width": 1.2 }, svg);
         }
-        if (o.showValues && !o.stacked && bw > 22) text(svg, bx + (bw - 2) / 2, ya - 4, fmtV(v), { "text-anchor": "middle", "font-size": 10 });
+        // "inside": mid-bar, clear of the error whiskers; outlined so it reads on stripes too
+        if (o.showValues === "inside" && !o.stacked && bw > 22 && yb - ya > 24)
+          text(svg, bx + (bw - 2) / 2, (ya + yb) / 2 + 4, fmtV(v), { "text-anchor": "middle", "font-size": 12, "font-weight": 700, fill: "#fff",
+                                                                     stroke: "rgba(0,0,0,.65)", "stroke-width": 3, "paint-order": "stroke" });
+        else if (o.showValues && !o.stacked && bw > 22) text(svg, bx + (bw - 2) / 2, ya - 4, fmtV(v), { "text-anchor": "middle", "font-size": 10 });
         K.hover(r, () => `${K.tipTitle(String(c))}${K.tipRow(C(s.color), s.name, fmtV(v))}${s.err && s.err[ci] ? K.tipRow(C("var(--faint)"), "95% range", `${fmtV(s.err[ci][0])} – ${fmtV(s.err[ci][1])}`) : ""}${s.tips ? s.tips[ci] || "" : ""}`);
         if (o.onClick) r.addEventListener("click", () => o.onClick(ci, si));
         H.state.rows.push({ category: c, series: s.name, value: v });
