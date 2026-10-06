@@ -70,6 +70,10 @@
         <div class="s6"><h3>Gain against how sure YOLO was</h3><div id="scoreGain"></div></div>
         <div class="s6"><h3>By side of the brain</h3><div id="sideGain"></div>
           <p class="note">Same groups as Analytics: left = more than 2/3 of the tumour on the patient's left, right = less than 1/3, both = in between. Bars = mean, lines = 95% range.</p></div>
+        <div class="s12"><div class="row" style="margin-bottom:6px"><h3 style="flex:1;margin:0">Side and tumour size together</h3>
+            <div class="seg" id="sideSizeSeg"><button data-v="dice3d">MedSAM2</button><button data-v="yolo_dice3d">YOLO hint</button><button data-v="delta">gain</button></div></div>
+          <div id="sideSize"></div>
+          <p class="note">Each square = mean 3D Dice of the patients on that side with that tumour size; hover for how many. Squares with fewer than 5 patients are too small to trust.</p></div>
         <div class="s6"><h3>Every patient by side</h3><div id="sideScatter"></div>
           <p class="note">One dot per patient. Dashed lines = the 1/3 and 2/3 group borders. Click a dot to open that patient.</p></div>
       </div>

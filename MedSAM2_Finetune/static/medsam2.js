@@ -142,7 +142,7 @@
   async function renderEval() {
     K.$$("#splitSeg button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.split));
     const r = S.run, ev = r.eval, sum = ev && ev[S.split];
-    const clear = (msg) => { $("evalKpis").innerHTML = `<p class="empty">${msg}</p>`; ["sweepChart", "confusion", "pairChart", "deltaChart", "sizeGain", "scoreGain", "sideGain", "sideScatter", "patTable"].forEach((id) => { $(id).innerHTML = ""; }); };
+    const clear = (msg) => { $("evalKpis").innerHTML = `<p class="empty">${msg}</p>`; ["sweepChart", "confusion", "pairChart", "deltaChart", "sizeGain", "scoreGain", "sideGain", "sideSize", "sideScatter", "patTable"].forEach((id) => { $(id).innerHTML = ""; }); };
     if (!sum) return clear(LIVE.includes(r.state) ? "The final check runs after training." : "This run has not been scored on this pool.");
     const data = await evalData(S.split);
     if (!data) return clear("The result files were not found.");
@@ -202,6 +202,23 @@
       series: [{ name: "YOLO hint", color: "var(--yolo)", stripes: true, values: bar("yolo_dice3d"), err: ci("yolo_dice3d") },
                { name: "MedSAM2", color: "var(--medsam2)", values: bar("dice3d"), err: ci("dice3d") }] });
     if (unknown) $("sideGain").insertAdjacentHTML("beforeend", `<p class="note">${unknown} patient(s) without side data left out.</p>`);
+    const SIZES = [[0, 10], [10, 30], [30, 60], [60, 100], [100, Infinity]];   // same groups as "Gain by tumour size"
+    const key = S.sideSize || "dice3d";
+    K.$$("#sideSizeSeg button").forEach((b) => b.classList.toggle("on", b.dataset.v === key));
+    const cellOf = groups.map((g) => SIZES.map(([a, b]) => g.filter((p) => p.gt_total / 1000 >= a && p.gt_total / 1000 < b)));
+    const sizeLab = ([a, b]) => (b === Infinity ? `≥ ${a} mL` : `${a}–${b} mL`);
+    Charts.heat($("sideSize"), {
+      rows: ["Left", "Right", "Both"].map((c, i) => `${c} (n=${groups[i].length})`),
+      cols: SIZES.map((s, j) => `${sizeLab(s)} (n=${groups.reduce((t, g, i) => t + cellOf[i][j].length, 0)})`),
+      values: cellOf.map((row) => row.map((c) => (c.length ? St.mean(c.map((p) => p[key])) : null))),
+      fmt: key === "delta" ? K.signed : K.f3, cell: 110, exportName: `${S.sel}_dice_by_side_and_size`,
+      ...(key === "delta" ? { diverging: true, posColor: "var(--good)", negColor: "var(--bad)" } : { color: key === "dice3d" ? "var(--medsam2)" : "var(--yolo)" }),
+      tip: (i, j) => {
+        const c = cellOf[i][j];
+        return `${K.tipTitle(`${["Left", "Right", "Both"][i]} · ${sizeLab(SIZES[j])}`)}${K.tipRow(K.color("var(--faint)"), "patients", c.length)}${c.length ? `
+          ${K.tipRow(K.color("var(--medsam2)"), "MedSAM2", K.f4(St.mean(c.map((p) => p.dice3d))))}${K.tipRow(K.color("var(--yolo)"), "YOLO hint", K.f4(St.mean(c.map((p) => p.yolo_dice3d))))}${K.tipRow(K.color("var(--neutral)"), "gain", K.signed(St.mean(c.map((p) => p.delta))))}` : ""}${c.length && c.length < 5 ? `<div class="faint">too few patients to trust</div>` : ""}`;
+      },
+    });
     const SIDE_COL = { left: "var(--yolo)", right: "var(--medsam2)", both: "var(--test)" };
     const known = recs.filter((p) => sideOf(sides[p.id]) != null);
     Charts.scatter($("sideScatter"), {
@@ -519,6 +536,7 @@
     $("zRange").addEventListener("input", (e) => S.prof && setZ(S.prof.z[+e.target.value]));
     $("zPlay").addEventListener("click", play);
     K.$$(".panel").forEach((c) => c.addEventListener("change", loadSlice));
+    $("sideSizeSeg").addEventListener("click", (e) => { const b = e.target.closest("button[data-v]"); if (b) { S.sideSize = b.dataset.v; renderSides(S.recs || []); } });
     K.key("n", "Start a new run", () => !$("newRunBtn").disabled && openStart());
     K.key("arrowleft", "Previous slice", () => S.prof && setZ(S.prof.z[Math.max(0, S.prof.z.indexOf(S.z) - 1)]));
     K.key("arrowright", "Next slice", () => S.prof && setZ(S.prof.z[Math.min(S.prof.z.length - 1, S.prof.z.indexOf(S.z) + 1)]));
