@@ -1,32 +1,35 @@
-"""Score a fine-tuned checkpoint the way it is meant to run: as a video, with HITL rounds.
+"""Score a fine-tuned checkpoint the way it runs: every slice prompted, memory in between.
 
 For one patient:
 
-  1. `anchors.initial` picks the slice(s) to prompt, from YOLO's map.
-  2. Each anchor gets YOLO's per-voxel logits as a dense prompt.
-  3. The volume is propagated **forward** from the lowest anchor and **backward** from the
-     highest one, exactly as `05_infer_multibbox_hitl.py` did; the backward pass fills the
-     frames the forward pass never reached.
-  4. A HITL round then adds the anchor where the prediction disagrees most with YOLO,
-     and the whole propagation runs again — up to `hitl.rounds` times.
+  1. `anchors.anchor` picks the start slice (the most confident YOLO tumour area).
+  2. Every slice gets YOLO's own map for that slice as its prompt.
+  3. Two passes run away from the anchor — up to the top of the brain and down to the bottom —
+     each through `model.track`, the very function training uses. The anchor is segmented
+     without memory; every other slice with its own hint *and* the memory of the slices
+     already passed.
+  4. With `evaluate.tta_flip`, the same is done on the left-right mirrored patient (in the
+     same batch) and the two answers are averaged.
+  5. `evaluate.min_component` removes tiny 3D specks.
 
-Nothing in steps 1-4 ever looks at the expert mask, so the score at the end is always an
-honest one: the model is never given a hint it would not have on a new patient.
-
-Every number is measured at the slice's own size, so it is comparable with the
-YOLO_finetune page. Alongside MedSAM2, the YOLO prompt itself is scored on the same
-patients — that pairing is the point of the whole folder.
+Nothing here ever looks at the expert mask, so every score is one the pipeline could
+reproduce on a new patient. Alongside MedSAM2, the YOLO answer itself is scored on the same
+patients — that pairing is the point of the whole folder. Every number is measured at the
+slice's own size, so it is comparable with the YOLO_finetune page.
 """
 import os
 from datetime import datetime
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+from scipy import ndimage
 
 from . import anchors as anchor_rules
-from .common import (CHECKPOINTS_DIR, dice, import_sam2, list_patients, mask_prompt_override,
-                     read_json, to_model_image, write_json)
-from .yolo_prompts import load_prompt
+from .common import dice, list_patients, read_json, to_model_image, write_json
+from .dataset import to_prompt
+from .model import build_train_model, features, select, track
+from .yolo_prompts import load_prompt, prompt_logits
 
 
 def thresholds_of(cfg):
@@ -34,86 +37,87 @@ def thresholds_of(cfg):
     return sorted(set([float(v) for v in e["sweep"]]) | {float(e["mask_threshold"])})
 
 
-def build_predictor(cfg, device="cuda", weights=None):
-    """The vendored video predictor, optionally carrying this run's fine-tuned weights."""
-    import_sam2()
-    import sam2.sam2_video_predictor_npz as npz
-    from sam2.build_sam import build_sam2_video_predictor_npz
-
-    # `propagate_in_video` draws a tqdm bar per pass, which is hundreds of lines per patient
-    # in the run log the page shows. Replace the name the module calls; nothing is edited.
-    npz.tqdm = lambda iterable, *a, **kw: iterable
-
-    ckpt = os.path.join(CHECKPOINTS_DIR, cfg["model"]["checkpoint"])
-    predictor = build_sam2_video_predictor_npz(
-        cfg["model"]["config"], ckpt, device=device,
-        hydra_overrides_extra=mask_prompt_override(cfg))
-    if weights:
-        state = torch.load(weights, map_location="cpu", weights_only=False)
-        missing, unexpected = predictor.load_state_dict(state["model"], strict=False)
-        if unexpected:
-            raise RuntimeError(f"checkpoint does not fit the model: {unexpected[:3]}")
-        return predictor.eval(), state
-    return predictor.eval(), None
-
-
 def load_run_model(run_dir, cfg, device="cuda", which="best.pt"):
     path = os.path.join(run_dir, "weights", which)
     if not os.path.exists(path):
         raise FileNotFoundError(f"no checkpoint at {path}")
-    return build_predictor(cfg, device, weights=path)
+    model, state = build_train_model(cfg, device, weights=path)
+    return model.eval(), state
 
 
-def _frames(entry, cfg, device):
-    """The whole patient as a "video": normalised frames the image encoder expects."""
-    size = cfg["model"]["image_size"]
-    return torch.stack([to_model_image(f, size) for f in entry["rgb"]]).to(device)
+def _amp(cfg, device):
+    return torch.autocast("cuda", dtype=torch.bfloat16,
+                          enabled=bool(cfg["train"]["amp"]) and str(device).startswith("cuda"))
 
 
 @torch.inference_mode()
-def _propagate(predictor, state, prompts, size, device):
-    """One forward + one backward pass from the anchors; returns logits and object scores.
+def infer(model, cfg, entry, device="cuda"):
+    """Mask logits [N, H, W] for one patient, the object score per slice, and the anchor."""
+    sam2 = model.sam2
+    size = cfg["model"]["image_size"]
+    n = len(entry["z"])
+    h, w = [int(v) for v in entry["shape"]]
+    a = anchor_rules.anchor(entry, cfg)
 
-    The two passes each start from a clean state with the same prompts, the way the old
-    pipeline did it: forward covers everything from the lowest anchor up, backward fills in
-    what is below the highest one.
-    """
-    frames = state["num_frames"]
-    logits = [None] * frames
-    objs = np.zeros(frames, np.float32)
+    images = torch.stack([to_model_image(f, size) for f in entry["rgb"]]).to(device)
+    prompts = to_prompt(prompt_logits(entry, cfg), size).to(device)          # [N, 1, S, S]
+    flips = [False, True] if cfg["evaluate"].get("tta_flip") else [False]
+    # array axis 0 of a slice (left-right of the head) is dim -2 of the image tensor
+    images = torch.cat([images.flip(-2) if f else images for f in flips])
+    prompts = torch.cat([prompts.flip(-2) if f else prompts for f in flips])
+    v = len(flips)
 
-    def register():
-        predictor.reset_state(state)
-        for k, prompt in prompts.items():
-            # A 2D float tensor already at image_size keeps its soft values: `add_new_mask`
-            # only binarises a mask it has to resize.
-            predictor.add_new_mask(state, frame_idx=int(k), obj_id=1,
-                                   mask=prompt.to(device))
+    logits = np.zeros((v, n, h, w), np.float32)
+    objs = np.zeros((v, n), np.float32)
+    with _amp(cfg, device):
+        feats = features(sam2, images)
+        for order in (range(a, n), range(a, -1, -1)):
+            order = torch.tensor(list(order), device=device)
+            t = len(order)
+            rows = (torch.arange(v, device=device)[:, None] * n + order[None, :]).flatten()
+            p = torch.stack([prompts[k * n + order] for k in range(v)], dim=1)  # [T, V, 1, S, S]
+            outs = track(sam2, select(feats, rows), p, t, v)
+            for j, out in enumerate(outs):
+                m = F.interpolate(out["pred_masks_high_res"].float(), size=(h, w),
+                                  mode="bilinear", align_corners=False)[:, 0]
+                k = int(order[j])
+                logits[:, k] = m.cpu().numpy()
+                objs[:, k] = out["multistep_object_score_logits"][-1].float().flatten().cpu().numpy()
+            del outs
+    for i, f in enumerate(flips):
+        if f:
+            logits[i] = logits[i][:, ::-1]
+    return {"logits": logits.mean(axis=0), "objs": objs.mean(axis=0), "anchor": a,
+            "views": logits}      # [V, N, H, W]: the plain and the mirrored answer, for tuning
 
-    def collect():
-        out = state["output_dict"]
-        for store in ("cond_frame_outputs", "non_cond_frame_outputs"):
-            for t, rec in out[store].items():
-                if "object_score_logits" in rec:
-                    objs[t] = float(rec["object_score_logits"].flatten()[0])
 
-    order = sorted(prompts)
-    register()
-    for t, _ids, mask_logits in predictor.propagate_in_video(
-            state, start_frame_idx=order[0], reverse=False):
-        logits[t] = mask_logits[0, 0].float().cpu().numpy()
-    collect()
+def postprocess(mask, cfg):
+    """Remove 3D specks smaller than `evaluate.min_component` voxels."""
+    small = int(cfg["evaluate"].get("min_component") or 0)
+    if small <= 0 or not mask.any():
+        return mask
+    lab, count = ndimage.label(mask)
+    sizes = np.bincount(lab.ravel(), minlength=count + 1)
+    keep = sizes >= small
+    keep[0] = False
+    return keep[lab]
 
-    if order[-1] > 0:
-        register()
-        for t, _ids, mask_logits in predictor.propagate_in_video(
-                state, start_frame_idx=order[-1], reverse=True):
-            if logits[t] is None:
-                logits[t] = mask_logits[0, 0].float().cpu().numpy()
-        collect()
 
-    blank = np.full((size[0], size[1]), -30.0, np.float32)
-    return np.stack([blank if v is None else v for v in logits]), objs
+def final_mask(out, cfg, threshold=None):
+    t = float(cfg["evaluate"]["mask_threshold"]) if threshold is None else threshold
+    m = out["logits"] > t
+    if cfg["evaluate"].get("use_obj_score"):
+        m &= (out["objs"] > 0)[:, None, None]
+    return postprocess(m, cfg)
+
+
+def run_patient(model, cfg, patient_id, device="cuda", entry=None):
+    """One patient through the model; the page's slice viewer and the scorer both use this."""
+    entry = entry if entry is not None else load_prompt(cfg, patient_id)
+    out = infer(model, cfg, entry, device)
+    out["mask"] = final_mask(out, cfg)
+    out["anchors"] = [out["anchor"]]
+    return out
 
 
 def _counts(pred, gt):
@@ -121,98 +125,40 @@ def _counts(pred, gt):
     return inter, int(pred.sum()), int(gt.sum())
 
 
-def run_patient(predictor, cfg, patient_id, device="cuda", entry=None):
-    """The HITL loop for one patient; returns the final logits and what each round did."""
-    entry = entry if entry is not None else load_prompt(cfg, patient_id)
-    h, w = [int(v) for v in entry["shape"]]
-    size = cfg["model"]["image_size"]
-    hitl, ev = cfg["hitl"], cfg["evaluate"]
-    gt = entry["gt"] > 0
-    threshold = float(ev["mask_threshold"])
-
-    state = predictor.init_state(_frames(entry, cfg, device), h, w)
-    picked = anchor_rules.initial(entry, cfg)
-    prompts = {}
-    rounds = []
-    logits = objs = pred = None
-    for round_index in range(max(1, int(hitl["rounds"]))):
-        for k in picked:
-            if k not in prompts:
-                pr = torch.from_numpy(anchor_rules.prompt_for(entry, cfg, k)).float()[None, None]
-                prompts[k] = torch.nn.functional.interpolate(
-                    pr, size=(size, size), mode="bilinear", align_corners=False)[0, 0]
-        logits, objs = _propagate(predictor, state, prompts, (h, w), device)
-        gate = objs > 0 if ev["use_obj_score"] else np.ones(len(objs), bool)
-        new_pred = (logits > threshold) & gate[:, None, None]
-        d_gt = dice(*_counts(new_pred, gt))
-        change = None if pred is None else dice(*_counts(new_pred, pred))
-        # Per-slice counts for this round, so the page can redraw the curve as it was at any
-        # round rather than only at the last one. Counts, not masks: two small integers per
-        # slice, which is a few KB per patient rather than a few MB.
-        flat = new_pred.reshape(len(new_pred), -1)
-        rounds.append({"round": round_index + 1, "anchors": sorted(int(k) for k in picked),
-                       "z": [int(entry["z"][k]) for k in sorted(picked)],
-                       "dice3d": round(d_gt, 4),
-                       "same_as_previous": None if change is None else round(change, 4),
-                       "pred": flat.sum(axis=1).tolist(),
-                       "inter": np.logical_and(new_pred, gt).reshape(len(new_pred), -1).sum(axis=1).tolist()})
-        pred = new_pred
-
-        if round_index + 1 >= int(hitl["rounds"]):
-            break
-        nxt = anchor_rules.next_anchor(entry, cfg, pred, picked)
-        if nxt is None:
-            break
-        picked.append(nxt)
-
-    return {"logits": logits, "objs": objs, "rounds": rounds, "anchors": sorted(picked)}
+def _per_slice(a, b):
+    n = len(a)
+    return np.logical_and(a, b).reshape(n, -1).sum(1), a.reshape(n, -1).sum(1)
 
 
-def patient_record(predictor, cfg, patient_id, device="cuda", entry=None, out=None):
+def patient_record(model, cfg, patient_id, device="cuda", entry=None, out=None):
     """One patient: per-slice numbers for YOLO and MedSAM2, plus the threshold sweep.
 
-    `entry` / `out` let a caller that has already propagated this patient (the page's slice
+    `entry` / `out` let a caller that has already run this patient (the page's slice
     viewer) reuse that work instead of paying for a second pass.
     """
     entry = entry if entry is not None else load_prompt(cfg, patient_id)
-    out = out if out is not None else run_patient(predictor, cfg, patient_id, device, entry)
-    logits, objs = out["logits"], out["objs"]
+    out = out if out is not None else run_patient(model, cfg, patient_id, device, entry)
     gt = entry["gt"] > 0
     yolo = anchor_rules.yolo_mask(entry, cfg)
-    ths = thresholds_of(cfg)
-    k_at = ths.index(float(cfg["evaluate"]["mask_threshold"]))
-    gate = objs > 0 if cfg["evaluate"]["use_obj_score"] else np.ones(len(objs), bool)
-
-    sweep = np.zeros((len(ths), 3), np.int64)
-    rec = {"id": patient_id, "z": entry["z"].tolist(), "gt": [], "pred": [], "inter": [],
-           "yolo": [], "yolo_inter": [], "score": entry["scores"].round(3).tolist(),
-           "nblobs": entry["nblobs"].tolist(), "obj": np.round(objs, 3).tolist(),
-           "rounds": out["rounds"], "anchors": out["anchors"],
-           "anchor_z": [int(entry["z"][k]) for k in out["anchors"]]}
-    for k in range(len(entry["z"])):
-        for j, t in enumerate(ths):
-            pred = (logits[k] > t) & gate[k]
-            sweep[j] += _counts(pred, gt[k])
-            if j == k_at:
-                i_, p_, g_ = _counts(pred, gt[k])
-                rec["inter"].append(i_)
-                rec["pred"].append(p_)
-                rec["gt"].append(g_)
-        yi, yp, _ = _counts(yolo[k], gt[k])
-        rec["yolo"].append(yp)
-        rec["yolo_inter"].append(yi)
-
-    rec["sweep"] = sweep.tolist()
-    rec["dice3d"] = round(dice(sum(rec["inter"]), sum(rec["pred"]), sum(rec["gt"])), 4)
-    rec["yolo_dice3d"] = round(dice(sum(rec["yolo_inter"]), sum(rec["yolo"]), sum(rec["gt"])), 4)
+    sweep = [list(_counts(final_mask(out, cfg, t), gt)) for t in thresholds_of(cfg)]
+    inter, pred = _per_slice(out["mask"], gt)
+    y_inter, y_pred = _per_slice(yolo, gt)
+    g = gt.reshape(len(gt), -1).sum(1)
+    rec = {"id": patient_id, "z": entry["z"].tolist(), "gt": g.tolist(), "pred": pred.tolist(),
+           "inter": inter.tolist(), "yolo": y_pred.tolist(), "yolo_inter": y_inter.tolist(),
+           "score": entry["scores"].round(3).tolist(), "nblobs": entry["nblobs"].tolist(),
+           "obj": np.round(out["objs"], 3).tolist(), "anchors": out["anchors"],
+           "anchor_z": [int(entry["z"][k]) for k in out["anchors"]], "sweep": sweep}
+    rec["dice3d"] = round(dice(int(inter.sum()), int(pred.sum()), int(g.sum())), 4)
+    rec["yolo_dice3d"] = round(dice(int(y_inter.sum()), int(y_pred.sum()), int(g.sum())), 4)
     rec["delta"] = round(rec["dice3d"] - rec["yolo_dice3d"], 4)
-    rec["gt_total"] = sum(rec["gt"])
+    rec["gt_total"] = int(g.sum())
     return rec
 
 
-def patient_profile(predictor, cfg, patient_id, device="cuda", entry=None, out=None):
+def patient_profile(model, cfg, patient_id, device="cuda", entry=None, out=None):
     """The per-slice view the page charts: Dice and pixel counts for both models."""
-    rec = patient_record(predictor, cfg, patient_id, device, entry, out)
+    rec = patient_record(model, cfg, patient_id, device, entry, out)
     rec["dice"] = [round(dice(i, p, g), 4) for i, p, g in zip(rec["inter"], rec["pred"], rec["gt"])]
     rec["yolo_dice"] = [round(dice(i, p, g), 4)
                         for i, p, g in zip(rec["yolo_inter"], rec["yolo"], rec["gt"])]
@@ -244,25 +190,6 @@ def summarise(records, cfg):
     best = max(sweep, key=lambda s: s["dice3d_mean"] or 0) if records else {"threshold": None}
     mean = lambda v: float(np.mean(v)) if len(v) else None            # noqa: E731
     median = lambda v: float(np.median(v)) if len(v) else None        # noqa: E731
-    # What each round setting would actually give you, over the WHOLE pool.
-    #
-    # A patient that ran out of anchors at round 7 still answers with its round-7 result if
-    # `hitl.rounds` is set to 12 — so its value is carried forward rather than dropped. Taking
-    # the mean only over the patients that reached each round would compare round 12 on the
-    # handful of big tumours against round 1 on everybody, and the curve would rise for no
-    # reason but the changing cohort.
-    max_rounds = max((len(r["rounds"]) for r in records), default=0)
-    by_round = []
-    for k in range(1, max_rounds + 1):
-        vals, anchors, reached = [], [], 0
-        for r in records:
-            item = r["rounds"][min(k, len(r["rounds"])) - 1]
-            vals.append(item["dice3d"])
-            anchors.append(len(item["anchors"]))
-            reached += len(r["rounds"]) >= k
-        by_round.append({"round": k, "patients": len(records), "still_running": reached,
-                         "anchors_mean": float(np.mean(anchors)),
-                         "dice3d_mean": float(np.mean(vals))})
     return {
         "patients": len(records),
         "threshold": float(cfg["evaluate"]["mask_threshold"]),
@@ -280,15 +207,9 @@ def summarise(records, cfg):
         "specificity": det["tn"] / max(1, det["tn"] + det["fp"]),
         "sweep": sweep,
         "best_threshold": best["threshold"],
-        "anchors_mean": mean([len(r["anchors"]) for r in records]),
-        "rounds_mean": mean([len(r["rounds"]) for r in records]),
-        "by_round": by_round,
-        # Which round count would have been best on this pool. On val it is a setting to copy
-        # into `hitl.rounds`; on test it is only ever reported, like the threshold sweep.
-        "best_round": max(by_round, key=lambda r: r["dice3d_mean"])["round"] if by_round else None,
         "patient_scores": [{"id": r["id"], "dice3d": r["dice3d"], "yolo_dice3d": r["yolo_dice3d"],
                             "delta": r["delta"], "gt_total": r["gt_total"],
-                            "anchors": len(r["anchors"]), "rounds": len(r["rounds"]),
+                            "anchor_z": (r.get("anchor_z") or [None])[0],
                             "score_mean": round(float(np.mean(r["score"])), 3) if r["score"] else 0.0}
                            for r in records],
     }
@@ -296,8 +217,8 @@ def summarise(records, cfg):
 
 def scoring_settings(cfg):
     """Everything that changes what a scoring pass produces."""
-    return {"prompt": cfg["prompt"], "anchors": cfg["anchors"], "hitl": cfg["hitl"],
-            "evaluate": cfg["evaluate"], "image_size": cfg["model"]["image_size"],
+    return {"design": "dense-prompt", "prompt": cfg["prompt"], "evaluate": cfg["evaluate"],
+            "image_size": cfg["model"]["image_size"],
             "min_fg_voxels": cfg["data"]["min_fg_voxels"],
             "mask_shortcut": cfg["model"].get("use_mask_input_as_output_without_sam", True)}
 
@@ -305,10 +226,9 @@ def scoring_settings(cfg):
 def _already_scored(path, cfg, patients, weights):
     """A finished `<split>.json` this run can keep instead of scoring the pool again.
 
-    Scoring a pool takes far longer than training a round, and a machine that goes down
-    half way through should not cost the half that was already done. Reused only when the
-    file covers the whole pool, was written *after* the checkpoint it is scoring, and its
-    stored settings still match — so retraining or changing an anchor rule re-scores.
+    Reused only when the file covers the whole pool, was written *after* the checkpoint it
+    is scoring, and its stored settings still match — so retraining or changing a setting
+    re-scores.
     """
     data = read_json(path)
     if not data or data.get("settings") != scoring_settings(cfg):
@@ -321,13 +241,13 @@ def _already_scored(path, cfg, patients, weights):
 
 
 def evaluate(run_dir, cfg, out_dir, splits=("val", "test"), max_patients=None, progress=None,
-             log=print, device="cuda", predictor=None, which="best.pt"):
+             log=print, device="cuda", model=None, which="best.pt"):
     """Score `which` checkpoint on the given pools; writes <split>.json and summary.json."""
     from .yolo_prompts import ensure_cache
 
     weights = os.path.join(run_dir, "weights", which)
-    if predictor is None:
-        predictor, state = load_run_model(run_dir, cfg, device, which)
+    if model is None:
+        model, state = load_run_model(run_dir, cfg, device, which)
         log(f"[eval] {which} from round {state.get('epoch')}")
     os.makedirs(out_dir, exist_ok=True)
     todo = {}
@@ -349,7 +269,7 @@ def evaluate(run_dir, cfg, out_dir, splits=("val", "test"), max_patients=None, p
         else:
             records = []
             for p in patients:
-                records.append(patient_record(predictor, cfg, p["id"], device))
+                records.append(patient_record(model, cfg, p["id"], device))
                 done += 1
                 if progress:
                     progress(done, total, split)
@@ -359,27 +279,18 @@ def evaluate(run_dir, cfg, out_dir, splits=("val", "test"), max_patients=None, p
         s = summary[split]
         log(f"[eval] {split}: MedSAM2 3D Dice {s['dice3d_mean']:.4f} (median {s['dice3d_median']:.4f}) "
             f"vs YOLO {s['yolo_dice3d_mean']:.4f} | helped {s['helped']} / hurt {s['hurt']} "
-            f"| {s['anchors_mean']:.1f} anchors over {s['rounds_mean']:.1f} rounds "
             f"| best sweep threshold on {split}: {s['best_threshold']}")
     write_json(os.path.join(out_dir, "summary.json"), summary)
     return summary
 
 
-def quick_dice(predictor, cfg, patients, device="cuda"):
-    """Mean 3D Dice over some patients — the after-every-round check.
-
-    One HITL round only: a check that ran the full loop would cost more than the round of
-    training it is checking.
-    """
-    import copy
-
-    one_round = copy.deepcopy(cfg)
-    one_round["hitl"]["rounds"] = 1
+def quick_dice(model, cfg, patients, device="cuda"):
+    """Mean 3D Dice over some patients — the after-every-round check. It is the full
+    inference path (both passes, TTA, post-processing), so the round it picks as best is
+    picked on the score that gets reported."""
     scores = []
     for p in patients:
-        entry = load_prompt(one_round, p["id"])
-        out = run_patient(predictor, one_round, p["id"], device, entry)
-        gate = (out["objs"] > 0)[:, None, None] if cfg["evaluate"]["use_obj_score"] else True
-        pred = (out["logits"] > float(cfg["evaluate"]["mask_threshold"])) & gate
-        scores.append(dice(*_counts(pred, entry["gt"] > 0)))
+        entry = load_prompt(cfg, p["id"])
+        out = run_patient(model, cfg, p["id"], device, entry)
+        scores.append(dice(*_counts(out["mask"], entry["gt"] > 0)))
     return float(np.mean(scores)) if scores else 0.0

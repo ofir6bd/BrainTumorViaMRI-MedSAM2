@@ -37,9 +37,6 @@ PROMPT_VARIANTS = {
     "max": "the highest probability any YOLO blob gives that voxel",
     "max_weighted": "same, but each blob's probability is multiplied by its own confidence score",
     "conf_filtered": "blobs below the score threshold are dropped, then the highest probability",
-    "binary": "the plain YOLO mask (probability cut at 0.5), 0 or 1 — no soft values",
-    "box": "a filled rectangle around each kept blob instead of its outline",
-    "none": "no prompt at all — MedSAM2 is asked to find the tumour unaided",
 }
 UNFREEZE = {
     "decoder": "mask decoder only (fastest, fewest weights changed)",
@@ -72,7 +69,8 @@ def yolo_runs():
         return out
     for run_id in sorted(os.listdir(YOLO_RUNS_DIR), reverse=True):
         d = os.path.join(YOLO_RUNS_DIR, run_id)
-        for name in ("best.pt", "last.pt"):
+        # best_dice.pt: the round with the best check 3D Dice (YOLO runs from 2026-09-28 on)
+        for name in ("best_dice.pt", "best.pt", "last.pt"):
             weights = os.path.join(d, "train", "weights", name)
             if os.path.exists(weights):
                 cfg = read_json(os.path.join(d, "eval", "summary.json")) or {}

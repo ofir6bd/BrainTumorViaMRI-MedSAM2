@@ -16,18 +16,21 @@ and eval/ (val.json, test.json, summary.json).
 import argparse
 import copy
 import os
+import shutil
 import time
 import traceback
 from datetime import datetime
 
+import numpy as np
 import yaml
 
 from .build_dataset import build
-from .common import PRETRAINED_DIR, RUNS_DIR, load_config, read_json, write_json
-from .evaluate import evaluate
+from .common import PRETRAINED_DIR, RUNS_DIR, best_weights, list_patients, load_config, read_json, write_json
+from .evaluate import evaluate, patient_dice3d
 
 TRAIN_KEYS = ("epochs", "patience", "imgsz", "batch", "optimizer", "close_mosaic", "mosaic",
-              "fliplr", "hsv_h", "hsv_s", "hsv_v", "seed", "workers", "device", "amp")
+              "fliplr", "hsv_h", "hsv_s", "hsv_v", "seed", "workers", "device", "amp",
+              "degrees", "scale", "translate", "cos_lr")
 SMOKE = {"max_patients": 2, "epochs": 2}
 
 
@@ -109,15 +112,74 @@ def _train(run_dir, cfg, dataset_dir, status, resume):
     model.add_callback("on_train_epoch_start", epoch_start)
     model.add_callback("on_train_batch_end", batch_end)
     model.add_callback("on_fit_epoch_end", epoch_end)
+    train_args = {k: cfg["train"][k] for k in TRAIN_KEYS if k in cfg["train"]}
+    if (cfg.get("select") or {}).get("by") == "dice3d":
+        model.add_callback("on_fit_epoch_end", DiceCheck(run_dir, cfg, status))
+        # Ultralytics' own early stop watches mask mAP; ours watches 3D Dice instead.
+        train_args["patience"] = cfg["train"]["epochs"] + 1
     if resume:
         model.train(resume=True)
     else:
         model.train(data=os.path.join(dataset_dir, "data.yaml"), project=run_dir, name="train",
-                    exist_ok=True, plots=True, **{k: cfg["train"][k] for k in TRAIN_KEYS})
-    return os.path.join(run_dir, "train", "weights", "best.pt")
+                    exist_ok=True, plots=True, **train_args)
+    return best_weights(run_dir)
 
 
-def run(run_dir, resume=False, evaluate_only=False):
+class DiceCheck:
+    """After every round: score that round's weights by 3D Dice on `select.patients` val
+    patients, keep the best round as `weights/best_dice.pt`, and stop after
+    `select.patience` rounds without a better one.
+
+    Ultralytics keeps as `best.pt` the round with the best mask mAP, a detection-style
+    score. What this project reports is 3D Dice, and the two do not always agree. The check
+    uses the real scorer (`evaluate.patient_dice3d`), extras included, at `evaluate.conf`.
+    """
+
+    def __init__(self, run_dir, cfg, status):
+        sel = cfg["select"]
+        self.cfg, self.status = cfg, status
+        self.patients = list_patients(cfg["data"]["val_pool"])[:(cfg.get("run") or {}).get("max_patients")
+                                                                or sel["patients"]]
+        self.patience = int(sel["patience"])
+        self.csv = os.path.join(run_dir, "dice_check.csv")
+        self.best_path = os.path.join(run_dir, "train", "weights", "best_dice.pt")
+        self.best, self.since, self.finished = -1.0, 0, False
+        if os.path.exists(self.csv):       # a resumed run carries on from what it had
+            rows = np.loadtxt(self.csv, delimiter=",", skiprows=1, ndmin=2)
+            if len(rows):
+                k = int(np.argmax(rows[:, 1]))
+                self.best, self.since = float(rows[k, 1]), len(rows) - 1 - k
+
+    def __call__(self, trainer):
+        from ultralytics import YOLO
+
+        # Ultralytics calls this once more after its final validation; that is not a round.
+        if self.finished or not os.path.exists(trainer.last):
+            return
+        epoch = trainer.epoch + 1
+        t0 = time.time()
+        model = YOLO(str(trainer.last))
+        dice3d = float(np.mean([patient_dice3d(model, p, self.cfg) for p in self.patients]))
+        del model
+        new = not os.path.exists(self.csv)
+        with open(self.csv, "a", encoding="utf-8") as f:
+            f.write(("epoch,dice3d,seconds\n" if new else "") + f"{epoch},{dice3d:.6f},{time.time() - t0:.1f}\n")
+        if dice3d > self.best:
+            self.best, self.since = dice3d, 0
+            shutil.copyfile(trainer.last, self.best_path)
+        else:
+            self.since += 1
+        self.status.update(check_dice3d=round(dice3d, 4), best_check_dice3d=round(self.best, 4),
+                           since_best=self.since)
+        print(f"[check] round {epoch}: 3D Dice {dice3d:.4f} on {len(self.patients)} val patients "
+              f"(best {self.best:.4f}, {self.since} since) in {time.time() - t0:.0f}s", flush=True)
+        if self.since >= self.patience:
+            print(f"[check] no better round for {self.since} rounds — stopping", flush=True)
+            trainer.stop = True
+        self.finished = trainer.stop
+
+
+def run(run_dir, resume=False, evaluate_only=False, splits=("val", "test")):
     with open(os.path.join(run_dir, "run_config.yaml"), "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     status = Status(run_dir)
@@ -125,7 +187,7 @@ def run(run_dir, resume=False, evaluate_only=False):
     status.update(state="running", pid=os.getpid(), started=datetime.now().isoformat(timespec="seconds"),
                   error=None, stage="dataset")
     try:
-        best = os.path.join(run_dir, "train", "weights", "best.pt")
+        best = best_weights(run_dir)
         if not evaluate_only:
             dataset_dir, meta = build(cfg, max_patients=max_patients,
                                       progress=lambda d, t: status.update(dataset_done=d, dataset_total=t))
@@ -134,7 +196,7 @@ def run(run_dir, resume=False, evaluate_only=False):
         if not os.path.exists(best):
             raise FileNotFoundError(f"no trained weights at {best}")
         status.update(stage="evaluate", eval_done=0, eval_total=None)
-        evaluate(best, cfg, os.path.join(run_dir, "eval"), max_patients=max_patients,
+        evaluate(best, cfg, os.path.join(run_dir, "eval"), max_patients=max_patients, splits=splits,
                  progress=lambda d, t, split: status.update(eval_done=d, eval_total=t, eval_split=split))
         status.update(state="done", stage="done", finished=datetime.now().isoformat(timespec="seconds"))
     except Exception as e:
@@ -152,13 +214,16 @@ def main():
     ap.add_argument("--smoke", action="store_true", help="2 patients per pool, 2 epochs")
     ap.add_argument("--resume", action="store_true", help="continue from the run's last.pt")
     ap.add_argument("--evaluate-only", action="store_true", help="re-run evaluation of best.pt")
+    ap.add_argument("--splits", default="val,test",
+                    help="pools to score at the end, e.g. `val` while comparing settings")
     args = ap.parse_args()
     run_dir = os.path.abspath(args.run or new_run(args.set, args.smoke))
     print(f"[run] {run_dir}", flush=True)
     # Ultralytics drops side files (e.g. the model it downloads for its AMP check) into the
     # working directory; working inside the run keeps them in this folder.
     os.chdir(run_dir)
-    run(run_dir, resume=args.resume, evaluate_only=args.evaluate_only)
+    run(run_dir, resume=args.resume, evaluate_only=args.evaluate_only,
+        splits=tuple(s for s in args.splits.split(",") if s))
 
 
 if __name__ == "__main__":

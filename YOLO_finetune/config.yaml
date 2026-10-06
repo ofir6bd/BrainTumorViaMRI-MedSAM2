@@ -8,8 +8,12 @@ data:
   train_pool: yolo_train       # pools are keys of the project config.yaml -> paths
   val_pool: yolo_val           #   (YOLO never sees the medsam2_* pools)
   test_pool: test
+  max_train_patients: null     # use only the first N scans of train_pool, whole people only
+                               #   (null = all). For learning curves: how much does more data help?
   min_fg_voxels: 100           # a slice needs this many non-zero FLAIR voxels (brain) to be used
-  min_mask_area: 50            # tumour pieces smaller than this (pixels) are left out of the labels
+  min_mask_area: 5             # tumour pieces smaller than this (pixels) are left out of the labels.
+                               #   Measured (test 3D Dice): 50 -> 0.8746, 15 -> 0.8767, 5 -> 0.8781,
+                               #   0 -> 0.8760 — all within noise of each other; 5 was the best.
   # Each frame is one axial slice, 3 channels: R = T1C, G = T2, B = FLAIR,
   # each scaled to its own p0.5-p99.5. Label = whole tumour (seg > 0).
   # Slices with brain but no tumour are kept with an empty label (they teach "no tumour here").
@@ -23,6 +27,10 @@ train:
   close_mosaic: 10             # last N epochs without mosaic augmentation
   mosaic: 1.0
   fliplr: 0.5                  # left-right flip: tumours occur on both sides
+  degrees: 0.0                 # random rotation, +- degrees (Ultralytics default 0)
+  scale: 0.5                   # random zoom, +- fraction (Ultralytics default 0.5)
+  translate: 0.1               # random shift, fraction of the image (Ultralytics default 0.1)
+  cos_lr: false                # cosine learning-rate decay instead of linear
   hsv_h: 0.0                   # no hue / saturation jitter: the channels are MRI sequences,
   hsv_s: 0.0                   #   not colours — shifting hue would mix T1C, T2 and FLAIR
   hsv_v: 0.2                   # mild brightness jitter only
@@ -31,7 +39,27 @@ train:
   device: 0                    # the RTX 5090
   amp: true                    # mixed precision
 
+select:                        # which round becomes the run's model
+  by: map                      # map | dice3d. map: Ultralytics keeps the round with the best mask
+                               #   mAP as best.pt. dice3d: every round's weights are scored by 3D
+                               #   Dice on `patients` val patients and the best kept as best_dice.pt.
+                               #   Measured on 3 runs (326 val patients, dice pick minus map pick):
+                               #   -0.0047, +0.0011, -0.0012. A 30-patient check is too noisy to
+                               #   pick a round by; mAP is read over all 81 val patients.
+  patients: 30                 # val patients in the after-every-round check (first N of val_pool)
+  patience: 12                 # stop after this many rounds without a better check Dice
+                               #   (with by: dice3d, train.patience is not used)
+
 evaluate:
-  conf: 0.25                   # confidence threshold for the reported test scores
+  conf: 0.05                   # confidence threshold for the reported scores. Chosen on val
+                               #   (yolo_val + medsam2_val, 326 patients) together with the two
+                               #   extras below: with the mirror averaged in, a blob seen in only one
+                               #   view is halved, so a lower cut pays. Run 20260927-010028:
+                               #   conf 0.25, no extras 0.8690 -> conf 0.05 + both extras 0.8754;
+                               #   flat from 0.03 to 0.075.
   sweep: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.7]  # thresholds tried on val and test
   batch: 32                    # slices per predict call
+  tta_flip: true               # also predict the left-right mirrored slice and average the two
+                               #   (same predict call). Val: +0.004 at the best conf of each.
+  min_component: 200           # drop 3D tumour pieces smaller than this many voxels (0 = keep all).
+                               #   Val: 0 -> 0.8741, 100 -> 0.8750, 200 -> 0.8754 (conf 0.05, TTA).

@@ -1,9 +1,10 @@
-# MedSAM2_Finetune — teach MedSAM2 to turn a YOLO guess into a clean tumour outline,
-# the way SAM2 is meant to be used: the stack of slices is a *video*.
+# MedSAM2_Finetune — teach MedSAM2 to fix a YOLO guess, slice by slice, with the neighbours
+# in memory.
 #
-# A few slices (the anchors) get a prompt built from YOLO's per-voxel probability; the rest
-# of the volume is reached by propagating through SAM2's memory, forwards and backwards.
-# The expert segmentation is only ever the target of the loss, never a prompt.
+# The stack of slices is a video in which EVERY slice is prompted with YOLO's own map for
+# that slice. The anchor (the most confident slice) is segmented on its own; two passes then
+# run away from it, up and down, and every later slice sees its hint AND the memory of the
+# slices already passed. The expert segmentation is only ever the target of the loss.
 # The UI shows this file as-is and a run may override the keys listed in routes.EDITABLE
 # (the run keeps its own copy in runs/<run>/run_config.yaml).
 
@@ -12,135 +13,101 @@ model:
   config: configs/sam2.1_hiera_t512.yaml # the vendored SAM2 config that matches it
   image_size: 512                        # what that config was trained at
   use_mask_input_as_output_without_sam: false
-                          # SAM2's own config turns this ON. It means "if a slice was given a
-                          # mask prompt, hand that mask straight back as the answer, without
-                          # running the prompt encoder or the mask decoder" — which is right
-                          # when a person drew the mask, because then the prompt IS the truth.
-                          # Ours is a YOLO guess, so with it on the anchor slices were never
-                          # segmented at all: measured on BraTS-GLI-00008-101 z=70, the output
-                          # was the prompt pixel-for-pixel (99.8% identical, 1721 px of which
-                          # 1183 were outside the head) and the anchor scored 0.33 Dice while
-                          # YOLO's own mask scored 0.76. Off = the anchor is segmented like
-                          # every other slice. Runs made before 2026-09-23 have no such key
-                          # and replay with SAM2's default (on), the way they actually ran.
+                          # SAM2's own config turns this ON: "a slice with a mask prompt gets
+                          # the prompt back as its answer, the decoder never runs". Right when
+                          # a person drew the mask, wrong for a YOLO guess — with it on, every
+                          # slice here would simply be YOLO. Measured on BraTS-GLI-00008-101
+                          # z=70: the output was the prompt pixel-for-pixel and scored 0.33
+                          # Dice where YOLO's own mask scored 0.76.
 
 prompt:
-  yolo_run: ""            # which YOLO_finetune run makes the prompts ("" = the best-scoring one)
-  variant: max            # max | max_weighted | conf_filtered | binary | box | none
+  yolo_run: 20260923-224333  # which YOLO_finetune run makes the prompts ("" = the best-scoring one).
+                          #   Pinned: its prompt cache exists and every earlier run used it, so
+                          #   scores stay comparable (test 0.8776; the newest, 20260927-010028,
+                          #   scores 0.8781 — within noise, and would need all 1,290 rebuilt).
+  variant: max            # max | max_weighted | conf_filtered — which cached map is the hint
   yolo_conf: 0.05         # blobs below this confidence are never produced
-  score_min: 0.25         # conf_filtered / box: drop blobs whose confidence is below this
-  logit_scale: 8.0        # multiply YOLO's logits before handing them to MedSAM2.
-                          #   YOLO's logits reach about +-5.5; SAM2's mask prompt was trained on a
-                          #   wider scale, so it barely reacts to them raw. Measured on 4 val
-                          #   patients with the untrained checkpoint: scale 1 -> 0.379 Dice,
-                          #   2 -> 0.627, 4 -> 0.726, 8 -> 0.757, 12 -> 0.760 (the prompt itself
-                          #   scores 0.819). 8 is where it stops mattering.
+  score_min: 0.25         # conf_filtered: drop blobs below this confidence. It also sets YOLO's
+                          #   own mask — the answer MedSAM2 is scored against.
+  logit_scale: 8.0        # multiply YOLO's logits before handing them to MedSAM2. YOLO's reach
+                          #   about +-5.5; SAM2's mask prompt barely reacts to them raw
+                          #   (untrained checkpoint, 4 val patients: scale 1 -> 0.379 Dice,
+                          #   4 -> 0.726, 8 -> 0.757, 12 -> 0.760).
   empty_logit: -8.0       # what a slice YOLO left empty is prompted with (a confident "nothing")
-  clip_to_head: true      # silence the prompt where the frame has no head in it. At yolo_conf
-                          #   0.05 YOLO sometimes returns a near-random box: on
-                          #   BraTS-GLI-00008-101 z=70 a 0.050 blob covered 1669 px, 1184 of
-                          #   them outside the skull. A voxel counts as head if any channel is
-                          #   non-zero, which excludes 4 of 734,193 expert tumour voxels over
-                          #   10 val patients. Read at prompt time, so changing it needs no
-                          #   cache rebuild.
+  clip_to_head: true      # silence the hint where the frame has no head in it (a 0.05 YOLO blob
+                          #   can be a near-random box: 1184 of 1669 px outside the skull on
+                          #   BraTS-GLI-00008-101 z=70). Read at prompt time, no cache rebuild.
 
-anchors:                  # which slices are prompted; everything else is reached by memory
-                          # The first anchor is the slice with the most confident tumour area
-                          #   (area x score) — the automatic stand-in for "the slice a
-                          #   radiologist would start on". Two other rules were tried and
-                          #   dropped: on three test patients at 5 rounds all three landed
-                          #   within 0.0018 of each other, so it was not worth a setting.
-  count: 1                # anchors the first round starts from. Measured: starting with 3 is
-                          #   WORSE than 1 (0.8056 vs 0.8194 over three test patients) — three
-                          #   chosen up front crowd the same confident region, while the
-                          #   correction rounds place each new one where the answer is wrong.
-  min_gap: 5              # slices that must separate two anchors
-
-hitl:                     # extra anchors added round by round (the loop 05_infer_multibbox_hitl had)
-  rounds: 8               # every patient runs this many rounds, unless the anchors run out of
-                          #   room (anchors.min_gap). 1 = no extra anchors. Each round is a full
-                          #   forward+backward pass, so this is the main cost of scoring:
-                          #   roughly 4 s per round per patient.
-                          # Read off run 20260924-105947, which ran 15. The check pool peaked at
-                          #   5 (0.8561) and the test pool at 8 (0.8628); both were far above the
-                          #   0.8493 / 0.8597 they ended at by 15. 8 sits inside the check pool's
-                          #   noise of its own peak (0.8538 at 8 vs 0.8561 at 5, and that check
-                          #   wanders by about +-0.01), so it is a fair choice rather than a
-                          #   test-set one. Fewer anchors also spreads them further apart,
-                          #   which matters: with 11 anchors, 96% of tumour slices sat within 4
-                          #   slices of one, and on those MedSAM2 ran 0.008 BELOW the YOLO hint,
-                          #   while on slices 5-9 away it ran 0.209 ABOVE it. Propagation is what
-                          #   this model is good at, so give it something to propagate.
-                          # The answer kept is the one after the LAST round. Which round count is
-                          #   actually best is read off the check pool — `summary[split].best_round`
-                          #   and the "Score after each round" chart — and then set here, the same
-                          #   way `evaluate.mask_threshold` is chosen. Picking the best round per
-                          #   patient by its Dice would mean reading the expert mask at inference,
-                          #   which is the oracle this folder deliberately does not have.
-                          # The next anchor always goes where the prediction disagrees most with
-                          #   YOLO, counted in voxels, at least `anchors.min_gap` from every
-                          #   anchor already placed. Any slice may win, including one YOLO left
-                          #   empty — that anchor is prompted with `prompt.empty_logit`, a
-                          #   confident "nothing here".
-                          # Slices YOLO left empty used to be barred, so that no anchor could
-                          #   ever erase and have the memory carry that erasure into its
-                          #   neighbours. Measured on 12 test patients at 8 rounds, the guard
-                          #   scored 0.8263 against 0.8679 without it (YOLO itself 0.8839). It
-                          #   picked the same anchors on 7 of the 12 and cost 0.0009 on the 11
-                          #   that behave, but on BraTS-GLI-02254-100 — where YOLO's tumour ends
-                          #   at z=97 and memory kept drawing up to 1100 voxels a slice out to
-                          #   z=150 — it could not point at the run-away at all (0.2450 against
-                          #   0.7342 with z=130 and z=135 anchored), and ran out of room after
-                          #   4 of the 8 rounds.
-                          # Nothing here ever reads the expert mask.
+augment:                  # training only: make some hints WORSE than YOLO's, so the model learns
+                          # to fix a hint rather than copy it (the target is still the expert).
+  p: 0.3                  # share of training frames whose hint is changed at all.
+                          #   Measured (10-round screens, all 245 val patients): 0.3 -> 0.8861,
+                          #   0 -> 0.8859 — a tie (paired difference 0.0002 +- 0.0016). Kept on:
+                          #   it costs nothing and guards the longer runs against copying.
+  drop_blob: 1.0          # relative odds of each kind of damage, among the changed frames:
+  drop_slice: 0.5         #   drop one blob / blank the whole slice (YOLO missed it)
+  grow: 1.0               #   outline grown / shrunk by a 3..morph_max px grey dilation/erosion
+  shrink: 1.0
+  shift: 0.5              #   whole map moved up to shift_max px
+  cut: 1.0                #   the other confidence cut (prob <-> prob_f): a low-confidence blob
+                          #   added or taken away
+  morph_max: 7
+  shift_max: 4
 
 data:
   train_pool: medsam2_train   # pools are keys of the project config.yaml -> paths
   val_pool: medsam2_val       #   YOLO trained on yolo_*, so it has never seen these patients
   test_pool: test
   min_fg_voxels: 100          # a slice needs this much brain to be used at all
-  max_train_patients: 300     # patients per round from train_pool (null = all 721)
-  val_patients: 40            # patients in the after-every-round check (null = all).
-                              #   A check is a full propagation per patient, so keep it small.
-  clips_per_patient: 4        # training clips taken from each patient each round
-  tumour_clip_fraction: 0.8   # share of those clips that must contain tumour
+  max_train_patients: null    # patients per round from train_pool (null = all 500).
+                              #   Learning curve, same settings, val: 250 -> 0.8838, 500 -> 0.8861,
+                              #   721 -> 0.8864 — why 221 of the 721 went to yolo_train on 2026-09-29.
+  val_patients: 80            # patients in the after-every-round check (null = all).
+                              #   At 40 the check wandered by about +-0.01 round to round, and
+                              #   all three 10-round screens "peaked" at round 4 — 80 halves
+                              #   the variance of the pick, for ~5 extra minutes a round.
+  clips_per_patient: 3        # training clips taken from each patient each round
+  tumour_clip_fraction: 0.8   # share of those clips that start on a slice YOLO found tumour on
 
 video:
-  num_frames: 8               # slices in a training clip: the anchor plus 7 propagated ones
-  reverse_fraction: 0.5       # share of clips fed in descending z, so the model also learns to
-                              #   propagate backwards — which is what inference does below the anchor
-  batch: 1                    # clips per step (a clip is already num_frames forward passes)
+  num_frames: 8               # slices in a training clip: the anchor plus 7 with memory
+  reverse_fraction: 0.5       # share of clips fed in descending z — the downward pass
+  batch: 2                    # clips per step
 
 train:
-  epochs: 50                  # run 20260924-105947 was still underfitting at 30: its loss fell
-                              #   every single round (0.2241 -> 0.1386) and its best check was
-                              #   round 21 of 29, by which point the cosine schedule had annealed
-                              #   the rate to 2.7e-7. It stopped because the schedule ran out.
-  patience: 10                # the 40-patient check wanders by about +-0.01, so rounds within
-                              #   a point of each other are noise: do not stop on it. Raised with
-                              #   `epochs`, or a long run gets cut short by that wobble.
-  accum: 4                    # clips added up before a correction (effective batch = batch * accum)
+  epochs: 15                  # every 10-round screen was flat from round 4 on (check within
+                              #   +-0.005); 15 gives the cosine schedule room without waste
+  patience: 8                 # the check wanders: do not stop on noise
+  accum: 2                    # batches added up before a correction (effective = batch * accum)
   lr: 1.0e-4                  # AdamW, for the mask decoder and the prompt encoder
-  memory_lr: 1.0e-5           # the memory moves 10x slower: it carries the answer between
-                              #   slices, so a big step there disturbs every slice nobody
-                              #   prompted. SurgSAM-2 uses exactly this ratio (2e-4 / 2e-5);
-                              #   Medical SAM 2 goes further still (1e-4 / 1e-8).
-  vision_lr: 1.0e-5           # lower rate for the image encoder, used only when unfreeze = all
+  memory_lr: 1.0e-5           # the memory moves 10x slower: a big step there disturbs every slice.
+                              #   SurgSAM-2 uses exactly this ratio (2e-4 / 2e-5).
+  vision_lr: 1.0e-6           # the image encoder, used only when unfreeze = all
   weight_decay: 0.01
-  unfreeze: decoder+prompt+memory   # decoder | decoder+prompt | decoder+prompt+memory | all
+  unfreeze: all           # decoder | decoder+prompt | decoder+prompt+memory | all
+                          #   Measured (10-round screens, 245 val patients): all -> 0.8864,
+                          #   helped 183 / hurt 10; decoder+prompt+memory -> 0.8861, 172 / 14.
+                          #   A tie on the mean; `all` helps more patients and costs ~10% time.
   dice_weight: 1.0            # loss = dice_weight * Dice loss + bce_weight * BCE, over every frame
   bce_weight: 1.0
   iou_weight: 0.05            # keeps SAM2's own quality head honest
   obj_weight: 0.1             # teaches its object head "is there any tumour on this slice"
-  fliplr: 0.5                 # left-right flip, applied to frame, prompt and target together
+  fliplr: 0.5                 # left-right flip, applied to frame, hint and target together
   amp: true                   # bfloat16 mixed precision
   workers: 4
   seed: 42
   device: 0                   # the RTX 5090
 
 evaluate:
-  mask_threshold: 0.0         # the propagated output is a logit map; > this is tumour (0 = p > 0.5)
-  use_obj_score: false        # a slice whose object head says "nothing here" is left empty.
-                              #   Off by default: measured on the 2D run it moved 3D Dice by +0.0001
-                              #   while costing sensitivity — the false alarms are confident, not leaks.
-  sweep: [-4, -3, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4]   # thresholds tried on val and test
+  mask_threshold: 0.0         # the output is a logit map; > this is tumour (0 = p > 0.5).
+                              #   Chosen on val (-0.5 -> 0.8896, 0 -> 0.8898, 0.5 -> 0.8892),
+                              #   never on test.
+  tta_flip: true              # also run the left-right mirrored patient and average the two
+                              #   (same batch, so nearly free). Val: +0.0004.
+  min_component: 100          # drop 3D pieces smaller than this many voxels (0 = keep all).
+                              #   Val, final model: 0 -> 0.8898, 100 -> 0.8903, 200 -> 0.8899,
+                              #   500 -> 0.8871, 1000 -> 0.8873 — big cuts delete real small
+                              #   tumours. 100 sits on the flat part. Cutting what lies far from
+                              #   YOLO's 3D mask gave nothing (0.8898 at 10 px / 5 slices).
+  use_obj_score: false        # a slice whose object head says "nothing here" is left empty
+  sweep: [-2, -1, -0.5, 0, 0.5, 1, 2]   # thresholds tried on val and test

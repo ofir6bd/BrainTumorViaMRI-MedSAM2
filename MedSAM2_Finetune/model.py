@@ -1,21 +1,22 @@
-"""MedSAM2 on a stack of slices, the way SAM2 is meant to run: as a video.
+"""MedSAM2 on a stack of slices, as a video in which **every slice is prompted**.
 
-A few slices (the anchors) are prompted with YOLO's per-voxel map; the rest of the clip is
-reached through SAM2's memory. The vendored `training.model.sam2.SAM2Train` already knows
-how to run that — prompt the conditioning frames, then track the others with memory
-attention — so it is *used*, not reimplemented. Two things are changed from the outside:
+Each slice gets YOLO's own per-voxel map for that slice as a mask prompt, *and* the memory
+of the slices before it. Frame 0 (the anchor) is the one frame with no memory behind it;
+every later frame is a SAM2 "tracked" frame that also carries a mask prompt. The vendored
+`SAM2Base._track_step` supports exactly that — on a frame that is not the initial
+conditioning frame, the mask prompt goes to the decoder *and* the features are memory-
+conditioned (`sam2_base.py`, `_prepare_memory_conditioned_features`, `is_init_cond_frame`).
 
-1. `SAM2Train.prepare_prompt_inputs` normally puts the **ground-truth mask** on the
-   conditioning frames (`mask_inputs_per_frame[t] = gt_masks_per_frame[t]`). Here the
-   anchors and their prompts are supplied by the caller instead, so the expert mask never
-   reaches the model — it is only the target of the loss.
-2. Nothing in `MedSAM2/` is edited. The class is subclassed and the batch object is a small
-   local stand-in for the vendor's `BatchedVideoDatapoint` (the tracking code reads exactly
-   four things off it, listed in `Clips` below).
+So the model's job is "fix YOLO's guess on this slice, knowing what the neighbours looked
+like" — not "redraw the tumour from memory alone", which is what the anchor-only version
+asked and why it never beat YOLO: with 1-8 anchors it threw away YOLO's answer on ~95% of
+the slices, and scored below YOLO at every distance from an anchor, the anchor included.
 
-Backwards propagation is learned by feeding half the clips in descending z
-(`video.reverse_fraction`) — to the model that is still "forward", and at inference the
-video predictor's own `reverse=True` pass then behaves the same way.
+Training and inference run **the same function** (`track`): `SAM2Train.forward_tracking`
+with our prompts in place of the ground truth it would have used. Inference simply feeds a
+whole half-volume (anchor -> top, anchor -> bottom) where training feeds a short clip.
+Nothing in `MedSAM2/` is edited; the batch object is a small local stand-in for the
+vendor's `BatchedVideoDatapoint` (the tracking code reads exactly the things in `Clips`).
 """
 from dataclasses import dataclass
 
@@ -30,15 +31,10 @@ LOGIT_CLAMP = 30.0  # keeps BCE finite if the decoder ever produces an extreme l
 
 @dataclass
 class Clips:
-    """What `SAM2Train.forward_tracking` reads off its input, and nothing more.
-
-    img_batch: [T, B, 3, S, S]   masks: [T, O, S, S] (O = B, one object per clip)
-    obj_to_frame_idx: [T, O, 2] as (frame index, clip index)
-    """
+    """A training batch. img_batch: [T, B, 3, S, S]   masks: [T, B, S, S] (one object per clip)"""
 
     img_batch: torch.Tensor
     masks: torch.Tensor
-    obj_to_frame_idx: torch.Tensor
 
     @property
     def num_frames(self):
@@ -46,21 +42,16 @@ class Clips:
 
     @property
     def flat_img_batch(self):
-        return self.img_batch.transpose(0, 1).flatten(0, 1)      # [(B*T), 3, S, S]
-
-    @property
-    def flat_obj_to_img_idx(self):
-        frame_idx, video_idx = self.obj_to_frame_idx.unbind(dim=-1)
-        return video_idx * self.num_frames + frame_idx
+        return self.img_batch.transpose(0, 1).flatten(0, 1)      # [(B*T), 3, S, S], clip-major
 
     def to(self, device):
         return Clips(self.img_batch.to(device, non_blocking=True),
-                     self.masks.to(device, non_blocking=True),
-                     self.obj_to_frame_idx.to(device, non_blocking=True))
+                     self.masks.to(device, non_blocking=True))
 
 
-def build_train_model(cfg, device="cuda"):
-    """The vendored SAM2 built as `SAM2Train`, from one of the MedSAM2 checkpoints."""
+def build_train_model(cfg, device="cuda", weights=None):
+    """The vendored SAM2 built as `SAM2Train`, from one of the MedSAM2 checkpoints, and
+    optionally carrying a run's fine-tuned weights. Used for training *and* inference."""
     import os
 
     from .common import CHECKPOINTS_DIR
@@ -80,39 +71,73 @@ def build_train_model(cfg, device="cuda"):
             "++model.rand_init_cond_frames_for_train=false",
             *mask_prompt_override(cfg),
         ])
-    return VideoSAM2(model)
+    state = None
+    if weights:
+        state = torch.load(weights, map_location="cpu", weights_only=False)
+        model.load_state_dict(state["model"])
+    return VideoSAM2(model), state
+
+
+@dataclass
+class _Index:
+    """The two things `forward_tracking` reads off its input when the image features are
+    already computed: how many frames, and which feature row belongs to (frame, clip)."""
+
+    num_frames: int
+    flat_obj_to_img_idx: torch.Tensor
+
+
+def features(sam2, images, chunk=16):
+    """Image-encoder output for [N, 3, S, S] frames, computed `chunk` at a time."""
+    parts = [sam2.forward_image(images[i:i + chunk]) for i in range(0, len(images), chunk)]
+    return {"backbone_fpn": [torch.cat([p["backbone_fpn"][l] for p in parts])
+                             for l in range(len(parts[0]["backbone_fpn"]))],
+            "vision_pos_enc": [torch.cat([p["vision_pos_enc"][l] for p in parts])
+                               for l in range(len(parts[0]["vision_pos_enc"]))]}
+
+
+def select(feats, rows):
+    """The feature rows of `rows` (a LongTensor), in that order."""
+    return {k: [x[rows] for x in v] for k, v in feats.items()}
+
+
+def track(sam2, feats, prompts, num_frames, num_clips):
+    """Frame 0 of each clip is the anchor; every frame gets its mask prompt.
+
+    `feats` rows are ordered clip-major (row = clip * T + frame, as `Clips.flat_img_batch`),
+    `prompts` is [T, B, 1, S, S]. Returns the vendor's per-frame output dicts.
+    """
+    t, b = num_frames, num_clips
+    backbone_out = dict(feats)
+    backbone_out.update(
+        num_frames=t, init_cond_frames=[0], frames_not_in_init_cond=list(range(1, t)),
+        mask_inputs_per_frame={k: prompts[k] for k in range(t)},
+        point_inputs_per_frame={}, gt_masks_per_frame={}, frames_to_add_correction_pt=[])
+    frame = torch.arange(t, device=prompts.device)[:, None]
+    clip = torch.arange(b, device=prompts.device)[None, :]
+    return sam2.forward_tracking(backbone_out, _Index(t, clip * t + frame))
 
 
 class VideoSAM2(nn.Module):
-    """Runs one batch of clips: (frames, prompts, anchors) -> per-frame mask logits."""
+    """Runs one batch of clips: (frames, per-frame prompts) -> per-frame mask logits."""
 
     def __init__(self, sam2):
         super().__init__()
         self.sam2 = sam2
 
-    def forward(self, clips, prompts, anchors):
-        """`prompts` is [A, B, 1, S, S] logits for the A anchor frames, `anchors` their
-        frame indices inside the clip (the same for every clip in the batch)."""
-        sam2 = self.sam2
-        backbone_out = sam2.forward_image(clips.flat_img_batch)
-        backbone_out = sam2.prepare_prompt_inputs(backbone_out, clips)
-        # Replace the vendor's ground-truth prompts with ours. Everything after this point
-        # is the vendored tracking code, unchanged.
-        n = clips.num_frames
-        backbone_out["init_cond_frames"] = list(anchors)
-        backbone_out["frames_not_in_init_cond"] = [t for t in range(n) if t not in anchors]
-        backbone_out["mask_inputs_per_frame"] = {int(t): prompts[i] for i, t in enumerate(anchors)}
-        backbone_out["point_inputs_per_frame"] = {}
-        backbone_out["frames_to_add_correction_pt"] = []
-        return sam2.forward_tracking(backbone_out, clips)
+    def forward(self, clips, prompts):
+        """`prompts` is [T, B, 1, S, S] logits, one YOLO hint per frame of every clip."""
+        feats = self.sam2.forward_image(clips.flat_img_batch)
+        feats = {"backbone_fpn": feats["backbone_fpn"], "vision_pos_enc": feats["vision_pos_enc"]}
+        return track(self.sam2, feats, prompts, clips.num_frames, clips.img_batch.shape[1])
 
 
 def set_trainable(model, unfreeze):
     """Freeze everything, then switch back on what this run is allowed to change.
 
-    Unlike the slice-by-slice version, the memory encoder and memory attention now carry
-    the prediction from the anchors to the rest of the volume, so they are worth training —
-    `decoder+prompt+memory` is the default.
+    The prompt encoder reads YOLO's hint on every slice and the memory brings in the
+    neighbours, so both are worth training — `decoder+prompt+memory` is the default. `all`
+    also moves the image encoder, at `train.vision_lr`.
     """
     sam2 = model.sam2
     for p in sam2.parameters():
@@ -140,7 +165,7 @@ def param_groups(model, cfg):
     """Three learning rates, because the three parts tolerate very different step sizes.
 
     The memory is the delicate one: it carries the answer between slices, so a large update
-    there disturbs every slice nobody prompted. Both published works that train it at all
+    there disturbs every slice at once. Both published works that train it at all
     move it far more slowly than the decoder — SurgSAM-2 by 10x (2e-4 vs 2e-5), Medical SAM 2
     by 10,000x (1e-4 vs 1e-8). `memory_lr` defaults to `lr` if a run's config predates it.
     """

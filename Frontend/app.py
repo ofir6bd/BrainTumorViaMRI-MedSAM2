@@ -2,6 +2,7 @@ import io
 import json
 import os
 import sys
+import threading
 from functools import lru_cache
 
 import yaml
@@ -18,6 +19,7 @@ from dataset_stats import StatsStore
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from YOLO_finetune.routes import finetune_bp  # noqa: E402
 from MedSAM2_Finetune.routes import medsam2_bp  # noqa: E402
+from results import results_bp  # noqa: E402
 
 with open("config.yaml", "r") as _f:
     _CFG = yaml.safe_load(_f)
@@ -52,6 +54,7 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.register_blueprint(finetune_bp)  # the YOLO_finetune page, at /finetune/
 app.register_blueprint(medsam2_bp)   # the MedSAM2_Finetune page, at /medsam2/
+app.register_blueprint(results_bp)   # the Results page (dataset x YOLO x MedSAM2), at /results/
 
 
 def _pool_of(root):
@@ -94,7 +97,43 @@ def find_patients():
     return patients
 
 
+def _folders_signature():
+    """What the patient list depends on: every pool folder's modification time (it changes
+    whenever a patient folder is moved in or out)."""
+    sig = []
+    for pool in POOLS:
+        try:
+            sig.append(os.stat(pool["path"]).st_mtime_ns)
+        except OSError:
+            sig.append(None)
+    return tuple(sig)
+
+
 PATIENTS = find_patients()
+_signature = _folders_signature()
+_scan_lock = threading.Lock()
+
+
+def refresh_patients():
+    """Re-list the patient folders if any pool folder changed since the last look.
+
+    Moving patients between pools (see split_manifest.json `moves`) used to leave a running
+    viewer pointing at folders that no longer existed, and every Analytics request failed
+    until a restart. The list is now rebuilt in place, so moves need no restart.
+    """
+    global _signature
+    sig = _folders_signature()
+    if sig == _signature:
+        return
+    with _scan_lock:
+        if sig != _signature:
+            PATIENTS[:] = find_patients()
+            _BY_ID.clear()
+            _BY_ID.update({p["patient_id"]: p for p in PATIENTS})
+            _signature = sig
+
+
+_BY_ID = {p["patient_id"]: p for p in PATIENTS}
 stats_store = StatsStore(os.path.join(_CFG["paths"]["outputs"], "dashboard", "dataset_stats.json"))
 
 
@@ -103,10 +142,12 @@ def load_volume(path):
     return nib.load(path).get_fdata()
 
 
-def get_patient(idx):
-    if idx < 0 or idx >= len(PATIENTS):
+def get_patient(pid):
+    refresh_patients()
+    p = _BY_ID.get(pid)
+    if p is None:
         abort(404)
-    return PATIENTS[idx]
+    return p
 
 
 def best_slice(seg):
@@ -147,7 +188,7 @@ def index():
 @app.route("/thumb.png")
 def thumb_png():
     """One axial slice for the patient drawer: a modality or T1C - T1, optional labels."""
-    p = get_patient(int(request.args.get("id", -1)))
+    p = get_patient(request.args.get("pid", ""))
     kind = request.args.get("mod", "flair")
     if kind not in IMAGE_KINDS:
         abort(400)
@@ -187,6 +228,10 @@ def _manifest_report():
         "note": manifest.get("note"),
         "seed": manifest.get("seed"),
         "counts": manifest.get("counts"),
+        "subject_counts": manifest.get("subject_counts"),
+        # the history of re-splits, without the (long) id lists
+        "moves": [{k: v for k, v in m.items() if k != "ids"} | {"n_ids": len(m.get("ids", []))}
+                  for m in manifest.get("moves", [])],
         "moved": moved,
         "not_in_manifest": sorted(set(on_disk) - set(assignment)),
         "missing_on_disk": sorted(set(assignment) - set(on_disk)),
@@ -196,25 +241,33 @@ def _manifest_report():
 @app.route("/api/dashboard/status")
 def api_dashboard_status():
     # Opening the dashboard fills in whatever is not cached yet.
+    refresh_patients()
     stats_store.start(PATIENTS, log=print)
     return jsonify(stats_store.status(PATIENTS))
 
 
 @app.route("/api/dashboard/recompute", methods=["POST"])
 def api_dashboard_recompute():
+    refresh_patients()
     started = stats_store.start(PATIENTS, force=True, log=print)
     return jsonify({"started": started, **stats_store.status(PATIENTS)})
 
 
+@app.route("/api/dashboard/sides")
+def api_dashboard_sides():
+    """Share of each patient's tumour on the patient's left (0..1), for the model pages."""
+    return jsonify({pid: rec.get("left_frac") for pid, rec in stats_store.records.items()})
+
+
 @app.route("/api/dashboard/data")
 def api_dashboard_data():
+    refresh_patients()
     records = []
-    for i, p in enumerate(PATIENTS):
+    for p in PATIENTS:
         rec = stats_store.records.get(p["patient_id"])
         if rec is None:
             continue
         rec = {k: v for k, v in rec.items() if k != "_key"}
-        rec["idx"] = i
         rec["pool"] = p["pool"]
         rec["images"] = [k for k in IMAGE_KINDS
                          if all(m in p["modalities"] for m in image_needs(k))]

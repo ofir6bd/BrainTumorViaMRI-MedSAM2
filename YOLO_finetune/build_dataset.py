@@ -23,9 +23,22 @@ WORKERS = 6
 def dataset_splits(cfg, max_patients=None):
     d = cfg["data"]
     splits = {"train": list_patients(d["train_pool"]), "val": list_patients(d["val_pool"])}
+    if d.get("max_train_patients"):
+        splits["train"] = _whole_people(splits["train"], int(d["max_train_patients"]))
     if max_patients:
         splits = {k: v[:max_patients] for k, v in splits.items()}
     return splits
+
+
+def _whole_people(patients, n):
+    """The first `n` scans (in folder order), never cutting a person in two: all of one
+    person's timepoints (BraTS-GLI-XXXXX-1NN) are taken or none are."""
+    out = []
+    for p in patients:
+        if len(out) >= n and p["id"].rsplit("-", 1)[0] != out[-1]["id"].rsplit("-", 1)[0]:
+            break
+        out.append(p)
+    return out
 
 
 def dataset_key(cfg, splits):

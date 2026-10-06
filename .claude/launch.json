@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": ["Frontend/serve.py"],
       "port": 5000
+    },
+    {
+      "name": "brats-viewer-dev",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["Frontend/serve.py", "--port", "5001"],
+      "port": 5001
     }
   ]
 }

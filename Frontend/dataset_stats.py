@@ -85,6 +85,7 @@ def patient_stats(patient):
         "left_frac": None,
         "n_cc": 0,
         "largest_cc_frac": None,
+        "cc_vox": [],
     }
     if not wt_vox:
         return rec
@@ -111,7 +112,10 @@ def patient_stats(patient):
 
     lab, n_cc = ndimage.label(wt)
     rec["n_cc"] = int(n_cc)
-    rec["largest_cc_frac"] = round(float(np.bincount(lab.ravel())[1:].max()) / wt_vox, 4)
+    sizes = np.bincount(lab.ravel())[1:]
+    rec["largest_cc_frac"] = round(float(sizes.max()) / wt_vox, 4)
+    # every piece's size, biggest first; same 3D rule (face-touching) as the models' speck filter
+    rec["cc_vox"] = sorted((int(v) for v in sizes), reverse=True)
     return rec
 
 
@@ -151,7 +155,8 @@ class StatsStore:
     def missing(self, patients):
         return [p for p in patients
                 if (r := self.records.get(p["patient_id"])) is None
-                or r.get("_key") != _file_key(p["seg_file"])]
+                or r.get("_key") != _file_key(p["seg_file"])
+                or "cc_vox" not in r]
 
     @property
     def running(self):

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Results{% endblock %}
+{% block page_title %}Results — YOLO and MedSAM2, patient by patient{% endblock %}
+{% block tools %}
+  <button id="csvBtn" title="Save the per-patient table (after filters) as CSV">CSV</button>
+{% endblock %}
+{% block content %}
+  <!-- ============ SOURCES ============ -->
+  <section class="filterbar" aria-label="What to compare">
+    <div class="grp"><span class="lbl">Pool</span>
+      <div class="seg" id="poolSeg" role="group" aria-label="Pool">
+        <button data-v="test" title="Scored by both models — the real result">test</button>
+        <button data-v="medsam2_val" title="MedSAM2's check pool (and the YOLO hint it was given)">medsam2_val</button>
+        <button data-v="yolo_val" title="YOLO's check pool (YOLO only)">yolo_val</button>
+      </div></div>
+    <div class="grp"><span class="lbl" style="color:var(--yolo)">YOLO run</span><select id="yoloRun" aria-label="YOLO run"></select>
+      <label class="inline" title="Blob confidence at or above which a pixel counts">conf <select id="yoloThr"></select></label></div>
+    <div class="grp"><span class="lbl" style="color:var(--medsam2)">MedSAM2 run</span><select id="medRun" aria-label="MedSAM2 run"></select>
+      <label class="inline" title="Logit above which a pixel counts (0 = probability 0.5)">cut <select id="medThr"></select></label></div>
+    <div class="grp" style="margin-left:auto"><span class="count-pill" id="count"></span><button class="small" id="resetBtn">Reset</button></div>
+    <div class="grp" style="flex-basis:100%"><span class="lbl">Keep</span><div class="chips" id="filterChips"></div>
+      <input type="search" id="search" placeholder="Patient id…  (/)" style="width:160px" aria-label="Search patients"></div>
+  </section>
+  <div id="note" class="callout hidden"></div>
+
+  <!-- ============ HEADLINE ============ -->
+  <section id="secHead" data-toc="Headline"><div class="kpis" id="kpis"><div class="skeleton" style="grid-column:1/-1"></div></div></section>
+
+  <!-- ============ LEADERBOARD ============ -->
+  <div class="section-title" id="secBoard" data-toc="Every run"><h2>Every scored run</h2><span class="dim">Click a row to use that run above</span></div>
+  <section class="card"><div id="board"></div></section>
+
+  <!-- ============ HEAD TO HEAD ============ -->
+  <div class="section-title" id="secPair" data-toc="Head to head"><h2>Head to head</h2><span class="dim">The same patients, scored by each model</span></div>
+  <div class="grid">
+    <section class="card s6">
+      <div class="card-head"><div class="grow"><h3>MedSAM2 against YOLO, per patient</h3>
+        <p class="card-sub">Above the dashed line MedSAM2 improved that patient; below it, it made it worse. Drag a box to keep those patients; click a dot to open one.</p></div>
+        <div class="card-tools"><select id="pairX" aria-label="Across"></select><button class="small ghost" data-full>⤢</button></div></div>
+      <div id="pairChart"></div>
+    </section>
+    <section class="card s6">
+      <div class="card-head"><div class="grow"><h3>How much it changed</h3>
+        <p class="card-sub">MedSAM2 minus the chosen reference, per patient. Right of zero = gain. Drag to keep a range.</p></div>
+        <div class="card-tools"><button class="small ghost" data-full>⤢</button></div></div>
+      <div id="deltaChart"></div>
+    </section>
+    <section class="card s6">
+      <div class="card-head"><div class="grow"><h3>Scores, all patients at once</h3>
+        <p class="card-sub">Share of patients at or below each 3D Dice. A curve further right is better; the gap at the left is the patients a model fails on.</p></div></div>
+      <div id="ecdfChart"></div>
+    </section>
+    <section class="card s6">
+      <div class="card-head"><div class="grow"><h3>Which cut-off is best</h3>
+        <p class="card-sub">Mean 3D Dice at every threshold each run was scored at, on this pool. The dashed line is the cut-off in use. Choose cut-offs on a val pool, never on test.</p></div></div>
+      <div class="two"><div id="sweepY"></div><div id="sweepM"></div></div>
+    </section>
+  </div>
+
+  <!-- ============ WHERE ============ -->
+  <div class="section-title" id="secWhere" data-toc="Where it fails"><h2>Where each model fails</h2><span class="dim">Scores split by what the tumour looks like</span></div>
+  <div class="grid">
+    <section class="card s12">
+      <div class="card-head"><div class="grow"><h3>Mean 3D Dice by group</h3>
+        <p class="card-sub">Bars = mean, whiskers = 95% range (bootstrap), n under each group. Click a bar to keep that group everywhere on the page.</p></div>
+        <div class="card-tools"><label class="inline">split by <select id="strat">
+          <option value="size">tumour size (fifths)</option><option value="parts">parts present</option><option value="rc">surgery cavity</option>
+          <option value="et">enhancing part</option><option value="side">side of brain</option><option value="pieces">number of pieces</option>
+          <option value="height">position (bottom → top)</option><option value="slices">tumour slices (fifths)</option></select></label>
+          <button class="small ghost" data-full>⤢</button></div></div>
+      <div id="stratChart"></div>
+      <div id="stratTable" style="margin-top:10px"></div>
+    </section>
+    <section class="card s6">
+      <div class="card-head"><div class="grow"><h3>Score against tumour size</h3>
+        <p class="card-sub">Each dot is a patient; the line is the trend. Small tumours are where 3D Dice is hardest.</p></div>
+        <div class="card-tools"><select id="sizeModel"><option value="med">MedSAM2</option><option value="yolo">YOLO</option><option value="hint">YOLO hint</option><option value="delta">change</option></select></div></div>
+      <div id="sizeChart"></div>
+    </section>
+    <section class="card s6">
+      <div class="card-head"><div class="grow"><h3>Missed and false slices</h3>
+        <p class="card-sub">Slices with expert tumour where a model drew nothing (missed), and slices without tumour where it drew something (false), summed over the patients shown.</p></div></div>
+      <div id="sliceErrChart"></div>
+    </section>
+  </div>
+
+  <!-- ============ RUN VS RUN ============ -->
+  <div class="section-title" id="secAB" data-toc="Run vs run"><h2>Run against run</h2><span class="dim">Did a change of settings really help?</span></div>
+  <section class="card">
+    <div class="card-head"><div class="grow"><h3>Two runs of one model, same patients</h3>
+      <p class="card-sub">The paired difference per patient, its 95% range and a Wilcoxon signed-rank test. A difference smaller than its range is noise.</p></div>
+      <div class="card-tools">
+        <div class="seg" id="abModel"><button data-v="medsam2">MedSAM2</button><button data-v="yolo">YOLO</button></div>
+        <label class="inline">A <select id="abA"></select></label><label class="inline">B <select id="abB"></select></label></div></div>
+    <div class="kpis" id="abKpis"></div>
+    <div class="two" style="margin-top:12px"><div id="abScatter"></div><div id="abHist"></div></div>
+  </section>
+
+  <!-- ============ PATIENTS ============ -->
+  <div class="section-title" id="secPat" data-toc="Patients"><h2>Every patient</h2><span class="dim">Sort by change to find the biggest wins and losses</span></div>
+  <section class="card"><div id="patTable"></div></section>
+
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="drTitle">
+    <div class="drawer-head">
+      <div class="grow"><h2 id="drTitle" class="mono"></h2><p class="card-sub" id="drSub"></p></div>
+      <div class="row">
+        <a class="btn small" id="drData" title="This patient's scan and tumour measurements">Scan ↗</a>
+        <button class="icon" id="drPrev" title="Previous (←)" aria-label="Previous">←</button>
+        <button class="icon" id="drNext" title="Next (→)" aria-label="Next">→</button>
+        <button class="icon" id="drClose" title="Close (Esc)" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div class="drawer-body" id="drBody"></div>
+  </aside>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='pages/results.js') }}"></script>
+{% endblock %}

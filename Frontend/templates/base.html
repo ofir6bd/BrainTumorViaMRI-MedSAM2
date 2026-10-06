@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}BraTS 2024{% endblock %} · BraTS viewer</title>
+  <script>
+    // theme before first paint, so a light-theme reader never sees a dark flash
+    try { const t = localStorage.getItem("brats-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='kit/kit.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body data-base="{% block base %}/{% endblock %}">
+  <div class="shell">
+    <aside class="side" aria-label="Navigation">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">B</span>
+        <div><b>BraTS 2024</b><small>glioma MRI · YOLO + MedSAM2</small></div>
+      </div>
+      {% set bp = request.blueprint %}
+      <nav class="nav" aria-label="Pages">
+        <a href="{{ url_for('index') }}" {% if not bp %}aria-current="page"{% endif %}><span class="ico">▦</span>Analytics</a>
+        <a href="{{ url_for('results.index') }}" {% if bp == 'results' %}aria-current="page"{% endif %}><span class="ico">◈</span>Results</a>
+        <a href="{{ url_for('finetune.index') }}" {% if bp == 'finetune' %}aria-current="page"{% endif %}><span class="ico">⚙</span>YOLO_finetune <span class="badge hidden" id="navYolo"></span></a>
+        <a href="{{ url_for('medsam2.index') }}" {% if bp == 'medsam2' %}aria-current="page"{% endif %}><span class="ico">◉</span>MedSAM2_Finetune <span class="badge hidden" id="navMed"></span></a>
+      </nav>
+      <p class="side-sec">On this page</p>
+      <nav class="toc" id="toc" aria-label="Sections"></nav>
+      <div class="side-foot">
+        <div class="gpu-mini" id="gpuMini" title="The graphics card, read every few seconds"></div>
+        <div class="row">
+          <button class="small ghost" id="paletteBtn" title="Command palette (Ctrl+K)">⌘ Commands</button>
+          <button class="small ghost" id="keysBtn" title="Keyboard shortcuts (?)">?</button>
+          <button class="small ghost" id="themeBtn" title="Light / dark (T)">◐</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="grow">
+          <h1>{% block page_title %}{% endblock %}</h1>
+          <div class="sub" id="pageSub">{% block page_sub %}Loading…{% endblock %}</div>
+        </div>
+        <div class="tools">
+          {% block tools %}{% endblock %}
+          <span><button id="viewsBtn" title="Save this view, or open a saved one">★ Views</button></span>
+          <button id="linkBtn" title="Copy a link that opens this exact view">Copy link</button>
+        </div>
+      </header>
+      <main class="page" id="page">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='kit/kit.js') }}"></script>
+  <script src="{{ url_for('static', filename='kit/charts.js') }}"></script>
+  <script>
+    // Saved views and the "running" badges next to the page links are the same on every page.
+    document.addEventListener("DOMContentLoaded", () => {
+      const vb = document.getElementById("viewsBtn");
+      vb.addEventListener("click", () => Kit.views.menu(vb));
+      const badge = async (url, id) => {
+        try {
+          const o = await Kit.api(url);
+          const el = document.getElementById(id);
+          el.classList.toggle("hidden", !o.active);
+          if (o.active) { el.className = "badge running"; el.textContent = "running"; }
+        } catch (e) { /* the page itself reports errors */ }
+      };
+      const tick = () => { badge("{{ url_for('finetune.api_active') }}", "navYolo"); badge("{{ url_for('medsam2.api_active') }}", "navMed"); };
+      tick();
+      Kit.every(tick, 15000);
+    });
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

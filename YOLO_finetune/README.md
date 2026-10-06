@@ -7,7 +7,7 @@ from the project `config.yaml -> paths`.
 
 | Pool | Patients | Role |
 |---|---|---|
-| `yolo_train` | 250 | training |
+| `yolo_train` | 471 | training (250 until 2026-09-29; see the root README) |
 | `yolo_val` | 81 | best-epoch choice (and threshold choice) |
 | `test` | 324 | final score — never trained on, never used for choosing |
 
@@ -38,14 +38,51 @@ The first run of a model downloads its COCO weights (`yolo11m-seg.pt`, ~45 MB) i
    label. Built once into `dataset/<hash>/` and reused by every run with the same data settings.
 2. **Training** (`train.py`) — Ultralytics fine-tune with the settings in `config.yaml`.
    Hue/saturation jitter is off: the three channels are MRI sequences, not colours.
-3. **Evaluation** (`evaluate.py`) — `best.pt` on every brain slice of **val** and **test**,
-   straight from the NIfTI files, masks at the slice's own size (`retina_masks`). One pass
-   scores every confidence threshold in `evaluate.sweep`.
+3. **Evaluation** (`evaluate.py`) — the run's model on every brain slice of **val** and
+   **test**, straight from the NIfTI files, masks at the slice's own size. One pass scores
+   every confidence threshold in `evaluate.sweep`. Each blob is kept as a probability map
+   (`common.keep_soft_masks`); "tumour" is probability > 0.5, which with the extras off is
+   exactly Ultralytics' own mask. Two extras, both on by default:
+   - `evaluate.tta_flip` — the left-right mirrored slice is predicted too (same call) and the
+     two probability maps are averaged;
+   - `evaluate.min_component` — 3D tumour pieces smaller than this many voxels are removed.
+
+Which round becomes the model is `select.by`: `map` (Ultralytics' `best.pt`, the default) or
+`dice3d` (every round scored by 3D Dice on `select.patients` val patients, best kept as
+`best_dice.pt`, early stop after `select.patience`). `common.best_weights` picks
+`best_dice.pt` when a run has one; the page and MedSAM2_Finetune use it.
+
+`--splits val` scores only val at the end, for runs that compare settings.
 
 Each run is `runs/<YYYYMMDD-HHMMSS>/`: `run_config.yaml` (its exact settings), `status.json`,
 `log.txt`, `train/` (Ultralytics: `results.csv`, `weights/best.pt`, `last.pt`, plots) and
 `eval/` (`val.json`, `test.json`, `summary.json`). A run is its own process — closing the page
 (or restarting the viewer) does not stop it; **Stop** does, and **Resume** continues from `last.pt`.
+
+## What was measured (2026-09-28)
+
+Choices were made on **both** pools YOLO never trained on, `yolo_val` + `medsam2_val`
+(326 patients); test was scored once, at the end.
+
+| change | val 3D Dice |
+|---|---|
+| run `20260927-010028`, conf 0.25, no extras | 0.8690 |
+| **+ mirror TTA, conf 0.05, `min_component` 200** | **0.8754** (+0.0064; flat from conf 0.03 to 0.075) |
+| retrain: less mosaic / zoom, ±10° rotation | 0.8776 (map pick) / 0.8729 (dice pick) |
+| retrain: no mosaic | 0.8737 / 0.8725 |
+| retrain: cosine learning rate | 0.8753 / 0.8764 |
+
+None of the retrains beats the old weights beyond noise (best: +0.0022 ± 0.0021, 73 patients
+better / 71 worse), and picking the round by a 30-patient Dice check was *worse* than
+Ultralytics' mAP pick on two of three runs. So the model stays `20260927-010028`, now scored
+with the extras. Six earlier runs (model size m/x, `min_mask_area` 0-50) had already all
+landed within 0.8746-0.8781 on test: this YOLO was limited by its 250 training patients, not by
+its settings — every run's val loss bottoms out around round 16-19 and then rises.
+
+**Test, scored once: 0.8805 vs 0.8781 before (+0.0024 ± 0.0021, median +0.0024; 113 patients
+better, 51 worse).** Smaller than on val, but most patients gain. The run's pre-extras scores
+are kept in `runs/20260927-010028/eval_conf025_noextras/`. The three retrain screens are
+`runs/20260928-122541` (A), `-164059` (B), `-194043` (C), scored on val only.
 
 ## Metrics
 
@@ -60,28 +97,28 @@ Each run is `runs/<YYYYMMDD-HHMMSS>/`: `run_config.yaml` (its exact settings), `
 
 ## The page
 
-- **Start** — model, epochs, patience, image size, batch, smoke test; the full `config.yaml`
-  shown alongside.
-- **Live run** — stage stepper with progress (patients / epoch + batch / patients), elapsed,
-  time per epoch, time left (estimate), best epoch and epochs since best (vs patience), live log
-  with filter, and a live GPU readout.
-- **Runs** — every run with its state and scores; tick up to 3 to overlay their curves.
-- **Training curves** — losses (train vs val), mask and box metrics, learning rate; one synced
-  crosshair across all charts, best-epoch marker, and a note on where val loss bottomed out.
-- **Dataset** — slices per split with / without tumour, tumour-size distribution.
-- **Evaluation** (val / test) — KPIs, threshold sweep, 3D Dice histogram (click a bar to filter
-  the table), Dice vs tumour size, Dice by size bucket, slice-level confusion table, sortable
-  patient table, per-patient CSV export.
-- **See a slice** — pick **any finished model** (any run's `best.pt`), a pool (val / test) and a
-  patient, and run it now: the RGB input next to FLAIR with found / missed / false tumour pixels,
-  and a confidence slider. **Run this patient** sends every brain slice through that model
-  (a few seconds) and draws one chart with two scales — Dice per slice on the left (0–1), expert
-  and predicted tumour pixels on the right — plus that patient's 3D Dice. Click the chart to jump
-  to a slice. Results are cached per model / patient / threshold.
-- **Plots** — everything Ultralytics saved (PR curves, confusion matrix, batches).
+Built on the viewer's shared kit (`Frontend/static/kit/`, shell `Frontend/templates/base.html`).
 
-The URL keeps the view (run, split, patient, slice, threshold, compared runs) — **Copy link**.
-Keys: `/` search, `←`/`→` slice, `[`/`]` patient.
+- **Live run** — stage stepper with progress, time per round and time left, best val mAP and
+  rounds since, the 3D Dice check when `select.by: dice3d`, a live round-by-round chart, and the
+  log (filter, follow, progress bars on/off, colour for errors / scores, save).
+- **Runs** — sortable table (status, model, rounds, best mAP, val / test 3D Dice, time); tick up to
+  four to overlay their curves, and **Compare settings** lists exactly the settings that differ.
+- **This run** — headline scores with sparklines; resume, score again, rounds CSV, settings, and a
+  link to the run on the Results page.
+- **Training charts** — errors / mask scores / box scores / learning rate, crosshair synced across
+  charts, drag to zoom, best-round marker, and a note on where the val mask error bottomed out.
+- **Pictures** — slices per pool with / without tumour, tumour size per slice.
+- **Results** (val / test, any confidence) — scores with a bootstrap range, the confidence sweep
+  (click a point to switch), the per-patient histogram (drag to filter the table), score against
+  tumour size with trend, mean score by size with ranges, slice-level found / missed / false, and
+  the patient table.
+- **See a slice** — any trained model, pool, patient, slice and confidence; opens on the slice
+  with the most tumour; **Whole patient** draws Dice and pixel counts for every slice.
+- **More charts** — everything Ultralytics saved, click to enlarge.
+- **▶ New run** opens the start dialog: model, rounds, patience, picture size, batch, the two
+  picture settings, mosaic / zoom / rotation / flip, cosine learning rate, which round to keep,
+  quick test — with an estimate and the full `config.yaml`.
 
 ## Files
 
@@ -93,4 +130,4 @@ Keys: `/` search, `←`/`→` slice, `[`/`]` patient.
 | `train.py` | one run: dataset → training → evaluation; CLI (`python -m YOLO_finetune.train`) |
 | `evaluate.py` | val + test scoring and threshold sweep |
 | `routes.py` | the page's API — a Flask blueprint the viewer mounts at `/finetune/` |
-| `templates/finetune.html`, `static/` | the page |
+| `templates/finetune.html`, `static/finetune.js` | the page (extends the viewer's shared shell and kit) |

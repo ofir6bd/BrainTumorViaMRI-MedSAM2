@@ -1,415 +1,129 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MedSAM2_Finetune</title>
-  <!-- The look and the chart kit are shared with the YOLO_finetune page on purpose: one
-       design, one copy of the code. This folder adds only what is new. -->
-  <link rel="stylesheet" href="{{ url_for('finetune.static', filename='style.css') }}">
-  <link rel="stylesheet" href="{{ url_for('medsam2.static', filename='style.css') }}">
-</head>
-<body data-base="{{ url_for('medsam2.index') }}">
-  <nav class="apps" aria-label="Pages">
-    <span class="apps-brand">BraTS 2024</span>
-    <a href="/">Analytics</a>
-    <a href="{{ url_for('finetune.index') }}">YOLO_finetune</a>
-    <a href="{{ url_for('medsam2.index') }}" aria-current="page">MedSAM2_Finetune</a>
-  </nav>
-  <header class="top">
-    <div>
-      <h1>MedSAM2_Finetune</h1>
-      <p class="sub" id="topSub">Loading&hellip;</p>
+{% extends "base.html" %}
+{% block title %}MedSAM2_Finetune{% endblock %}
+{% block base %}{{ url_for('medsam2.index') }}{% endblock %}
+{% block page_title %}MedSAM2_Finetune{% endblock %}
+{% block tools %}
+  <button id="newRunBtn" class="primary" title="Start a fine-tune (N)">▶ New run</button>
+{% endblock %}
+{% block content %}
+  <!-- ============ LIVE ============ -->
+  <section class="card" id="secLive" data-toc="Live run">
+    <div class="card-head"><div class="grow"><h2>What is running now <span class="mono dim" id="liveId"></span></h2><p class="card-sub" id="liveSub">Nothing is running.</p></div>
+      <div class="card-tools"><button class="danger" id="stopBtn" disabled>■ Stop</button><button id="resumeBtn" title="Continue from last.pt">Resume</button>
+        <button id="rescoreBtn" title="Score best.pt again on val and test">Score again</button></div></div>
+    <ol class="stepper" id="stepper">
+      <li data-stage="prompts"><b>1. YOLO hints</b><div class="pbar"><i></i></div><em></em></li>
+      <li data-stage="train"><b>2. Train</b><div class="pbar"><i></i></div><em></em></li>
+      <li data-stage="evaluate"><b>3. Final check</b><div class="pbar"><i></i></div><em></em></li>
+      <li data-stage="done"><b>4. Done</b><div class="pbar"><i></i></div><em></em></li>
+    </ol>
+    <div class="kpis" id="liveKpis"></div>
+    <div class="two" style="margin-top:12px">
+      <div><h3>Check score, round by round</h3><div id="liveChart"></div></div>
+      <div>
+        <div class="row" style="margin-bottom:6px"><h3 style="flex:1">Log</h3>
+          <input type="search" id="logFilter" placeholder="Only lines with…" style="width:150px" aria-label="Filter the log">
+          <label class="inline"><input type="checkbox" id="logFollow" checked> follow</label>
+          <button class="small" id="logDl">Save</button></div>
+        <pre class="log" id="log" tabindex="0"></pre>
+      </div>
     </div>
-    <div class="gpu" id="gpu" title="How busy the graphics card is right now (updated every 3 seconds)"></div>
-  </header>
+  </section>
 
-  <nav class="jump" aria-label="Sections">
-    <a href="#secHow">How it works</a><a href="#secStart">Start</a><a href="#secLive">Live run</a>
-    <a href="#secRuns">Runs</a><a href="#secCurves">Training charts</a><a href="#secEval">Results</a>
-    <a href="#secRounds">Rounds</a><a href="#secHelp">Did it help?</a>
-    <a href="#secPatient">One patient</a><a href="#secViewer">See a slice</a>
-    <a href="#secWhen">When does it help?</a>
-    <span class="jump-keys"><kbd>&larr;</kbd><kbd>&rarr;</kbd> next slice &middot; <kbd>[</kbd><kbd>]</kbd> next patient</span>
-  </nav>
+  <!-- ============ RUNS ============ -->
+  <div class="section-title" id="secRuns" data-toc="Runs"><h2>Runs</h2><span class="dim">Click a run to open it · tick up to 4 to draw their curves together</span></div>
+  <section class="card">
+    <div id="runsTable"></div>
+    <div class="row" style="margin-top:8px"><button class="small" id="diffBtn">Compare settings of ticked runs</button><span class="note" id="cmpNote" style="margin:0"></span></div>
+  </section>
 
-  <main class="wrap">
-    <!-- ================= HOW IT WORKS ================= -->
-    <section class="card" id="secHow">
-      <div class="card-head">
-        <h2>How this fine-tune works</h2>
-        <p class="card-sub">The stack of slices is treated as a video: a few slices are pointed at,
-          and the answer travels through the rest.</p>
-      </div>
-      <ol class="how">
-        <li>
-          <b>YOLO looks at the slices first.</b>
-          Every axial slice that shows brain becomes the same colour picture YOLO was trained on:
-          <span class="ch r">red = T1C</span>, <span class="ch g">green = T2</span>,
-          <span class="ch b">blue = FLAIR</span>. A fine-tuned YOLO (you choose which run) gives
-          a <b>confidence score per blob</b> and, underneath, a <b>probability for every pixel</b>.
-          We keep the second one — the part YOLO normally throws away.
-        </li>
-        <li>
-          <b>A few slices get pointed at: the anchors.</b>
-          MedSAM2 does not need a hint on every slice. One slice — the one where YOLO is most
-          sure — is prompted with YOLO's probability map. That is the automatic stand-in for
-          the radiologist who would otherwise draw a box there.
-        </li>
-        <li>
-          <b>The answer travels through the volume.</b>
-          From the anchor the prediction is carried <b>up</b> through the stack and then
-          <b>down</b> again, using SAM2's memory: each slice sees what the model decided on the
-          slices before it. Nobody prompts those slices — they are reached, not told.
-        </li>
-        <li>
-          <b>Then a correction round: HITL.</b>
-          After a pass we look for the slice where the result disagrees most with the hint,
-          make that slice a new anchor too, and run the whole thing again. This repeats up to
-          <b data-cfg="hitl.rounds"></b> times, or until the answer stops changing — the same
-          loop the older hand-prompted pipeline used, with YOLO in the human's place.
-        </li>
-        <li>
-          <b>The expert mask is only the answer sheet.</b>
-          Training works on short clips — the anchor plus the slices after it — and the loss
-          compares <em>every</em> frame of the clip with the expert segmentation, including the
-          ones nobody prompted. The expert mask is never shown to the model as a prompt.
-        </li>
-        <li>
-          <b>Every round we check, and we compare against YOLO.</b>
-          The check is the real thing: a full forward-and-backward pass per patient. At the end
-          both models are scored on the same test patients, so the real question gets a real
-          answer: <b>did MedSAM2 make YOLO's guess better or worse?</b>
-        </li>
-      </ol>
-      <p class="note" id="howNote"></p>
+  <div id="analysis" class="hidden" style="display:flex;flex-direction:column;gap:16px">
+    <section class="card" id="secRun" data-toc="This run">
+      <div class="card-head"><div class="grow"><h2>Run <span class="mono" id="selId"></span></h2><p class="card-sub" id="selSub"></p></div>
+        <div class="card-tools"><button id="cfgBtn">Settings</button><a class="btn" id="toResults">Results ↗</a></div></div>
+      <div class="kpis" id="kpis"></div>
     </section>
 
-    <!-- ================= START ================= -->
-    <section class="card" id="secStart">
-      <div class="card-head">
-        <h2>Start a fine-tune</h2>
-        <p class="card-sub">Change anything here before you start. The run keeps its own copy of these settings.</p>
-      </div>
-      <form class="start-form" id="startForm" autocomplete="off">
-
-          <p class="band">Shared <span class="band-tag both">used when learning <em>and</em> when running</span></p>
-
-          <label class="fld">Starting checkpoint <em>(model.checkpoint)</em>
-            <select id="fCheckpoint"></select>
-            <small class="hint">Which MedSAM2 it starts from, before it learns anything from your patients. They differ in what they were trained on. <b class="eg">For example:</b> <code>MedSAM2_latest.pt</code> saw many kinds of medical scan, while <code>MedSAM2_MRI_LiverLesion.pt</code> was tuned for liver MRI.</small></label>
-          <label class="fld">Least brain on a slice <em>(data.min_fg_voxels)</em>
-            <input id="fMinFg" type="number" step="10" min="0" max="50000">
-            <small class="hint">A slice needs at least this many non-black voxels to count as brain at all. <b class="eg">For example:</b> at 100, the top and bottom of the head are skipped and a typical patient keeps about 138 slices out of 182.</small></label>
-
-          <p class="card-sub">The hint YOLO gives</p>
-          <label class="fld">Which YOLO makes the hint <em>(prompt.yolo_run)</em>
-            <select id="fYoloRun"></select>
-            <small class="hint">Which of your trained YOLOs draws the hint. <b class="eg">For example:</b> leave it automatic and it takes run <code>20260921-200857</code>, the one that scored 0.8767 on the test patients.</small></label>
-          <label class="fld">Prompt style <em>(prompt.variant)</em>
-            <select id="fVariant"></select>
-            <small class="hint">YOLO finds several blobs on a slice, each with its own confidence. This decides how they become one number per pixel. <b class="eg">For example:</b> <code>max</code> takes the highest of them; <code>binary</code> throws the softness away and gives a plain yes or no.</small></label>
-          <label class="fld">Lowest YOLO confidence kept <em>(prompt.yolo_conf)</em>
-            <input id="fYoloConf" type="number" step="any" min="0.005" max="0.9">
-            <small class="hint">YOLO reports every blob it is at least this sure of. Lower keeps more guesses, including near-random ones. <b class="eg">For example:</b> at 0.05, one slice came back with nine blobs &mdash; eight sensible, and one scoring 0.050 that covered air outside the head.</small></label>
-          <label class="fld">Blob must score at least <em>(prompt.score_min)</em>
-            <input id="fScoreMin" type="number" step="any" min="0" max="0.95">
-            <small class="hint">A blob this confident counts as YOLO's own answer &mdash; and that is the mask MedSAM2 is scored against. <b class="eg">For example:</b> at 0.25 that same slice keeps 3 blobs of the 9, covering 310 pixels instead of 1,737.</small></label>
-          <label class="fld">How loud the hint is <em>(prompt.logit_scale)</em>
-            <input id="fLogitScale" type="number" step="any" min="0.05" max="20">
-            <small class="hint">How loudly the hint is said. MedSAM2 expects a stronger signal than YOLO produces, so it is multiplied up. <b class="eg">For example:</b> on the untrained model scale 1 scored 0.379 and scale 8 scored 0.757; above 8 it stopped making a difference.</small></label>
-          <label class="fld">"Nothing here" value <em>(prompt.empty_logit)</em>
-            <input id="fEmptyLogit" type="number" step="any" min="-30" max="0">
-            <small class="hint">What a slice with no hint at all is told. <b class="eg">For example:</b> &minus;8 means &ldquo;almost certainly nothing here&rdquo;; &minus;1 would be a much softer &ldquo;probably not&rdquo;.</small></label>
-          <p class="note" id="variantNote"></p>
-
-          <p class="note">The first slice to point at is always the one where YOLO is most sure
-            and the tumour looks biggest &mdash; when running, and for where training clips start.
-            Two safeguards are always on, with no box of their own: the hint is
-            <b>silenced outside the head</b> (YOLO sometimes returns a near-random box at the very
-            bottom of its score list), and a slice that gets a hint is still <b>segmented by
-            MedSAM2</b> rather than having the hint handed straight back as the answer.</p>
-
-          <p class="band">Training only <span class="band-tag train">how it learns</span></p>
-
-          <p class="card-sub">Who it learns from</p>
-          <label class="fld">Patients per round <em>(data.max_train_patients)</em>
-            <input id="fMaxTrain" type="number" step="1" min="1" placeholder="all">
-            <small class="hint">How many patients each round learns from, out of the 721 in the training pool. <b class="eg">For example:</b> 300 takes about 9 minutes a round; using all 721 would take roughly twice that.</small></label>
-          <label class="fld">Patients in the round check <em>(data.val_patients)</em>
-            <input id="fValPatients" type="number" step="1" min="1" placeholder="all">
-            <small class="hint">Patients scored after every round, to decide which round was best. <b class="eg">For example:</b> 40 patients add about 3 minutes to each round, and make the score wobble by about &plusmn;0.01 &mdash; so a smaller difference between rounds is noise.</small></label>
-          <label class="fld">Clips per patient <em>(data.clips_per_patient)</em>
-            <input id="fClips" type="number" step="1" min="1" max="64">
-            <small class="hint">How many short runs of slices are taken from each patient. New ones are drawn every round. <b class="eg">For example:</b> 4 clips from 300 patients is 1,200 a round, picked out of roughly 39,000 possible positions.</small></label>
-          <label class="fld">Share of clips with tumour <em>(data.tumour_clip_fraction)</em>
-            <input id="fTumourClips" type="number" step="any" min="0" max="1">
-            <small class="hint">Share of those clips that must start on a slice where YOLO found tumour. The rest start anywhere. <b class="eg">For example:</b> 0.8 means 8 clips in 10 start on tumour; the other 2 teach it to say &ldquo;nothing here&rdquo;.</small></label>
-
-          <p class="card-sub">Clips &mdash; how far the answer has to travel</p>
-          <label class="fld">Slices in a clip <em>(video.num_frames)</em>
-            <input id="fNumFrames" type="number" step="1" min="2" max="32">
-            <small class="hint">How many slices are in one training clip. The first is pointed at; the rest must be reached through memory. <b class="eg">For example:</b> 8 means 1 anchor and 7 slices it has to carry the answer through.</small></label>
-          <label class="fld">Share read backwards <em>(video.reverse_fraction)</em>
-            <input id="fReverse" type="number" step="any" min="0" max="1">
-            <small class="hint">Share of clips fed the other way round, from high slice numbers down to low. <b class="eg">For example:</b> 0.5 means half of them &mdash; needed because at inference the answer travels both up and down from the anchor.</small></label>
-          <label class="fld">Clips per step <em>(video.batch)</em>
-            <input id="fVideoBatch" type="number" step="1" min="1" max="8">
-            <small class="hint">How many clips go through the graphics card at the same time. <b class="eg">For example:</b> 1 is usually right, because one clip is already 8 pictures; 2 doubles the memory it needs.</small></label>
-
-          <p class="card-sub">How it learns</p>
-          <label class="fld">Which weights may change <em>(train.unfreeze)</em>
-            <select id="fUnfreeze"></select>
-            <small class="hint">Which parts of MedSAM2 are allowed to change. <b class="eg">For example:</b> <code>decoder+prompt+memory</code> lets 11.7M of the 39M weights move, while the part that reads the picture (27M) stays exactly as it was.</small></label>
-          <label class="fld">Rounds <em>(train.epochs)</em>
-            <input id="fEpochs" type="number" step="1" min="1" max="500">
-            <small class="hint">How many times it works through the training patients. <b class="eg">For example:</b> 30 rounds at about 9 minutes each is roughly 4.5 hours.</small></label>
-          <label class="fld">Stop after N quiet rounds <em>(train.patience)</em>
-            <input id="fPatience" type="number" step="1" min="0" max="500">
-            <small class="hint">Stop early if this many rounds in a row fail to beat the best score so far. <b class="eg">For example:</b> 8 &mdash; with a check that wobbles &plusmn;0.01, stopping after 3 would often quit on noise. 0 never stops early.</small></label>
-          <label class="fld">Clips added up before a correction <em>(train.accum)</em>
-            <input id="fAccum" type="number" step="1" min="1" max="64">
-            <small class="hint">How many clips are added up before the model is actually nudged. <b class="eg">For example:</b> 1 clip at a time with accum 4 behaves like learning from 4 clips at once, without needing the memory for 4.</small></label>
-          <label class="fld">Learning rate <em>(train.lr)</em>
-            <input id="fLr" type="number" step="any" min="0.0000001" max="0.01">
-            <small class="hint">The size of the step the outline-drawing part takes each time it learns. <b class="eg">For example:</b> 1e-4 is the usual choice here; ten times bigger tends to wreck it, ten times smaller barely moves.</small></label>
-          <label class="fld">Memory learning rate <em>(train.memory_lr)</em>
-            <input id="fMemoryLr" type="number" step="any" min="0.000000001" max="0.01">
-            <small class="hint">The same, for the memory that carries the answer between slices. <b class="eg">For example:</b> 1e-5 &mdash; ten times smaller than the decoder, the ratio SurgSAM-2 uses. A big step here disturbs every slice nobody pointed at.</small></label>
-          <label class="fld">Image-encoder learning rate <em>(train.vision_lr)</em>
-            <input id="fVisionLr" type="number" step="any" min="0.00000001" max="0.001">
-            <small class="hint">The same, for the part that reads the picture. <b class="eg">For example:</b> only used if you choose <code>all</code> above; otherwise that part is frozen and this number is ignored.</small></label>
-          <label class="fld">Overlap weight <em>(train.dice_weight)</em>
-            <input id="fDiceW" type="number" step="any" min="0" max="10">
-            <small class="hint">How much it cares that the whole shape matches. <b class="eg">For example:</b> 1 alongside pixel weight 1 treats both equally; raising it favours getting the overall blob right over individual pixels.</small></label>
-          <label class="fld">Pixel weight <em>(train.bce_weight)</em>
-            <input id="fBceW" type="number" step="any" min="0" max="10">
-            <small class="hint">How much it cares that each single pixel is right. <b class="eg">For example:</b> 1 &mdash; on mostly-empty slices this part stays small anyway, about 0.03 of a typical 0.10 loss.</small></label>
-          <label class="fld">Left-right flip chance <em>(train.fliplr)</em>
-            <input id="fFliplr" type="number" step="any" min="0" max="1">
-            <small class="hint">Chance of mirroring a clip left to right before learning from it. <b class="eg">For example:</b> 0.5 means half of them. A mirrored brain is still a plausible brain, and tumours happen on both sides.</small></label>
-          <label class="fld">Reader processes <em>(train.workers)</em>
-            <input id="fWorkers" type="number" step="1" min="0" max="16">
-            <small class="hint">Background processes that read patient files while the card is busy. <b class="eg">For example:</b> 4 is plenty here; 0 makes the main process do the reading and is slower.</small></label>
-
-          <p class="band">Inference only <span class="band-tag infer">how it runs on a new patient</span></p>
-
-          <label class="fld">How many anchors to start with <em>(anchors.count)</em>
-            <input id="fAnchorCount" type="number" step="1" min="1" max="20">
-            <small class="hint">How many slices are pointed at before any correction round. <b class="eg">For example:</b> 1 beats 3 &mdash; measured 0.8194 against 0.8056 &mdash; because the correction rounds place later anchors where the answer is actually wrong, while three chosen up front crowd the same spot.</small></label>
-          <label class="fld">Slices between anchors <em>(anchors.min_gap)</em>
-            <input id="fAnchorGap" type="number" step="1" min="1" max="60">
-            <small class="hint">Two anchors must be at least this many slices apart. <b class="eg">For example:</b> 5 stops three neighbouring slices of the same lump all becoming anchors and saying the same thing three times.</small></label>
-          <label class="fld">Rounds <em>(hitl.rounds)</em>
-            <input id="fHitlRounds" type="number" step="1" min="1" max="40">
-            <small class="hint">How many times one more anchor is added and the whole volume is worked out again. Every patient runs them all. <b class="eg">For example:</b> 15 rounds takes about 65 seconds a patient; 3 takes about 15.</small></label>
-          <label class="fld">Tumour cut-off <em>(evaluate.mask_threshold)</em>
-            <input id="fThreshold" type="number" step="any" min="-10" max="10">
-            <small class="hint">MedSAM2 answers with a confidence for every pixel; above this line counts as tumour. <b class="eg">For example:</b> 0 means &ldquo;more likely than not&rdquo;. Raise it to 1 and it draws less; drop it to &minus;1 and it draws more.</small></label>
-          <p class="note">Each round adds one more anchor, on the slice where the result disagrees
-            most with YOLO &mdash; counted in pixels, and it may be a slice YOLO left empty, which
-            anchors a confident &ldquo;nothing here&rdquo; and is the only way to stop a run-away.
-            Then it propagates the whole volume again. The answer kept is the one after
-            the <b>last</b> round &mdash; the results panel then tells you which round count was
-            best on the check pool, to copy back into this box.</p>
-
-          <p class="estimate" id="startEstimate"></p>
-          <p class="form-err" id="startErr"></p>
-          <div class="start-btns">
-            <button class="primary big" id="btnStart" type="submit">&#9654; Start fine-tune</button>
-            <button id="btnSmoke" type="button" title="2 patients, 1 round — checks the whole chain works">Quick check</button>
-            <button id="btnReset" type="button">Reset to file</button>
-          </div>
-        </form>
+    <section class="card" id="secCurves" data-toc="Training charts">
+      <div class="card-head"><div class="grow"><h2>Training charts</h2><p class="card-sub" id="curvesSub">One point per round; hover one chart to read all of them; drag to zoom.</p></div>
+        <div class="card-tools"><button class="small ghost" data-full>⤢</button></div></div>
+      <div class="grid" id="curves"></div>
     </section>
 
-    <!-- ================= LIVE ================= -->
-    <section class="card" id="secLive">
-      <div class="card-head">
-        <h2>What is running now <span class="badge" id="liveId"></span></h2>
-        <div class="btns">
-          <button class="danger" id="btnStop" type="button">&#9632; Stop</button>
-          <button id="btnResume" type="button">&#9654; Continue</button>
-          <button id="btnRescore" type="button" title="Score the best checkpoint on the whole val and test pools again">&#8635; Score again</button>
-        </div>
-      </div>
-      <p class="sub" id="liveSub">No run yet.</p>
-      <ol class="stepper" id="stepper"></ol>
-      <div class="live-kpis" id="liveKpis"></div>
-      <div class="log-head">
-        <label class="tog">Log <input id="logFilter" type="search" placeholder="Show only lines with&hellip;"></label>
-        <label class="tog"><input id="logFollow" type="checkbox" checked> follow the end</label>
-      </div>
-      <pre class="log" id="log">(nothing yet)</pre>
-    </section>
-
-    <!-- ================= RUNS ================= -->
-    <section class="card" id="secRuns">
-      <div class="card-head">
-        <h2>Runs</h2>
-        <p class="card-sub">Click a run to see its results below. Tick up to 3 to draw their curves together.</p>
-      </div>
-      <div class="table-wrap">
-        <table class="tbl" id="runsTbl"><thead></thead><tbody></tbody></table>
-      </div>
-    </section>
-
-    <!-- ================= TRAINING CURVES ================= -->
-    <section class="card" id="secCurves">
-      <div class="card-head">
-        <h2>Training charts</h2>
-        <p class="card-sub">One point per round. Lower loss is better; higher check score is better.</p>
-      </div>
-      <div class="curve-grid" id="curves"></div>
-    </section>
-
-    <!-- ================= RESULTS ================= -->
-    <section class="card" id="secEval">
-      <div class="card-head">
-        <h2>Results <span class="badge" id="evalRunId"></span></h2>
-        <p class="card-sub">Measured on whole patients, at the slice's own size.</p>
-      </div>
+    <section class="card" id="secEval" data-toc="Results">
+      <div class="card-head"><div class="grow"><h2>Results</h2><p class="card-sub">best.pt on whole patients. <b>val</b> (<code>medsam2_val</code>) is for choosing settings; <b>test</b> is the real result.</p></div>
+        <div class="card-tools"><div class="seg" id="splitSeg"><button data-v="test">test</button><button data-v="val">val</button></div></div></div>
       <div class="kpis" id="evalKpis"></div>
-      <div class="curve-grid">
-        <div>
-          <h3>Score at every cut-off</h3>
-          <p class="note">MedSAM2's answer is a confidence per pixel. This is the score when
-            "tumour" means "above this line". The cut-off is chosen on the check pool, never on the test pool.</p>
-          <div id="chSweep"></div>
-        </div>
-        <div>
-          <h3>Slice by slice: did it spot the tumour at all?</h3>
-          <p class="note">Every brain slice of every test patient, counted once.</p>
-          <div id="confusion"></div>
-        </div>
+      <div class="grid" style="margin-top:14px">
+        <div class="s6"><h3>Which cut-off is best</h3><div id="sweepChart"></div></div>
+        <div class="s6"><h3>Slice by slice: found or missed?</h3><div id="confusion"></div><p class="note" id="confNote"></p></div>
       </div>
     </section>
 
-    <!-- ================= HITL ROUNDS ================= -->
-    <section class="card" id="secRounds">
-      <div class="card-head">
-        <h2>What the correction rounds did</h2>
-        <p class="card-sub">Round 1 is the first anchor alone. Each later round added one more anchor
-          and propagated the whole volume again.</p>
+    <section class="card" id="secHelp" data-toc="Did it help?">
+      <div class="card-head"><div class="grow"><h2>Did MedSAM2 help?</h2><p class="card-sub">Every patient scored twice on the same slices: by the YOLO hint alone, and after MedSAM2. Click a dot or row to open that patient.</p></div>
+        <div class="card-tools"><button class="small" id="csvBtn">CSV</button></div></div>
+      <div class="grid">
+        <div class="s6"><h3>YOLO hint against MedSAM2</h3><div id="pairChart"></div></div>
+        <div class="s6"><h3>How much it changed</h3><div id="deltaChart"></div></div>
+        <div class="s6"><h3>Gain by tumour size</h3><div id="sizeGain"></div></div>
+        <div class="s6"><h3>Gain against how sure YOLO was</h3><div id="scoreGain"></div></div>
+        <div class="s6"><h3>By side of the brain</h3><div id="sideGain"></div>
+          <p class="note">Same groups as Analytics: left = more than 2/3 of the tumour on the patient's left, right = less than 1/3, both = in between. Bars = mean, lines = 95% range.</p></div>
+        <div class="s12"><div class="row" style="margin-bottom:6px"><h3 style="flex:1;margin:0">Side and tumour size together</h3>
+            <div class="seg" id="sideSizeSeg"><button data-v="dice3d">MedSAM2</button><button data-v="yolo_dice3d">YOLO hint</button><button data-v="delta">gain</button></div></div>
+          <div id="sideSize"></div>
+          <p class="note">Each square = mean 3D Dice of the patients on that side with that tumour size; hover for how many. Squares with fewer than 5 patients are too small to trust.</p></div>
+        <div class="s6"><h3>Every patient by side</h3><div id="sideScatter"></div>
+          <p class="note">One dot per patient. Dashed lines = the 1/3 and 2/3 group borders. Click a dot to open that patient.</p></div>
       </div>
-      <div class="curve-grid">
-        <div>
-          <h3>Which rounds setting is best</h3>
-          <p class="note">Every point is the score you would get from the <b>whole pool</b> if
-            <code>hitl.rounds</code> were set to that number &mdash; so the points are directly
-            comparable. A patient that ran out of anchors early keeps answering with its last
-            round, which is exactly what it would do at a higher setting. Round N means N anchors.</p>
-          <div id="chRounds"></div>
-        </div>
-        <div>
-          <h3>How many anchors each patient ended up with</h3>
-          <div id="chAnchors"></div>
-        </div>
-      </div>
+      <h3 style="margin:14px 0 8px">Every patient</h3>
+      <div id="patTable"></div>
     </section>
 
-    <!-- ================= DID IT HELP ================= -->
-    <section class="card" id="secHelp">
-      <div class="card-head">
-        <h2>Did MedSAM2 help?</h2>
-        <p class="card-sub">Every dot is one patient, scored twice: once by YOLO alone, once after MedSAM2.</p>
-        <div class="btns">
-          <label class="tog">Pool
-            <select id="helpSplit"><option value="test">test</option><option value="val">check (val)</option></select>
-          </label>
-          <button id="btnCsv" type="button">Download the table (CSV)</button>
-        </div>
+    <section class="card" id="secPatient" data-toc="One patient">
+      <div class="card-head"><div class="grow"><h2>One patient, slice by slice</h2><p class="card-sub" id="profNote">From the stored results when the patient was scored; otherwise the model runs now (a few seconds, GPU).</p></div></div>
+      <div class="row" style="margin-bottom:10px">
+        <label class="field"><span>Checkpoint</span><select id="pWhich"><option value="best.pt">best round</option><option value="last.pt">latest round</option></select></label>
+        <label class="field"><span>Pool</span><select id="pSplit"><option value="test">test</option><option value="val">val</option><option value="train">train</option></select></label>
+        <label class="field" style="min-width:220px"><span>Patient</span><select id="pPatient"></select></label>
+        <button class="primary" id="pRun">▶ Show this patient</button>
       </div>
-      <div class="curve-grid">
-        <div>
-          <h3>YOLO alone vs YOLO + MedSAM2</h3>
-          <p class="note">Above the grey line, MedSAM2 improved that patient. Below it, it made things worse.
-            Click a dot to open that patient.</p>
-          <div id="chPaired"></div>
-        </div>
-        <div>
-          <h3>How much it changed</h3>
-          <p class="note">The difference per patient (MedSAM2 minus YOLO). Bars right of zero are gains.</p>
-          <div id="chDelta"></div>
-        </div>
-      </div>
-      <div class="two">
-        <div>
-          <h3>Helped the most</h3>
-          <div class="table-wrap"><table class="tbl" id="bestTbl"><thead></thead><tbody></tbody></table></div>
-        </div>
-        <div>
-          <h3>Hurt the most</h3>
-          <div class="table-wrap"><table class="tbl" id="worstTbl"><thead></thead><tbody></tbody></table></div>
-        </div>
-      </div>
+      <div class="kpis" id="profKpis"></div>
+      <div id="profChart" style="margin-top:10px"></div>
     </section>
 
-    <!-- ================= ONE PATIENT ================= -->
-    <section class="card" id="secPatient">
-      <div class="card-head">
-        <h2>One patient, slice by slice</h2>
-        <p class="card-sub">Propagates the whole volume with the chosen checkpoint (a few seconds).</p>
+    <section class="card" id="secViewer" data-toc="See a slice">
+      <div class="card-head"><div class="grow"><h2>See a slice</h2>
+        <p class="card-sub">The frame, the hint YOLO gave, YOLO's own mask and MedSAM2's answer:
+          <span class="lg" style="--c:var(--tp)">found</span> <span class="lg" style="--c:var(--fn)">missed</span> <span class="lg" style="--c:var(--fp)">drawn, not tumour</span>. The patient's right is on your left.</p></div>
+        <div class="card-tools">
+          <label class="inline"><input type="checkbox" class="panel" value="frame" checked> frame</label>
+          <label class="inline"><input type="checkbox" class="panel" value="prompt" checked> hint</label>
+          <label class="inline"><input type="checkbox" class="panel" value="yolo" checked> YOLO</label>
+          <label class="inline"><input type="checkbox" class="panel" value="medsam2" checked> MedSAM2</label></div></div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="small" id="zPlay" title="Play through the tumour slices (P)">▶ Play</button>
+        <input type="range" id="zRange" min="0" max="0" value="0" style="flex:1" aria-label="Slice"><b class="mono" id="zLabel">–</b>
       </div>
-      <div class="viewer-ctrls">
-        <label class="fld">Checkpoint <select id="pWhich">
-          <option value="best.pt">best round</option><option value="last.pt">latest round</option></select></label>
-        <label class="fld">Pool <select id="pSplit">
-          <option value="test">test</option><option value="val">check (val)</option><option value="train">train</option></select></label>
-        <label class="fld grow">Patient <select id="pPatient"></select></label>
-        <button class="primary" id="btnProfile" type="button">&#9654; Run this patient</button>
-      </div>
-      <div id="chProfile"></div>
-      <p class="note" id="profileNote"></p>
-      <p class="note" id="roundsNote"></p>
-      <div class="table-wrap" id="roundsWrap">
-        <table class="tbl" id="roundsTbl"><thead></thead><tbody></tbody></table>
-      </div>
+      <div class="viewer"><div><div class="imgbox"><img id="sliceImg" alt="Slice panels"><div class="loading hidden" id="sliceLoading">Working…</div></div>
+        <div class="note" id="panelKey" style="display:grid;gap:6px;margin:6px 0 0;text-align:center;line-height:1.5"></div></div>
+        <div><div class="kpis" id="sliceSide"></div></div></div>
     </section>
+  </div>
 
-    <!-- ================= SLICE VIEWER ================= -->
-    <section class="card" id="secViewer">
-      <div class="card-head">
-        <h2>See a slice</h2>
-        <p class="card-sub">The frame, the hint YOLO gave, and what each model made of it.</p>
-      </div>
-      <div class="viewer-ctrls">
-        <label class="fld grow">Slice <input id="zRange" type="range" min="0" max="0" value="0">
-          <b id="zLabel">&mdash;</b></label>
-        <label class="tog"><input type="checkbox" class="panel" value="frame" checked> frame</label>
-        <label class="tog"><input type="checkbox" class="panel" value="prompt" checked> YOLO hint</label>
-        <label class="tog"><input type="checkbox" class="panel" value="yolo" checked> YOLO mask</label>
-        <label class="tog"><input type="checkbox" class="panel" value="medsam2" checked> MedSAM2</label>
-      </div>
-      <div class="viewer">
-        <div class="viewer-img"><img id="sliceImg" alt="Slice panels"></div>
-        <div class="viewer-side" id="sliceSide"></div>
-      </div>
-      <p class="note">Colours on the mask panels: <span style="color:#0ca30c">green = found</span>,
-        <span style="color:#fab219">orange = missed</span>, <span style="color:#d03b3b">red = drawn but no tumour</span>.
-        On the hint panel, blue is "probably nothing" and red is "almost certainly tumour".</p>
-    </section>
-
-    <!-- ================= WHEN DOES IT HELP ================= -->
-    <section class="card" id="secWhen">
-      <div class="card-head">
-        <h2>When does it help?</h2>
-        <p class="card-sub">The same patients, sorted by what might explain the gain.</p>
-      </div>
-      <div class="curve-grid">
-        <div>
-          <h3>Gain vs how big the tumour is</h3>
-          <div id="chBySize"></div>
-        </div>
-        <div>
-          <h3>Gain vs how many anchors it needed</h3>
-          <div id="chByAnchors"></div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <script src="{{ url_for('finetune.static', filename='charts.js') }}"></script>
+  <details class="card" id="secHow" data-toc="How it works">
+    <summary style="cursor:pointer"><h2 style="display:inline">How this fine-tune works</h2></summary>
+    <ol style="line-height:1.6;color:var(--muted)">
+      <li><b>YOLO looks first.</b> Each brain slice (red = T1C, green = T2, blue = FLAIR) goes through a fine-tuned YOLO; we keep its probability for every pixel.</li>
+      <li><b>Every slice gets YOLO's hint</b> as a mask prompt — MedSAM2's job is to fix that guess, not to find the tumour from scratch.</li>
+      <li><b>The neighbours are in memory.</b> The start slice (YOLO's most confident) is segmented alone; two passes then run up and down the stack, each slice seeing its hint <em>and</em> the memory of the slices just passed.</li>
+      <li><b>Training teaches fixing, not copying:</b> <b data-cfg="augment.p"></b> of training hints are damaged on purpose while the answer stays the expert mask.</li>
+      <li><b>When running:</b> the mirrored patient is averaged in and pieces under <b data-cfg="evaluate.min_component"></b> voxels are removed.</li>
+      <li><b>The expert mask is only ever the answer sheet</b> — never shown to the model as a prompt, never used to pick slices.</li>
+    </ol>
+  </details>
+{% endblock %}
+{% block scripts %}
   <script src="{{ url_for('medsam2.static', filename='medsam2.js') }}"></script>
-</body>
-</html>
+{% endblock %}
