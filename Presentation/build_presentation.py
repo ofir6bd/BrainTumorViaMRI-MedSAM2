@@ -131,11 +131,15 @@ HE_NOTES = [
 המטרה: סימון תלת-ממדי מהיר ועקבי, שהרופא רק צריך לבדוק ולאשר.
 מסר: סימון אוטומטי חוסך זמן למומחים ונותן מדידות עקביות.""",
     # 3
-    """כל סריקה כוללת כמה רצפים של MRI, וכל רצף מראה את הגידול אחרת: T1C עם חומר ניגוד מדגיש את החלק הפעיל, T2 ו-FLAIR מדגישים נוזלים ובצקת.
-המומחים סימנו ארבעה חלקים: ליבה מתה (NETC), בצקת (SNFH), גידול פעיל (ET) וחלל ניתוח (RC). כ-85% מהסריקות הן אחרי ניתוח.
-אנחנו מסמנים את הגידול כולו, כלומר את כל החלקים יחד.
-המדד שלנו הוא 3D Dice: כמה המסכה של המודל חופפת למסכה של המומחה בנפח כולו. 0 = אין חפיפה, 1 = מושלם. מחשבים לכל מטופל ואז ממצעים.
-שלושה רצפים (T1C, T2, FLAIR) נכנסים כתמונה צבעונית אחת: אדום, ירוק וכחול.""",
+    """כאן רואים מטופל אחד, BraTS-GLI-00046-101, בפרוסה 115, בהגדלה על אזור הגידול. בפרוסה הזאת יש את כל ארבעת חלקי הגידול.
+T1 בלי חומר ניגוד: הטבעת של הגידול הפעיל (המסומנת בסגול) כמעט לא בהירה. זו תמונת ה"לפני" שמשווים אליה. המודלים שלנו לא משתמשים בה.
+T1C, אחרי הזרקת חומר ניגוד: אותה טבעת נדלקת בבהירות. זה הגידול הפעיל (ET). בפנים נשארת ליבה כהה, הרקמה המתה (NETC, באדום).
+T2: בצקת ונוזלים בהירים. הקו הירוק מסמן את הבצקת (SNFH).
+FLAIR: כמו T2, אבל הנוזל הרגיל של המוח (בחדרים) כהה, ולכן הבצקת בולטת יותר.
+בצד ימין: הסימון של המומחה, כולל חלל הניתוח (RC) בצהוב.
+אנחנו מסמנים את הגידול כולו, כלומר את כל החלקים יחד. המודלים שלנו מקבלים את T1C, T2 ו-FLAIR כתמונה צבעונית אחת.
+המדד: 3D Dice, החפיפה בין המסכה של המודל לזו של המומחה בכל הנפח. 0 = אין חפיפה, 1 = מושלם.
+מסר: אף רצף לבד לא מראה את כל הגידול, ולכן משלבים כמה רצפים.""",
     # 4
     """שני המודלים משלימים זה את זה.
 YOLO11: מודל זיהוי מהיר שגם מצייר מסכה לכל צורה שהוא מוצא. הוא עובד על פרוסה אחת בכל פעם ולא יודע מה יש בפרוסות השכנות. לכל צורה הוא נותן ציון ביטחון בין 0 ל-1.
@@ -255,28 +259,28 @@ def build():
           "Automatic 3D segmentation saves expert time and makes tumour measurements consistent.",
           ["Manual contouring is the bottleneck; variability between experts limits how 'perfect' any model can look."])
 
-    # 3 ---- background: MRI + BraTS
-    s = new_slide(prs, "MRI sequences and the BraTS 2024 data", 3, "Background")
-    for i, (f, cap) in enumerate([("mri_t1c.png", "T1C (with contrast)"), ("mri_t2.png", "T2"), ("mri_flair.png", "FLAIR"),
-                                  ("mri_flair_seg.png", "FLAIR + expert labels")]):
-        picture(s, f, Inches(0.6 + i * 2.05), Inches(1.6), Inches(1.9), Inches(2.3), caption=cap)
-    text(s, Inches(0.6), Inches(4.35), Inches(8.2), Inches(2.0), [
-        "Each scan: 4 MRI sequences, 182 × 218 × 182 voxels of 1 mm³ (1,000 voxels = 1 mL).",
-        "Experts label 4 parts: **NETC** dead core, **SNFH** swelling, **ET** enhancing tumour, **RC** surgery cavity.",
-        "Our target: the **whole tumour** = all labelled parts together.",
-    ], size=16, bullet=True, space=8)
-    box(s, Inches(9.0), Inches(1.6), Inches(3.7), Inches(4.5), fill=PANEL)
-    text(s, Inches(9.2), Inches(1.75), Inches(3.4), Inches(4.3), [
-        "**How we score: 3D Dice**",
-        "Dice = 2 × overlap ÷ (model + expert)",
-        "0 = no overlap, 1 = perfect",
-        "Computed per patient over the whole 3D volume, then averaged.",
-        "Each sequence shows the tumour differently, so we feed three of them (T1C, T2, FLAIR) as one colour picture.",
-    ], size=15, space=10)
-    takeaway(s, "Different MRI sequences show different tumour parts; we score the whole-tumour outline with 3D Dice.")
-    notes(s, "Shows the MRI sequences, the four labelled tumour parts and how results are scored.",
-          "Different MRI sequences show different tumour parts; we score the whole-tumour outline with 3D Dice.",
-          ["85% of the scans are post-operative (they contain a surgery cavity)."])
+    # 3 ---- background: MRI sequences, one patient
+    s = new_slide(prs, "Each MRI sequence shows a different part of the tumour", 3,
+                  "Background · patient BraTS-GLI-00046-101, slice 115, zoomed on the tumour")
+    panels = [("mod_t1.png", "T1 (no contrast)", "Rim (ET, violet) barely visible. Not used by our models."),
+              ("mod_t1c.png", "T1C (with contrast)", "Rim lights up (ET, violet); dead core dark (NETC, red)."),
+              ("mod_t2.png", "T2", "Swelling and fluid bright (SNFH, green)."),
+              ("mod_flair.png", "FLAIR", "Like T2, but brain fluid is dark: swelling stands out."),
+              ("mod_labels.png", "Expert labels", "NETC red · SNFH green · ET violet · RC (cavity) yellow")]
+    pw, step, x0, top = Inches(2.05), Inches(2.32), Inches(0.985), Inches(1.45)
+    for i, (f, head, cap) in enumerate(panels):
+        l = x0 + i * step
+        pic = picture(s, f, l, top, pw, Inches(3.2), center=False)
+        y = pic.top + pic.height + Inches(0.06)
+        text(s, l, y, pw, Inches(0.3), f"**{head}**", size=13, align=PP_ALIGN.CENTER, space=0)
+        text(s, l, y + Inches(0.28), pw, Inches(0.6), cap, size=11, color=MUTED, align=PP_ALIGN.CENTER, space=0)
+    text(s, Inches(0.6), Inches(5.45), Inches(12.1), Inches(0.8), [
+        "Target: the **whole tumour** (all four parts). Our models see T1C, T2 and FLAIR as one colour picture.",
+        "Score: **3D Dice** = 2 × overlap ÷ (model + expert), from 0 to 1, per patient.",
+    ], size=14, bullet=True, space=3)
+    takeaway(s, "No single sequence shows the whole tumour, so the models look at several sequences together.")
+    notes(s, "Shows one patient in four MRI sequences and which tumour part each sequence reveals.",
+          "No single sequence shows the whole tumour, so the models look at several sequences together.")
 
     # 4 ---- background: models
     s = new_slide(prs, "Two models with different strengths", 4, "Background")
