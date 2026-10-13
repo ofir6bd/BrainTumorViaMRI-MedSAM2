@@ -23,7 +23,7 @@ BG, PANEL, TEXT, MUTED = "0F1220", "1A1F33", "E8EAF2", "9AA0B8"
 YOLO_C, MS_C, GOOD, LINE = "3987E5", "E06A2E", "2FB35C", "2A2F47"
 FONT = "Segoe UI"
 W, H = Inches(13.333), Inches(7.5)
-TOTAL = 15
+TOTAL = 21
 
 
 def rgb(h):
@@ -97,6 +97,7 @@ def new_slide(prs, title, n, kicker=None):
     if kicker:
         text(s, Inches(0.6), Inches(0.28), Inches(9), Inches(0.35), kicker.upper(), size=12, color=MS_C)
     text(s, Inches(0.6), Inches(0.52), Inches(12.1), Inches(0.8), title, size=32, color=TEXT, space=0)
+    n = len(prs.slides._sldIdLst)
     text(s, Inches(12.0), Inches(7.05), Inches(1.0), Inches(0.3), f"{n} / {TOTAL}", size=11, color=MUTED, align=PP_ALIGN.RIGHT)
     return s
 
@@ -141,11 +142,24 @@ FLAIR: כמו T2, אבל הנוזל הרגיל של המוח (בחדרים) כה
 המדד: 3D Dice, החפיפה בין המסכה של המודל לזו של המומחה בכל הנפח. 0 = אין חפיפה, 1 = מושלם.
 מסר: אף רצף לבד לא מראה את כל הגידול, ולכן משלבים כמה רצפים.""",
     # 4
-    """שני המודלים משלימים זה את זה.
-YOLO11: מודל זיהוי מהיר שגם מצייר מסכה לכל צורה שהוא מוצא. הוא עובד על פרוסה אחת בכל פעם ולא יודע מה יש בפרוסות השכנות. לכל צורה הוא נותן ציון ביטחון בין 0 ל-1.
-SAM2 של Meta יודע לסמן אובייקט לפי רמז: נקודה, מלבן או מסכה. הוא מתייחס לסריקה תלת-ממדית כמו לווידאו וזוכר את הפרוסות שכבר עבר. MedSAM2 הוא SAM2 שאומן בנוסף על תמונות רפואיות.
-ל-MedSAM2 יש כ-39 מיליון משקלים, 70% מהם במקודד התמונה.
-מסר: YOLO טוב במציאה, MedSAM2 טוב בתיקון בעזרת ההקשר התלת-ממדי.""",
+    """המודל הראשון: YOLO11-seg. נראה מה הוא מקבל ומה הוא מחזיר, על פרוסה אמיתית.
+הקלט: פרוסה אחת בלבד, כתמונה צבעונית: אדום = T1C, ירוק = T2, כחול = FLAIR, בגודל 512 על 512.
+הפלט: לכל צורה שהוא מוצא יש מלבן, ציון ביטחון בין 0 ל-1, ומסכה, כלומר אילו פיקסלים שייכים לצורה.
+בפרוסה הזאת YOLO מצא שתי צורות, עם ביטחון 0.75 ו-0.35. אנחנו שומרים כל צורה עם ביטחון 0.05 ומעלה.
+החיסרון: YOLO רואה רק את הפרוסה הנוכחית ולא זוכר מה היה בפרוסות השכנות.
+המודל אומן מראש על תמונות יומיומיות, ואנחנו אימנו אותו על הסריקות שלנו.
+מסר: YOLO מהיר וטוב במציאת הגידול, אבל עיוור להקשר התלת-ממדי.""",
+    # 5
+    """המודל השני: MedSAM2. הוא מבוסס על SAM2 של Meta, ש"יודע לסמן כל דבר" לפי רמז, ואומן בנוסף על סריקות רפואיות.
+הוא מקבל שלושה קלטים בכל פרוסה:
+אחד, אותה תמונה צבעונית ש-YOLO ראה.
+שניים, הרמז מ-YOLO: עד כמה YOLO בטוח, לכל פיקסל.
+שלוש, הזיכרון: פרוסת ההתחלה ועוד 6 הפרוסות האחרונות שהוא כבר סימן. כאן רואים שלוש מהן.
+הוא מתקדם מפרוסת ההתחלה למעלה ואז למטה, וכל תשובה נכנסת לזיכרון של הפרוסה הבאה.
+הפלט: מסכה מתוקנת, וגם ציון "יש כאן גידול?". אם הציון מתחת ל-0, כל הפרוסה נמחקת. כאן הציון הוא 12.9, כלומר כן.
+ה-Dice בפרוסה הזאת עלה מ-0.852 של YOLO ל-0.882.
+למודל יש 39 מיליון משקלים, 70% מהם במקודד התמונה.
+מסר: MedSAM2 משלב את התמונה, הרמז והזיכרון, ומחזיר מסכה מתוקנת לכל פרוסה.""",
     # 5
     """שאלת המחקר: האם MedSAM2, כשהוא מקבל רמז מ-YOLO בכל פרוסה, מסמן את הגידול טוב יותר מ-YOLO לבד?
 כדי שההשוואה תהיה הוגנת שמרנו על כמה כללים:
@@ -185,6 +199,29 @@ MedSAM2 מתחיל מהפרוסה שבה YOLO הכי בטוח, ואז עובר �
 ממירים את ההסתברות ל-logit, הסולם ש-MedSAM2 עצמו משתמש בו, שבו 0 הוא 50%. הלוגיט מדגיש את הקצוות: הוא מבדיל בין "די בטוח" ל"בטוח מאוד". אחרי כפל ב-8 הטווח הוא בערך מינוס 44 עד 44.
 בפרוסות ש-YOLO לא מצא בהן כלום ומחוץ לראש שמים מינוס 20: "אין כאן כלום".
 בתמונה, משמאל לימין: התמונה, הרמז, המסכה של YOLO עצמו, והתשובה של MedSAM2. שימו לב ש-MedSAM2 תיקן חלק מהאזורים שבהם YOLO טעה.""",
+    # hint, step by step
+    """כאן רואים, על המטופל BraTS-GLI-00046-101 בפרוסה 115, איך הפלט של YOLO הופך לרמז ש-MedSAM2 מקבל. אלה בדיוק הערכים שהמודל קיבל.
+שלב A: YOLO נותן לכל פיקסל הסתברות בין 0 ל-1, ושומרים אותה כמספר בין 0 ל-255. בתמונה הימנית (A) רואים שהאזור בטוח מאוד ברובו. הקצה הישר הוא אמיתי: YOLO חותך את המסכה של כל צורה בגבול המלבן שלה.
+שלב B: ממירים את ההסתברות ללוגיט, ln של p חלקי 1 פחות p. הטווח הוא מינוס 5.5 עד 5.5, ו-0 הוא 50%.
+שלב C: מכפילים ב-8, והטווח נהיה מינוס 44 עד 44. התמונה של B ו-C זהה, רק הסקאלה משתנה, ולכן הן מוצגות יחד.
+שלב D: "אין כאן כלום". כל פרוסה ש-YOLO לא מצא בה אף צורה (68 מתוך 137 פרוסות אצל המטופל הזה) וכל מה שמחוץ לראש מקבלים מינוס 20. פיקסל נחשב בתוך הראש אם לפחות אחד מ-T1C, T2 או FLAIR שונה מ-0. בתמונה D רואים את קו הראש בלבן.
+בהיסטוגרמה: כל 150,618 הפיקסלים שקיבלו הסתברות מעל 0. רובם בקצוות, כמעט בטוחים או כמעט אפס, ומעט מאוד באמצע. ובטבלה: איך כל הסתברות מתורגמת לערך הסופי.
+מסר: הרמז שומר את רמת הביטחון של YOLO לכל פיקסל, בסקאלה ש-MedSAM2 מבין, עם "לא" ברור איפה ש-YOLO לא ראה כלום.""",
+    # hint vs own mask
+    """בשקופית הזאת משווים בין שני דברים ש-YOLO מייצר מאותה פרוסה: הרמז שעובר ל-MedSAM2, והמסכה של YOLO עצמו. זה אותו מטופל, בפרוסה 120.
+הרמז של YOLO כולל את כל הצורות עם ביטחון 0.05 ומעלה. לכל פיקסל יש הסתברות בין 0 ל-1, שאומרת עד כמה YOLO בטוח שזה גידול. בתמונה הראשונה רואים שבע צורות: אחת עם ביטחון 0.90, ושש חלשות בין 0.06 ל-0.23.
+המסכה של YOLO עצמו כוללת רק צורות עם ביטחון 0.25 ומעלה, ופיקסל נחשב גידול רק אם ההסתברות שלו מעל 0.5. זו תשובה של כן או לא לכל פיקסל, וזו התשובה הסופית של YOLO. אנחנו משתמשים בה רק כדי להשוות מול MedSAM2. בתמונה השנייה היא בכחול, והקו הירוק הוא הסימון של המומחה.
+בתמונה השלישית, בכתום, רואים מה יש רק ברמז: הצורות החלשות, וגם השוליים החלשים של הצורה החזקה. בפרוסה הזאת אלה 1,162 פיקסלים, ורק 99 מהם הם גידול אמיתי.
+כלומר, הרמז נותן ל-MedSAM2 יותר מידע, אבל גם יותר רעש, והמודל צריך ללמוד במה לסמוך.
+מסר: הרמז מכיל את כל מה ש-YOLO חושד בו, והמסכה של YOLO היא רק התשובה הבטוחה שלו.""",
+    # mirror check
+    """בדיקת המראה. כאן מטופל מקבוצת המבחן, BraTS-GLI-00008-101, בפרוסה 78.
+מריצים את MedSAM2 פעמיים, על כל המעבר למעלה ולמטה: פעם על המטופל הרגיל, ופעם על תמונת מראה שלו, שמאל וימין הפוכים. רואים את זה בשתי התמונות למעלה, כולל הרמז של YOLO באדום. שתי הגרסאות רצות יחד באותה אצווה, ולכן זה כמעט לא עולה זמן נוסף.
+אחר כך הופכים את התשובה של גרסת המראה בחזרה, כדי שתתיישר עם התשובה הרגילה, וממצעים את שתיהן פיקסל אחר פיקסל. רק אחרי הממוצע מפעילים את סף ה-50%.
+בשורה התחתונה: התשובה הרגילה, התשובה של המראה אחרי ההיפוך, ובצהוב המקומות שבהם הן לא מסכימות. רואים שזה רק בשוליים של הגידול. בסוף, התוצאה הממוצעת מול המומחה.
+המספרים במטופל הזה: Dice של 0.8457 לגרסה הרגילה, 0.8554 למראה, ו-0.8524 לממוצע. שתי התשובות שונות רק ב-1,312 ווקסלים בכל הנפח.
+חשוב להיות כנים: על כל המטופלים, בריצה קודמת, זה הוסיף רק 0.0004 ל-Dice. זה כמעט חינם, אז השארנו את זה, אבל זה לא מה שעושה את ההבדל.
+מסר: בדיקת המראה היא דעה שנייה זולה שמייצבת את השוליים, אבל התרומה שלה קטנה.""",
     # 11
     """איך מאמנים את MedSAM2 לתקן ולא להעתיק.
 התאמנו על 500 סריקות, בקטעים של 8 פרוסות, במשך 15 סבבים. אחרי כל סבב בדקנו על 80 סריקות ולידציה ושמרנו את הטוב ביותר.
@@ -192,6 +229,15 @@ MedSAM2 מתחיל מהפרוסה שבה YOLO הכי בטוח, ואז עובר �
 את מקודד התמונה הגדול השארנו קפוא. ניסינו לאמן גם אותו, וזה לא שיפר.
 הטריק החשוב: ב-30% מהדוגמאות קלקלנו את הרמז בכוונה (הסרנו, הזזנו, הגדלנו, הקטנו), בזמן שהתשובה נשארת המסכה של המומחה. כך המודל לומד לתקן את YOLO ולא סתם להעתיק אותו.
 בגרפים רואים שהציון מתייצב בערך מסבב 10.""",
+    # which parts we train
+    """בשקופית הזאת: אילו חלקים של MedSAM2 אימנו, ולמה.
+בתרשים רואים את המבנה: מקודד התמונה מסתכל על הפרוסה, מקודד הרמז קורא את הרמז, קשב הזיכרון מוסיף מידע מהפרוסות הקודמות, מפענח המסכה מצייר את התשובה, ומקודד הזיכרון שומר כל פרוסה לזיכרון. הערה: התרשים לקוח מהמאמר Medical SAM 2. אצלנו הזיכרון פשוט יותר, פרוסת ההתחלה ועוד 6 הפרוסות האחרונות, בלי מיון ובלי דגימה משוקללת.
+מקודד התמונה הוא החלק הכי גדול, 27 מיליון מתוך 39 מיליון משקלים. SAM2 אימן אותו על מיליוני תמונות ו-MedSAM2 התאים אותו לסריקות רפואיות, כך שהוא כבר רואה טוב, והנתונים שלנו קטנים יחסית. לכן הוא לומד הכי לאט, או נשאר קפוא.
+מקודד הרמז מעולם לא ראה רמז רך כמו של YOLO. מפענח המסכה צריך ללמוד מתי לסמוך על הרמז ומתי לתקן אותו. והזיכרון צריך ללמוד להעביר את הגידול מפרוסה לפרוסה.
+בטבלה העליונה: כמה משקלים יש בכל חלק ובאיזה קצב הוא לומד. בטבלה התחתונה: שלוש אפשרויות אימון, באותם 15 סבבים.
+בחרנו לפי הוולידציה: הוספת מקודד התמונה יצאה תיקו, 0.8917 מול 0.8918, ולקחה פי 3.5 זמן. ב-test היא קצת גבוהה יותר, אבל לא בוחרים לפי ה-test.
+הריצה הכי טובה שלנו מאמנת את המפענח, את מקודד הרמז ואת הזיכרון, עם "אין כאן כלום" של מינוס 20.
+מסר: מספיק לאמן את 30% מהמודל שקוראים את הרמז ומעבירים זיכרון. מקודד התמונה הגדול יכול להישאר קפוא.""",
     # 12
     """התוצאות על קבוצת המבחן, 324 מטופלים שאף מודל לא ראה.
 MedSAM2 הגיע ל-0.8988, מול 0.8834 של הגרסה הכי טובה של YOLO.
@@ -218,8 +264,11 @@ MedSAM2 מצא 96.9% מפרוסות הגידול, והשאיר ריקות 96.4% 
 גבולות חדים יותר: למצע כמה מודלי MedSAM2 שכבר אימנו (אנסמבל), בלי אימון חדש; פונקציית הפסד שמתמקדת בגבולות; ורזולוציית פלט גבוהה יותר.
 רמזים טובים יותר וגידולים קטנים: לשקלל כל פיקסל ברמז לפי הביטחון של הצורה; לתת ל-YOLO הקשר תלת-ממדי; ולהתמקד בגידולים מתחת ל-10 מ"ל.
 מעבר לפרויקט: לסמן גם את חלקי הגידול (ET, NETC, SNFH) ולא רק את כולו; לבדוק על סריקות מבתי חולים אחרים; להסיר את החפיפה של אנשים בין המבחן לאימון; ולמדוד מהירות.
-חשוב לזכור שגם מומחים לא מסכימים ביניהם לגמרי, ולכן השיפורים מכאן יהיו קטנים.
-תודה רבה, אשמח לשאלות.""",
+חשוב לזכור שגם מומחים לא מסכימים ביניהם לגמרי, ולכן השיפורים מכאן יהיו קטנים.""",
+    # 17
+    """תודה רבה על ההקשבה.
+לסיכום במשפט אחד: שילוב של YOLO, שמוצא את הגידול בכל פרוסה, עם MedSAM2, שמתקן אותו בעזרת הפרוסות השכנות, הגיע ל-3D Dice של 0.8988 על קבוצת המבחן, שיפור של 0.0154 מעל הגרסה הכי טובה של YOLO. 185 מטופלים השתפרו ורק 18 הורעו.
+אשמח לשאלות.""",
 ]
 
 
@@ -282,27 +331,68 @@ def build():
     notes(s, "Shows one patient in four MRI sequences and which tumour part each sequence reveals.",
           "No single sequence shows the whole tumour, so the models look at several sequences together.")
 
-    # 4 ---- background: models
-    s = new_slide(prs, "Two models with different strengths", 4, "Background")
-    for i, (name, col, items) in enumerate([
-        ("YOLO11-seg  (Ultralytics)", YOLO_C, [
-            "Fast object detector that also draws a mask for each shape it finds.",
-            "Works on **one 2D slice at a time**, no knowledge of neighbouring slices.",
-            "Gives a **confidence** for every shape (0–1).",
-            "We use the medium model (yolo11m-seg), pretrained on everyday photos."]),
-        ("SAM2 → MedSAM2", MS_C, [
-            "**Segment Anything 2** (Meta): outlines an object from a **prompt** (point, box or mask).",
-            "Treats a 3D scan **like a video**: remembers the slices it already did.",
-            "**MedSAM2** = SAM2 further trained on medical images and scans.",
-            "39 M weights: image encoder 70%, memory 19%, mask decoder 11%, prompt encoder <0.1%."])]):
-        l = Inches(0.6 + i * 6.15)
-        box(s, l, Inches(1.6), Inches(5.95), Inches(4.5), fill=PANEL)
-        text(s, l + Inches(0.25), Inches(1.8), Inches(5.5), Inches(0.5), f"**{name}**", size=20, color=col)
-        text(s, l + Inches(0.25), Inches(2.45), Inches(5.5), Inches(3.6), items, size=16, bullet=True, space=10)
-    takeaway(s, "YOLO is good at finding the tumour on a slice; MedSAM2 can refine it using the slices around it.")
-    notes(s, "Introduces the two models and why they complement each other.",
-          "YOLO is good at finding the tumour on a slice; MedSAM2 can refine it using the slices around it.",
-          ["Weight counts measured on the actual checkpoint: 38,962,498 in total."])
+    # 4 ---- YOLO: input -> output
+    s = new_slide(prs, "Model 1 · YOLO11-seg: one slice in, shapes out", 4, "Background · the models")
+    iw, top = Inches(2.8), Inches(1.5)
+    pin = picture(s, "io_yolo_input.png", Inches(0.6), top, iw, Inches(3.4), center=False)
+    text(s, Inches(0.6), pin.top + pin.height + Inches(0.05), iw, Inches(0.75),
+         "**Input:** one slice as a colour picture (red = T1C, green = T2, blue = FLAIR), 512 × 512", size=12, color=MUTED, align=PP_ALIGN.CENTER)
+    mid = pin.top + pin.height // 2
+    box(s, Inches(3.5), mid - Inches(0.16), Inches(0.4), Inches(0.32), fill=MUTED, shape=MSO_SHAPE.RIGHT_ARROW)
+    b = box(s, Inches(4.0), mid - Inches(0.8), Inches(1.9), Inches(1.6), fill=YOLO_C, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+    b.adjustments[0] = 0.12
+    text(s, Inches(4.05), mid - Inches(0.62), Inches(1.8), Inches(0.45), "**YOLO11-seg**", size=17, color="FFFFFF", align=PP_ALIGN.CENTER)
+    text(s, Inches(4.05), mid - Inches(0.1), Inches(1.8), Inches(0.8), "medium model\n2D, slice by slice", size=12, color="FFFFFF", align=PP_ALIGN.CENTER)
+    box(s, Inches(6.0), mid - Inches(0.16), Inches(0.4), Inches(0.32), fill=MUTED, shape=MSO_SHAPE.RIGHT_ARROW)
+    pout = picture(s, "io_yolo_output.png", Inches(6.5), top, iw, Inches(3.4), center=False)
+    text(s, Inches(6.5), pout.top + pout.height + Inches(0.05), iw, Inches(0.75),
+         "**Output:** for every shape a box, a confidence (0–1) and a mask", size=12, color=MUTED, align=PP_ALIGN.CENTER)
+    text(s, Inches(9.7), Inches(1.6), Inches(3.0), Inches(4.6), [
+        "Sees **one 2D slice at a time**, with no memory of the slices around it.",
+        "Finds each tumour shape and gives it a **confidence** from 0 to 1.",
+        "We keep every shape at **0.05 or more**; on this slice: 0.75 and 0.35.",
+        "Fine-tuned from a model pretrained on everyday photos (yolo11m-seg).",
+    ], size=15, bullet=True, space=10)
+    takeaway(s, "YOLO turns each slice into shapes with confidences, fast, but blind to the slices around it.")
+    notes(s, "Shows what YOLO receives and what it returns on one real slice.",
+          "YOLO turns each slice into shapes with confidences, fast, but blind to the slices around it.")
+
+    # 5 ---- MedSAM2: inputs -> output
+    s = new_slide(prs, "Model 2 · MedSAM2: three inputs, one corrected mask", 5, "Background · the models")
+    rows = [("io_yolo_input.png", "**1. The picture**", "the same colour slice"),
+            ("io_ms_hint.png", "**2. YOLO's hint**", "how sure YOLO is, per pixel"),
+            (None, "**3. Memory**", "start slice + the last 6 slices")]
+    for r, (f, head, sub) in enumerate(rows):
+        y = Inches(1.5) + r * Inches(1.6)
+        if f:
+            picture(s, f, Inches(0.6), y, Inches(1.25), Inches(1.5), center=False)
+        else:
+            for j in range(3):
+                picture(s, f"io_ms_mem{j}.png", Inches(0.6) + j * Inches(0.62), y + Inches(0.4), Inches(0.58), Inches(0.7), center=False)
+        text(s, Inches(2.6), y + Inches(0.35), Inches(2.4), Inches(0.35), head, size=15, space=0)
+        text(s, Inches(2.6), y + Inches(0.72), Inches(2.4), Inches(0.6), sub, size=12, color=MUTED, space=0)
+    mid = Inches(3.75)
+    box(s, Inches(5.1), mid - Inches(0.16), Inches(0.4), Inches(0.32), fill=MUTED, shape=MSO_SHAPE.RIGHT_ARROW)
+    b = box(s, Inches(5.6), mid - Inches(0.8), Inches(1.9), Inches(1.6), fill=MS_C, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+    b.adjustments[0] = 0.12
+    text(s, Inches(5.65), mid - Inches(0.62), Inches(1.8), Inches(0.45), "**MedSAM2**", size=17, color="FFFFFF", align=PP_ALIGN.CENTER)
+    text(s, Inches(5.65), mid - Inches(0.1), Inches(1.8), Inches(0.8), "SAM2 trained on\nmedical scans", size=12, color="FFFFFF", align=PP_ALIGN.CENTER)
+    box(s, Inches(7.6), mid - Inches(0.16), Inches(0.4), Inches(0.32), fill=MUTED, shape=MSO_SHAPE.RIGHT_ARROW)
+    pout = picture(s, "io_ms_output.png", Inches(8.1), Inches(1.5), Inches(2.3), Inches(2.8), center=False)
+    text(s, Inches(8.1), pout.top + pout.height + Inches(0.05), Inches(2.3), Inches(0.5),
+         "**Output:** the corrected mask", size=12, color=MUTED, align=PP_ALIGN.CENTER)
+    box(s, Inches(10.6), Inches(1.5), Inches(2.1), Inches(2.8), fill=PANEL, shape=MSO_SHAPE.ROUNDED_RECTANGLE).adjustments[0] = 0.08
+    for k, (big, small) in enumerate([("+12.9", "'tumour here?' score\n(above 0 = yes)"), ("0.882", "Dice on this slice\n(YOLO alone 0.852)")]):
+        y = Inches(1.6) + k * Inches(1.35)
+        text(s, Inches(10.65), y, Inches(2.0), Inches(0.55), f"**{big}**", size=26, color=MS_C, align=PP_ALIGN.CENTER, space=0)
+        text(s, Inches(10.65), y + Inches(0.55), Inches(2.0), Inches(0.65), small, size=12, color=MUTED, align=PP_ALIGN.CENTER, space=0)
+    text(s, Inches(8.1), Inches(4.85), Inches(4.6), Inches(1.4), [
+        "Goes **up, then down** from the start slice; each answer joins the memory.",
+        "39 M weights: image encoder 70%, memory 19%, mask decoder 11%.",
+    ], size=14, bullet=True, space=6)
+    takeaway(s, "MedSAM2 combines the picture, YOLO's hint and its memory into a corrected mask per slice.")
+    notes(s, "Shows what MedSAM2 receives on one slice and what it returns.",
+          "MedSAM2 reads the picture, YOLO's hint and its memory together, and returns a corrected mask per slice.")
 
     # 5 ---- question
     s = new_slide(prs, "Research question and ground rules", 5, "The project")
@@ -417,6 +507,105 @@ def build():
           ["Picture (left to right): input picture, YOLO's hint, YOLO's own mask, MedSAM2's answer.",
            "YOLO's own mask uses only shapes ≥ 0.25 and pixels > 50%; it is only for comparison."])
 
+    # 10b ---- the hint, step by step (one patient)
+    s = new_slide(prs, "The hint, step by step", 0, "Method · patient BraTS-GLI-00046-101, slice 115")
+    picture(s, "hint_steps.png", Inches(0.6), Inches(1.45), Inches(8.0), Inches(3.0), center=False)
+    text(s, Inches(8.85), Inches(1.45), Inches(3.85), Inches(3.1), [
+        "**A · Store:** YOLO's probability per pixel (0–1) is saved as 0–255.",
+        "**B · Logit:** ln(p / (1 − p)) gives −5.5 … +5.5, where 0 = 50%.",
+        "**C · × 8:** now about −44 … +44.",
+        "**D · 'Nothing here' = −20:** every slice with no YOLO shape (68 of 137 here) and everything outside the head.",
+        "Inside the head = any of T1C, T2, FLAIR is not 0.",
+    ], size=13, space=7)
+    picture(s, "hint_hist.png", Inches(0.6), Inches(4.55), Inches(5.6), Inches(1.5), center=False)
+    text(s, Inches(0.6), Inches(6.05), Inches(5.6), Inches(0.3), "All 150,618 non-zero pixels YOLO gave this patient: mostly 'sure' or 'barely'",
+         size=10, color=MUTED, space=0)
+    vals = [("0.00", "0", "−5.54", "−44"), ("0.05", "13", "−2.92", "−23"), ("0.25", "64", "−1.09", "−9"), ("0.50", "128", "0", "0"),
+            ("0.75", "191", "+1.09", "+9"), ("0.95", "242", "+2.92", "+23"), ("0.99", "252", "+4.43", "+35"), ("1.00", "255", "+5.54", "+44")]
+    heads = ["p", "Stored", "Logit", "Logit × 8"]
+    tbl = s.shapes.add_table(4, 9, Inches(6.5), Inches(4.6), Inches(6.2), Inches(1.4)).table
+    tbl.columns[0].width = Inches(1.08)
+    for c in range(1, 9):
+        tbl.columns[c].width = Inches(0.64)
+    for r in range(4):
+        tbl.rows[r].height = Inches(0.33)
+    for r in range(4):
+        for c in range(9):
+            cell = tbl.cell(r, c)
+            cell.fill.solid(); cell.fill.fore_color.rgb = rgb(PANEL if r % 2 else "232842")
+            cell.margin_left = cell.margin_right = Inches(0.04)
+            cell.margin_top = cell.margin_bottom = Inches(0.02)
+            tf = cell.text_frame; tf.paragraphs[0].alignment = PP_ALIGN.CENTER if c else PP_ALIGN.LEFT
+            runs(tf.paragraphs[0], heads[r] if c == 0 else vals[c - 1][r], 12, MS_C if (r == 3 and c) else (MUTED if c == 0 else TEXT),
+                 bold=(c == 0 or r == 3))
+    takeaway(s, "The hint = YOLO's confidence per pixel on MedSAM2's scale, plus a firm 'no' where YOLO saw nothing.")
+    notes(s, "Walks through the four steps that turn YOLO's output into MedSAM2's hint on one patient.",
+          "The hint keeps YOLO's confidence for every pixel, on MedSAM2's own scale, with a firm 'no' where YOLO saw nothing.")
+
+    # 10c ---- YOLO hint vs YOLO's own mask
+    s = new_slide(prs, "YOLO's hint vs YOLO's own mask", 0, "Method · patient BraTS-GLI-00046-101, slice 120")
+    panels = [("hvm_hint.png", "1 · YOLO hint", "7 shapes: 0.90 is kept by both; 0.06–0.23 only in the hint"),
+              ("hvm_own.png", "2 · YOLO's own mask", "blue = mask, green line = expert"),
+              ("hvm_extra.png", "3 · Only in the hint", "orange: weak shapes + the faint edge of the strong one")]
+    for i, (f, head, cap) in enumerate(panels):
+        l = Inches(0.6) + i * Inches(2.62)
+        text(s, l, Inches(1.4), Inches(2.5), Inches(0.35), f"**{head}**", size=14, align=PP_ALIGN.CENTER, space=0)
+        pic = picture(s, f, l, Inches(1.78), Inches(2.5), Inches(3.05), center=False)
+        text(s, l, pic.top + pic.height + Inches(0.04), Inches(2.5), Inches(0.5), cap, size=11, color=MUTED, align=PP_ALIGN.CENTER, space=0)
+    for j, (head, col, lines) in enumerate([
+            ("YOLO hint  ·  shapes ≥ 0.05", MS_C, ["A **probability per pixel**, 0 to 1: how sure YOLO is that the pixel is tumour.",
+                                                   "Gives MedSAM2 **more information**, including YOLO's weaker guesses."]),
+            ("YOLO's own mask  ·  shapes ≥ 0.25", YOLO_C, ["A **yes/no answer per pixel**: tumour when its probability is above 0.5.",
+                                                         "YOLO's final answer, **used only to compare** against MedSAM2."])]):
+        y = Inches(1.4) + j * Inches(2.05)
+        box(s, Inches(8.65), y, Inches(4.05), Inches(1.9), fill=PANEL, shape=MSO_SHAPE.ROUNDED_RECTANGLE).adjustments[0] = 0.07
+        text(s, Inches(8.85), y + Inches(0.12), Inches(3.7), Inches(0.4), f"**{head}**", size=15, color=col, space=0)
+        text(s, Inches(8.85), y + Inches(0.55), Inches(3.7), Inches(1.3), lines, size=13, bullet=True, space=5)
+    text(s, Inches(0.6), Inches(5.45), Inches(12.1), Inches(0.8), [
+        "On this slice: hint 3,800 px · own mask 2,638 px · expert 2,570 px.",
+        "Of the 1,162 pixels only in the hint, just 99 are real tumour: MedSAM2 has to learn which extra guesses to trust.",
+    ], size=14, bullet=True, space=3)
+    takeaway(s, "The hint carries everything YOLO suspects; the own mask is only YOLO's confident final answer.")
+    notes(s, "Compares the soft hint MedSAM2 receives with YOLO's own yes/no mask on one slice.",
+          "The hint carries everything YOLO suspects; the own mask is only YOLO's confident final answer.")
+
+    # 10d ---- step 7: the mirror check
+    s = new_slide(prs, "The mirror check", 0, "Method · test patient BraTS-GLI-00008-101, slice 78")
+    for i, (f, head) in enumerate([("mirror_in_normal.png", "Normal patient"), ("mirror_in_mirrored.png", "Mirrored")]):
+        l = Inches(0.6) + i * Inches(1.75)
+        text(s, l, Inches(1.42), Inches(1.65), Inches(0.3), f"**{head}**", size=12, align=PP_ALIGN.CENTER, space=0)
+        picture(s, f, l, Inches(1.75), Inches(1.65), Inches(1.95), center=False)
+    mid = Inches(2.7)
+    box(s, Inches(4.15), mid - Inches(0.15), Inches(0.38), Inches(0.3), fill=MUTED, shape=MSO_SHAPE.RIGHT_ARROW)
+    b = box(s, Inches(4.65), mid - Inches(0.7), Inches(1.75), Inches(1.4), fill=MS_C, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+    b.adjustments[0] = 0.12
+    text(s, Inches(4.7), mid - Inches(0.55), Inches(1.65), Inches(0.4), "**MedSAM2**", size=16, color="FFFFFF", align=PP_ALIGN.CENTER, space=0)
+    text(s, Inches(4.7), mid - Inches(0.08), Inches(1.65), Inches(0.7), "both copies\nin one batch", size=12, color="FFFFFF", align=PP_ALIGN.CENTER, space=0)
+    box(s, Inches(6.5), mid - Inches(0.15), Inches(0.38), Inches(0.3), fill=MUTED, shape=MSO_SHAPE.RIGHT_ARROW)
+    text(s, Inches(7.05), Inches(1.45), Inches(5.65), Inches(2.3), [
+        "**Same batch:** the normal and the left ↔ right mirrored patient go through both MedSAM2 passes together, so it costs almost nothing extra.",
+        "**Flip back:** the mirrored answer is flipped left ↔ right so it lines up with the normal one.",
+        "**Average per pixel:** the two scores are averaged, then the 50% cut-off makes the final mask.",
+    ], size=14, bullet=True, space=7)
+    answers = [("mirror_normal.png", "Normal answer"), ("mirror_mirror.png", "Mirror, flipped back"),
+               ("mirror_disagree.png", "Where they disagree"), ("mirror_result.png", "Averaged result")]
+    for i, (f, head) in enumerate(answers):
+        l = Inches(0.6) + i * Inches(2.0)
+        text(s, l, Inches(3.88), Inches(1.85), Inches(0.3), f"**{head}**", size=12, align=PP_ALIGN.CENTER, space=0)
+        picture(s, f, l, Inches(4.2), Inches(1.85), Inches(1.9), center=False)
+    box(s, Inches(8.75), Inches(3.88), Inches(3.95), Inches(2.25), fill=PANEL, shape=MSO_SHAPE.ROUNDED_RECTANGLE).adjustments[0] = 0.07
+    text(s, Inches(8.95), Inches(3.98), Inches(3.6), Inches(2.1), [
+        "**3D Dice, this patient**",
+        "normal 0.8457 · mirrored 0.8554 · **averaged 0.8524**",
+        "The two answers differ on only 1,312 voxels, all at the tumour edge (yellow).",
+        "Over all patients it added just **+0.0004** Dice (earlier run): tiny, but nearly free.",
+    ], size=13, space=6)
+    text(s, Inches(0.6), Inches(6.1), Inches(8.0), Inches(0.25), "Result colours: green = found · yellow = missed · red = drawn, not tumour",
+         size=10, color=MUTED, space=0)
+    takeaway(s, "The mirror check is a cheap second opinion: it steadies the edges, but adds very little Dice.")
+    notes(s, "Explains the mirror check (flip test-time augmentation) on one test patient.",
+          "The mirror check is a cheap second opinion: it steadies the edges, but adds very little Dice.")
+
     # 11 ---- training
     s = new_slide(prs, "Training MedSAM2 to fix, not copy", 11, "Method")
     picture(s, "ms_training_curves.png", Inches(0.6), Inches(1.5), Inches(7.0), Inches(4.7))
@@ -431,6 +620,59 @@ def build():
     notes(s, "Explains what parts of MedSAM2 are trained and how training teaches correction.",
           "Train only the small parts that read the hint and carry memory; keep the big image encoder frozen.",
           ["Check score levels off around round 10 at about 0.90."])
+
+    # 11b ---- MedSAM2 fine-tuning: which parts we train
+    s = new_slide(prs, "MedSAM2 fine-tuning: which parts we train", 0, "Method · training")
+
+    def table(rows, l, t, w, widths, size=10, head_fill="232842", last_bold=False, align_from=1):
+        tb = s.shapes.add_table(len(rows), len(rows[0]), l, t, w, Inches(0.25) * len(rows)).table
+        for c, cw in enumerate(widths):
+            tb.columns[c].width = Inches(cw)
+        for r, row in enumerate(rows):
+            tb.rows[r].height = Inches(0.25)
+            for c, val in enumerate(row):
+                cell = tb.cell(r, c)
+                cell.fill.solid(); cell.fill.fore_color.rgb = rgb(head_fill if r == 0 else (PANEL if r % 2 else BG))
+                cell.margin_left = cell.margin_right = Inches(0.05); cell.margin_top = cell.margin_bottom = Inches(0.02)
+                cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+                para = cell.text_frame.paragraphs[0]
+                para.alignment = PP_ALIGN.RIGHT if c >= align_from and r else PP_ALIGN.LEFT
+                runs(para, val, size, MUTED if r == 0 else TEXT, bold=(r == 0 or c == 0 or (last_bold and r == len(rows) - 1)))
+        return tb
+
+    picture(s, "medsam2_architecture.png", Inches(0.6), Inches(1.45), Inches(6.3), Inches(2.2), center=False)
+    text(s, Inches(0.6), Inches(3.62), Inches(6.3), Inches(0.3),
+         "Figure from the Medical SAM 2 paper. Our MedSAM2's memory is simpler: start slice + last 6 slices.",
+         size=10, color=MUTED, space=0)
+    text(s, Inches(0.6), Inches(4.0), Inches(6.3), Inches(2.3), [
+        "**Image encoder:** the biggest part (27 M of 39 M weights). SAM2 trained it on millions of images and MedSAM2 tuned it on medical scans; its features are already good and our data is small.",
+        "**Prompt encoder:** has never seen a soft YOLO hint.",
+        "**Mask decoder:** must learn to trust the hint where it's right and override it where it's wrong.",
+        "**Memory:** must learn to carry the tumour from slice to slice.",
+    ], size=12, bullet=True, space=5)
+    table([["Part", "Job", "Weights", "%", "Rate"],
+           ["Image encoder", "Looks at the slice picture", "27.2 M", "69.9%", "1e-6 *"],
+           ["Memory attention", "Mixes in memory of earlier slices", "5.9 M", "15.2%", "1e-5"],
+           ["Mask decoder", "Draws the final mask", "4.2 M", "10.8%", "1e-4"],
+           ["Memory encoder", "Stores each finished slice", "1.4 M", "3.6%", "1e-5"],
+           ["Object pointer", "'Tumour is here' note to memory", "0.2 M", "0.5%", "1e-4"],
+           ["Prompt encoder", "Reads YOLO's hint", "6,220", "0.02%", "1e-4"],
+           ["Small extras", "Bookkeeping", "18,993", "0.05%", "frozen"],
+           ["Total", "", "39.0 M", "100%", ""]],
+          Inches(7.1), Inches(1.45), Inches(5.6), [1.35, 2.2, 0.75, 0.6, 0.7], last_bold=True, align_from=2)
+    table([["What trains", "Size", "Val", "Test", "Gain", "Better/worse", "Time"],
+           ["decoder + prompt", "4.4 M", "0.8910", "0.8970", "+0.0141", "172 / 17", "2 h 24"],
+           ["+ memory", "11.7 M", "0.8918", "0.8981", "+0.0152", "198 / 19", "2 h 27"],
+           ["all (+ image encoder)", "38.9 M", "0.8917", "0.8997", "+0.0168", "206 / 14", "8 h 29"]],
+          Inches(7.1), Inches(4.15), Inches(5.6), [1.6, 0.6, 0.55, 0.55, 0.65, 0.95, 0.7])
+    text(s, Inches(7.1), Inches(5.25), Inches(5.6), Inches(1.0), [
+        "* the image encoder trains only in 'all'. Gain = test Dice over the YOLO hint (0.8828).",
+        "Chosen on **val**: adding the image encoder tied (0.8917 vs 0.8918) and took 3.5× longer.",
+        "Best run: **+ memory** with 'nothing here' −20: val 0.8928, test 0.8988.",
+    ], size=11, bullet=True, space=2)
+    takeaway(s, "Train the 30% that reads the hint and carries memory; the big image encoder can stay frozen.")
+    notes(s, "Shows the MedSAM2 architecture, how many weights each part has, and which parts were trained.",
+          "Training the 30% that reads the hint and carries memory is enough; the big image encoder can stay frozen.")
 
     # 12 ---- results
     s = new_slide(prs, "Results: MedSAM2 beats YOLO's best on test", 12, "Results")
@@ -497,6 +739,23 @@ def build():
     notes(s, "Lists the most promising next steps and the wider follow-ups.",
           "Next gains come from sharper edges and small tumours, then proving it on outside data.",
           ["Experts themselves don't agree perfectly, so expect small gains from here."])
+
+    # 17 ---- thank you
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    s.background.fill.solid(); s.background.fill.fore_color.rgb = rgb(BG)
+    text(s, Inches(0.7), Inches(1.0), Inches(8), Inches(0.4), "BRAIN TUMOUR SEGMENTATION · YOLO + MEDSAM2", size=13, color=MS_C)
+    text(s, Inches(0.7), Inches(1.5), Inches(7.2), Inches(1.3), "Thank you", size=60, space=0)
+    text(s, Inches(0.7), Inches(2.75), Inches(7.2), Inches(0.7), "Questions?", size=30, color=MUTED, space=0)
+    for k, (big, small, col) in enumerate([("0.8988", "MedSAM2 3D Dice (test)", MS_C),
+                                           ("+0.0154", "over YOLO's best (0.8834)", GOOD),
+                                           ("185 / 18", "patients better / worse", YOLO_C)]):
+        l = Inches(0.7) + k * Inches(2.45)
+        box(s, l, Inches(4.0), Inches(2.25), Inches(1.5), fill=PANEL, shape=MSO_SHAPE.ROUNDED_RECTANGLE).adjustments[0] = 0.1
+        text(s, l, Inches(4.15), Inches(2.25), Inches(0.7), f"**{big}**", size=30, color=col, align=PP_ALIGN.CENTER, space=0)
+        text(s, l, Inches(4.85), Inches(2.25), Inches(0.5), small, size=13, color=MUTED, align=PP_ALIGN.CENTER, space=0)
+    picture(s, "mod_labels.png", Inches(8.4), Inches(1.0), Inches(4.3), Inches(5.4),
+            caption="Patient BraTS-GLI-00046-101: the four labelled tumour parts")
+    text(s, Inches(0.7), Inches(6.85), Inches(8), Inches(0.35), "Presented by: ______________", size=13, color=MUTED)
 
     for slide, he in zip(prs.slides, HE_NOTES):
         slide.notes_slide.notes_text_frame.text = he
