@@ -67,6 +67,7 @@
       { k: "state", label: "Status", html: (v, r) => `${badge(v)}${r.error ? ` <span class="bad" title="${esc(r.error)}">!</span>` : ""}` },
       { k: "unfreeze", label: "Weights changed" },
       { k: "augment", label: "Hints damaged", num: true, fmt: (v) => (v == null ? "–" : K.f2(v)) },
+      { k: "empty_logit", label: "'Nothing here' value", num: true, fmt: (v) => (v == null ? "–" : v) },
       { k: "yolo_run", label: "Hint YOLO", html: (v) => `<span class="mono">${esc(v || "–")}</span>` },
       { k: "rounds", label: "Rounds", num: true, get: (r) => r.epochs_done, html: (v, r) => `${v}/${r.epochs_cfg}` },
       { k: "best", label: "Best check", num: true, get: (r) => (r.best ? r.best.val_dice3d : null), html: (v, r) => (v == null ? "–" : `${K.f4(v)} <span class="faint">@${r.best.epoch}</span>`) },
