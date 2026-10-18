@@ -67,6 +67,7 @@
       { k: "state", label: "Status", html: (v, r) => `${badge(v)}${r.error ? ` <span class="bad" title="${esc(r.error)}">!</span>` : ""}` },
       { k: "unfreeze", label: "Weights changed" },
       { k: "augment", label: "Hints damaged", num: true, fmt: (v) => (v == null ? "–" : K.f2(v)) },
+      { k: "variant", label: "Hint style", html: (v) => `<span class="mono">${esc(v || "–")}</span>` },
       { k: "empty_logit", label: "'Nothing here' value", num: true, fmt: (v) => (v == null ? "–" : v) },
       { k: "logit_scale", label: "Hint loudness", num: true, fmt: (v) => (v == null ? "–" : v) },
       { k: "yolo_conf", label: "YOLO conf", num: true, fmt: (v) => (v == null ? "–" : v) },
@@ -296,9 +297,10 @@
   function drawProfile() {
     const p = S.prof;
     if (!p) return;
-    S.charts.prof = Charts.line($("profChart"), { height: 290, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", y2Min: 0, yMin: 0, yMax: 1, exportName: `${p.id}_slices`,
+    S.charts.prof = Charts.line($("profChart"), { height: 290, xLabel: "Slice (z)", yLabel: "Dice · YOLO confidence", y2Label: "Tumour pixels", y2Min: 0, yMin: 0, yMax: 1, exportName: `${p.id}_slices`,
       series: [{ name: "Dice · MedSAM2", color: "var(--medsam2)", points: p.z.map((z, i) => [z, p.dice[i]]) },
                { name: "Dice · YOLO hint", color: "var(--yolo)", points: p.z.map((z, i) => [z, p.yolo_dice[i]]) },
+               ...(p.score ? [{ name: "YOLO max confidence", color: "var(--et)", width: 1.4, points: p.z.map((z, i) => [z, p.score[i]]) }] : []),
                { name: "expert pixels", color: "var(--gt)", axis: "right", area: true, points: p.z.map((z, i) => [z, p.gt[i]]) },
                { name: "MedSAM2 pixels", color: "var(--medsam2)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.pred[i]]) },
                { name: "YOLO pixels", color: "var(--yolo)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.yolo[i]]) }],
