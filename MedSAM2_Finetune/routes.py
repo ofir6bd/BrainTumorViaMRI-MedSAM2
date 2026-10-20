@@ -142,6 +142,12 @@ def run_summary(run_id):
         "yolo_run": st.get("yolo_run") or cfg["prompt"]["yolo_run"] or "(best)",
         "unfreeze": cfg["train"]["unfreeze"], "epochs_cfg": cfg["train"]["epochs"],
         "augment": (cfg.get("augment") or {}).get("p"),
+        "empty_logit": cfg["prompt"].get("empty_logit"),
+        "logit_scale": cfg["prompt"].get("logit_scale"), "yolo_conf": cfg["prompt"].get("yolo_conf"),
+        # YAML reads "1e-5" (no dot) as a string, so coerce
+        "lr": float(cfg["train"]["lr"]) if cfg["train"].get("lr") is not None else None,
+        "memory_lr": float(cfg["train"].get("memory_lr") or cfg["train"]["lr"]) if cfg["train"].get("lr") is not None else None,
+        "min_component": (cfg.get("evaluate") or {}).get("min_component"),
         "state": st.get("state"), "stage": st.get("stage"), "epoch": st.get("epoch"),
         "epochs": st.get("epochs"), "started": st.get("started"), "finished": st.get("finished"),
         "error": st.get("error"), "epochs_done": len(res.get("epoch", [])),

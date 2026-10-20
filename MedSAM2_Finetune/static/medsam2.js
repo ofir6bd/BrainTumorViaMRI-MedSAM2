@@ -67,13 +67,20 @@
       { k: "state", label: "Status", html: (v, r) => `${badge(v)}${r.error ? ` <span class="bad" title="${esc(r.error)}">!</span>` : ""}` },
       { k: "unfreeze", label: "Weights changed" },
       { k: "augment", label: "Hints damaged", num: true, fmt: (v) => (v == null ? "–" : K.f2(v)) },
-      { k: "yolo_run", label: "Hint YOLO", html: (v) => `<span class="mono">${esc(v || "–")}</span>`, hidden: true },
+      { k: "variant", label: "Hint style", html: (v) => `<span class="mono">${esc(v || "–")}</span>` },
+      { k: "empty_logit", label: "'Nothing here' value", num: true, fmt: (v) => (v == null ? "–" : v) },
+      { k: "logit_scale", label: "Hint loudness", num: true, fmt: (v) => (v == null ? "–" : v) },
+      { k: "yolo_conf", label: "YOLO conf", num: true, fmt: (v) => (v == null ? "–" : v) },
+      { k: "lr", label: "Learning rate", num: true, html: (v, r) => (v == null ? "–" : `${v.toExponential(0)}${r.memory_lr != null && r.memory_lr !== v ? ` <span class="faint" title="memory learning rate">mem ${r.memory_lr.toExponential(0)}</span>` : ""}`) },
+      { k: "min_component", label: "Speck filter (px)", num: true, fmt: (v) => (v == null ? "–" : v) },
+      { k: "yolo_run", label: "Hint YOLO", html: (v) => `<span class="mono">${esc(v || "–")}</span>` },
       { k: "rounds", label: "Rounds", num: true, get: (r) => r.epochs_done, html: (v, r) => `${v}/${r.epochs_cfg}` },
       { k: "best", label: "Best check", num: true, get: (r) => (r.best ? r.best.val_dice3d : null), html: (v, r) => (v == null ? "–" : `${K.f4(v)} <span class="faint">@${r.best.epoch}</span>`) },
       { k: "val", label: "Val 3D Dice", num: true, get: (r) => (r.val ? r.val.dice3d_mean : null), fmt: K.f4 },
       { k: "test", label: "Test 3D Dice", num: true, get: (r) => (r.test ? r.test.dice3d_mean : null), fmt: K.f4, bar: { max: 1, color: "var(--medsam2)" } },
       { k: "gain", label: "Test gain", num: true, get: (r) => (r.test ? r.test.delta_mean : null), html: (v) => (v == null ? "–" : K.deltaHtml(v)) },
       { k: "hh", label: "Helped / hurt", get: (r) => (r.test ? `${r.test.helped} / ${r.test.hurt}` : "–") },
+      { k: "patients", label: "Patients", num: true, get: (r) => (r.test ? r.test.patients : null), fmt: (v) => (v == null ? "–" : v) },
       { k: "time", label: "Train time", num: true, get: (r) => r.train_seconds, fmt: K.secs },
       { k: "created", label: "Started", get: (r) => K.when(r.created) },
     ];
@@ -290,9 +297,10 @@
   function drawProfile() {
     const p = S.prof;
     if (!p) return;
-    S.charts.prof = Charts.line($("profChart"), { height: 290, xLabel: "Slice (z)", yLabel: "Dice on the slice", y2Label: "Tumour pixels", y2Min: 0, yMin: 0, yMax: 1, exportName: `${p.id}_slices`,
+    S.charts.prof = Charts.line($("profChart"), { height: 290, xLabel: "Slice (z)", yLabel: "Dice · YOLO confidence", y2Label: "Tumour pixels", y2Min: 0, yMin: 0, yMax: 1, exportName: `${p.id}_slices`,
       series: [{ name: "Dice · MedSAM2", color: "var(--medsam2)", points: p.z.map((z, i) => [z, p.dice[i]]) },
                { name: "Dice · YOLO hint", color: "var(--yolo)", points: p.z.map((z, i) => [z, p.yolo_dice[i]]) },
+               ...(p.score ? [{ name: "YOLO max confidence", color: "var(--et)", width: 1.4, points: p.z.map((z, i) => [z, p.score[i]]) }] : []),
                { name: "expert pixels", color: "var(--gt)", axis: "right", area: true, points: p.z.map((z, i) => [z, p.gt[i]]) },
                { name: "MedSAM2 pixels", color: "var(--medsam2)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.pred[i]]) },
                { name: "YOLO pixels", color: "var(--yolo)", axis: "right", dash: "2 3", width: 1.2, points: p.z.map((z, i) => [z, p.yolo[i]]) }],

@@ -26,7 +26,8 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-from .common import brain_slices, keep_soft_masks, list_patients, load_volumes, rgb_slice, write_json
+from .common import (brain_slices, keep_soft_masks, list_patients, load_volumes, rgb_slice, tumour_mask,
+                     write_json)
 
 
 def thresholds_of(cfg):
@@ -88,7 +89,7 @@ def mask_at(views, t, shape, cfg):
 def _scored(model, patient, cfg, conf):
     vols = load_volumes(patient)
     zs = brain_slices(vols["FLAIR"], cfg["data"]["min_fg_voxels"])
-    gt = np.stack([vols["SEG"][:, :, z] > 0 for z in zs])
+    gt = np.stack([tumour_mask(vols["SEG"][:, :, z]) for z in zs])
     return zs, gt, predict_volume(model, vols, zs, cfg, conf)
 
 

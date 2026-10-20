@@ -133,7 +133,7 @@ def render(run, z, variant_id, masks, prompt=None, dice=None):
                  color=FG, fontsize=13, fontweight="bold", y=1.02)
 
     _panel(axes[0], _paint(base, gt, GT_RGB), "Ground truth (WT)", FG,
-           legend=[("expert seg > 0", GT_RGB)])
+           legend=[("expert tumour (labels 1-3)", GT_RGB)])
 
     if ref is not None:
         _panel(axes[1], _paint(base, ref[:, :, z], REF_RGB), "O · reference",

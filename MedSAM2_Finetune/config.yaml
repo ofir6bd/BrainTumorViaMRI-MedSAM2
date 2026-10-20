@@ -21,19 +21,22 @@ model:
                           # Dice where YOLO's own mask scored 0.76.
 
 prompt:
-  yolo_run: 20260923-224333  # which YOLO_finetune run makes the prompts ("" = the best-scoring one).
-                          #   Pinned: its prompt cache exists and every earlier run used it, so
-                          #   scores stay comparable (test 0.8776; the newest, 20260927-010028,
-                          #   scores 0.8781 — within noise, and would need all 1,290 rebuilt).
+  yolo_run: 20260929-074550  # which YOLO_finetune run makes the prompts ("" = the best-scoring one).
+                          #   Pinned: every run since 2026-09-29 used it (cache 980735f3de), so
+                          #   scores stay comparable.
   variant: max            # max | max_weighted | conf_filtered — which cached map is the hint
+                          #   max_weighted measured (15 rounds, else equal): val 0.8911 vs 0.8918,
+                          #   test 0.8980 vs 0.8981 — a tie; fewer false slices, more missed ones.
   yolo_conf: 0.05         # blobs below this confidence are never produced
   score_min: 0.25         # conf_filtered: drop blobs below this confidence. It also sets YOLO's
                           #   own mask — the answer MedSAM2 is scored against.
   logit_scale: 8.0        # multiply YOLO's logits before handing them to MedSAM2. YOLO's reach
                           #   about +-5.5; SAM2's mask prompt barely reacts to them raw
                           #   (untrained checkpoint, 4 val patients: scale 1 -> 0.379 Dice,
-                          #   4 -> 0.726, 8 -> 0.757, 12 -> 0.760).
-  empty_logit: -8.0       # what a slice YOLO left empty is prompted with (a confident "nothing")
+                          #   4 -> 0.726, 8 -> 0.757, 12 -> 0.760). Trained, 15 rounds: 4 and 8
+                          #   tie (val 0.8918 both).
+  empty_logit: -20.0      # what a slice YOLO left empty is prompted with (a confident "nothing").
+                          #   15 rounds, else equal: -20 -> val 0.8928, -8 -> 0.8918.
   clip_to_head: true      # silence the hint where the frame has no head in it (a 0.05 YOLO blob
                           #   can be a near-random box: 1184 of 1669 px outside the skull on
                           #   BraTS-GLI-00008-101 z=70). Read at prompt time, no cache rebuild.
@@ -79,15 +82,18 @@ train:
                               #   +-0.005); 15 gives the cosine schedule room without waste
   patience: 8                 # the check wanders: do not stop on noise
   accum: 2                    # batches added up before a correction (effective = batch * accum)
-  lr: 1.0e-4                  # AdamW, for the mask decoder and the prompt encoder
-  memory_lr: 1.0e-5           # the memory moves 10x slower: a big step there disturbs every slice.
+  lr: 5.0e-4                  # AdamW, for the mask decoder and the prompt encoder.
+                              #   15 rounds, else equal: 5e-4 -> val 0.8928, 1e-4 -> 0.8918.
+  memory_lr: 5.0e-5           # the memory moves 10x slower: a big step there disturbs every slice.
                               #   SurgSAM-2 uses exactly this ratio (2e-4 / 2e-5).
   vision_lr: 1.0e-6           # the image encoder, used only when unfreeze = all
   weight_decay: 0.01
-  unfreeze: all           # decoder | decoder+prompt | decoder+prompt+memory | all
+  unfreeze: decoder+prompt+memory   # decoder | decoder+prompt | decoder+prompt+memory | all
                           #   Measured (10-round screens, 245 val patients): all -> 0.8864,
                           #   helped 183 / hurt 10; decoder+prompt+memory -> 0.8861, 172 / 14.
-                          #   A tie on the mean; `all` helps more patients and costs ~10% time.
+                          #   15 rounds on the 2026-09-29 pools: all 0.8917 (8 h 29), decoder+
+                          #   prompt+memory 0.8918 (2 h 27), decoder+prompt 0.8910 — a tie at 3.5x
+                          #   less time.
   dice_weight: 1.0            # loss = dice_weight * Dice loss + bce_weight * BCE, over every frame
   bce_weight: 1.0
   iou_weight: 0.05            # keeps SAM2's own quality head honest

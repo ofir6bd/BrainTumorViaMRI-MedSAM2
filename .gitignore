@@ -15,9 +15,9 @@ MedSAM2/
 .idea/
 
 # --- Data & outputs ---
-data/*
-!data/sample/
-!data/sample/**
+datasets/*
+!datasets/sample/
+!datasets/sample/**
 outputs/
 
 # --- YOLO generated dataset ---

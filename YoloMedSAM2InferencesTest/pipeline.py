@@ -133,9 +133,10 @@ class PatientRun:
 
     @property
     def gt_wt(self):
-        """Whole tumour: every labelled voxel (BraTS labels 1-4 merged)."""
+        """Whole tumour: config.yaml -> labels.tumour (1-3; RC, label 4, is not tumour)."""
         if "gt_wt" not in self._vols:
-            self._vols["gt_wt"] = self._vol("SEG") > 0
+            from YOLO_finetune.common import tumour_mask
+            self._vols["gt_wt"] = tumour_mask(self._vol("SEG"))
         return self._vols["gt_wt"]
 
     @property

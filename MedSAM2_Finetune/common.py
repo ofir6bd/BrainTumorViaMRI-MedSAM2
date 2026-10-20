@@ -19,8 +19,8 @@ import yaml
 
 # The frame builder, patient walker and atomic writer are YOLO_finetune's, on purpose (see above).
 from YOLO_finetune.common import (  # noqa: F401  (re-exported for this package)
-    CHANNELS, brain_slices, list_patients, load_volumes, read_json, rgb_slice, short_hash,
-    write_json)
+    CHANNELS, TUMOUR_LABELS, brain_slices, list_patients, load_volumes, read_json, rgb_slice, short_hash,
+    tumour_mask, write_json)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)

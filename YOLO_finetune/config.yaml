@@ -15,7 +15,7 @@ data:
                                #   Measured (test 3D Dice): 50 -> 0.8746, 15 -> 0.8767, 5 -> 0.8781,
                                #   0 -> 0.8760 — all within noise of each other; 5 was the best.
   # Each frame is one axial slice, 3 channels: R = T1C, G = T2, B = FLAIR,
-  # each scaled to its own p0.5-p99.5. Label = whole tumour (seg > 0).
+  # each scaled to its own p0.5-p99.5. Label = whole tumour, labels 1-3 (project config.yaml -> labels.tumour; RC is not tumour).
   # Slices with brain but no tumour are kept with an empty label (they teach "no tumour here").
 
 train:

@@ -39,6 +39,21 @@ def project_paths():
         return yaml.safe_load(f)["paths"]
 
 
+def tumour_labels():
+    """The BraTS labels that count as tumour (project config.yaml -> labels.tumour)."""
+    with open(os.path.join(ROOT, "config.yaml"), "r", encoding="utf-8") as f:
+        return tuple(int(v) for v in yaml.safe_load(f)["labels"]["tumour"])
+
+
+# Read once: part of the dataset and prompt cache keys, so a change can never reuse old masks.
+TUMOUR_LABELS = tumour_labels()
+
+
+def tumour_mask(seg):
+    """Boolean tumour mask of a label volume or slice (RC, label 4, is not tumour)."""
+    return np.isin(np.rint(seg).astype(np.int16), TUMOUR_LABELS)
+
+
 def pool_dir(pool_key):
     return os.path.join(ROOT, project_paths()[pool_key])
 

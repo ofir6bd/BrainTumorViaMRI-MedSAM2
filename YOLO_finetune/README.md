@@ -34,7 +34,7 @@ The first run of a model downloads its COCO weights (`yolo11m-seg.pt`, ~45 MB) i
 1. **Dataset** (`build_dataset.py`) — one PNG per axial slice with brain in it
    (≥ `min_fg_voxels` non-zero FLAIR voxels): **R = T1C**, **G = T2**, **B = FLAIR**, each
    scaled to its own p0.5–p99.5. Label = outline of each
-   whole-tumour piece (`seg > 0`) of ≥ `min_mask_area` px; slices without tumour keep an empty
+   whole-tumour piece (labels 1-3, `config.yaml -> labels.tumour`; RC is left out) of ≥ `min_mask_area` px; slices without tumour keep an empty
    label. Built once into `dataset/<hash>/` and reused by every run with the same data settings.
 2. **Training** (`train.py`) — Ultralytics fine-tune with the settings in `config.yaml`.
    Hue/saturation jitter is off: the three channels are MRI sequences, not colours.
