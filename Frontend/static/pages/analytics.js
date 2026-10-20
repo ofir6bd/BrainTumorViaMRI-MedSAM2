@@ -256,11 +256,13 @@
     const pools = S.pools.map((p) => p.key);
     const fam = (k) => S.meta[k].family;
     const cross = (a, b) => (fam(a) === "yolo" && fam(b) === "medsam2") || (fam(a) === "medsam2" && fam(b) === "yolo");
+    const withTest = (a, b) => a !== b && (fam(a) === "test" || fam(b) === "test");
     const same = (a, b) => fam(a) === fam(b) && fam(a) !== "test" && a !== b;
     const V = pools.map((a) => pools.map((b) => (a === b ? (S.subjByPool[a] || new Set()).size : shared(a, b).size)));
-    let bad = 0; const warns = [];
+    let bad = 0, testBad = 0; const warns = [];
     pools.forEach((a, i) => pools.forEach((b, j) => {
       if (i < j && cross(a, b) && V[i][j]) bad++;
+      if (i < j && withTest(a, b) && V[i][j]) testBad++;
       if (i < j && same(a, b) && V[i][j]) warns.push(`${a} ↔ ${b}: ${V[i][j]}`);
     }));
     const sel = S.f.shared ? [pools.indexOf(S.f.shared[0]), pools.indexOf(S.f.shared[1])] : null;
@@ -271,7 +273,7 @@
         const a = pools[i], b = pools[j];
         if (i === j) return `${K.tipTitle(a)}${K.tipRow(K.color("var(--neutral)"), "people", V[i][j])}${K.tipRow(K.color("var(--neutral)"), "scans", S.recs.filter((r) => r.pool === a).length)}`;
         const subs = [...shared(a, b)].sort();
-        const verdict = cross(a, b) ? (subs.length ? "✕ must be 0 (YOLO vs MedSAM2)" : "✓ none, as it must be") : same(a, b) ? (subs.length ? "⚠ train and val share people" : "✓ none") : "test overlap (known, kept)";
+        const verdict = cross(a, b) ? (subs.length ? "✕ must be 0 (YOLO vs MedSAM2)" : "✓ none, as it must be") : same(a, b) ? (subs.length ? "⚠ train and val share people" : "✓ none") : (subs.length ? "✕ must be 0 (test is never trained on)" : "✓ none, as it must be");
         return `${K.tipTitle(`${a} and ${b}`)}${K.tipRow(K.color("var(--neutral)"), "people in both", subs.length)}<div class="faint">${esc(verdict)}</div>
           <div class="faint">${esc(subs.slice(0, 6).join(", "))}${subs.length > 6 ? ", …" : ""}</div>`;
       },
@@ -284,7 +286,8 @@
     $("leakVerdict").innerHTML = (bad ? `<div class="callout bad"><b>✕ ${bad} YOLO/MedSAM2 pool pair(s) share people.</b> MedSAM2 would learn from YOLO masks on people YOLO already knows.</div>`
       : `<div class="callout good"><b>✓ Nobody is in both a YOLO pool and a MedSAM2 pool.</b></div>`) +
       (warns.length ? `<div class="callout warn" style="margin-top:8px"><b>⚠ Train and val of one model share people</b> (${esc(warns.join(", "))}): that model's val score looks better than it is.</div>` : "") +
-      `<p class="note">test shares some people with the training pools since the original split; measured harmless and kept so every test score stays comparable.</p>`;
+      (testBad ? `<div class="callout bad" style="margin-top:8px"><b>✕ test shares people with ${testBad} other pool(s).</b> The test score would be optimistic.</div>`
+        : `<div class="callout good" style="margin-top:8px"><b>✓ Nobody in test is in any other pool.</b></div>`);
   }
   function renderManifest() {
     const m = S.manifest;

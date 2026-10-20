@@ -24,7 +24,7 @@ import numpy as np
 from scipy import ndimage
 
 LABELS = {1: "NETC", 2: "SNFH", 3: "ET", 4: "RC"}
-CACHE_VERSION = 1
+CACHE_VERSION = 2  # 2: WT = labels 1-3 and TC = 1+3 (RC, label 4, is not tumour)
 WORKERS = 8
 
 # Which world direction a voxel axis increases toward, per nibabel axis code, as
@@ -51,11 +51,11 @@ def patient_stats(patient):
         raise ValueError(f"FLAIR shape {brain.shape} != seg shape {seg.shape}")
 
     counts = np.bincount(seg.ravel(), minlength=5)
-    wt = seg > 0
+    wt = np.isin(seg, (1, 2, 3))
     wt_vox = int(wt.sum())
     ml = {name: round(int(counts[i]) * vox_ml, 3) for i, name in LABELS.items()}
     ml["WT"] = round(wt_vox * vox_ml, 3)
-    ml["TC"] = round((int(counts[1]) + int(counts[3]) + int(counts[4])) * vox_ml, 3)
+    ml["TC"] = round((int(counts[1]) + int(counts[3])) * vox_ml, 3)
     brain_ml = round(int(brain.sum()) * vox_ml, 3)
 
     # Axial slices = array axis 2. Profile ordered inferior -> superior.

@@ -27,7 +27,7 @@ from PIL import Image
 
 from YOLO_finetune.common import keep_soft_masks
 
-from .common import (CACHE_DIR, CHANNELS, brain_slices, load_volumes, prob_to_logit, read_json,
+from .common import (CACHE_DIR, CHANNELS, TUMOUR_LABELS, tumour_mask, brain_slices, load_volumes, prob_to_logit, read_json,
                      rgb_slice, short_hash, write_json, yolo_run)
 
 BATCH = 24  # slices per YOLO forward pass
@@ -42,7 +42,7 @@ def prompt_key(cfg):
     p, run = cfg["prompt"], yolo_run(cfg["prompt"]["yolo_run"])
     return short_hash({"yolo_run": run["id"], "which": run["which"], "imgsz": run["imgsz"],
                        "channels": CHANNELS, "yolo_conf": p["yolo_conf"], "score_min": p["score_min"],
-                       "min_fg_voxels": cfg["data"]["min_fg_voxels"]})
+                       "min_fg_voxels": cfg["data"]["min_fg_voxels"], "labels": TUMOUR_LABELS})
 
 
 def cache_dir(cfg):
@@ -76,7 +76,7 @@ def predict_patient(model, patient, cfg):
         frames = [rgb_slice(vols, z, cfg["data"]["min_fg_voxels"]) for z in chunk]
         for j, z in enumerate(chunk):
             rgb[i + j] = frames[j]
-            gt[i + j] = (vols["SEG"][:, :, z] > 0).astype(np.uint8)
+            gt[i + j] = tumour_mask(vols["SEG"][:, :, z]).astype(np.uint8)
         imgs = [Image.fromarray(f) for f in frames]
         with keep_soft_masks() as soft:
             results = model.predict(imgs, conf=p["yolo_conf"], imgsz=run["imgsz"], retina_masks=True,
@@ -121,7 +121,8 @@ def ensure_cache(cfg, patients, progress=None, log=print, model=None):
                    {"key": prompt_key(cfg), "yolo_run": run["id"], "yolo_weights": run["which"],
                     "imgsz": run["imgsz"], "yolo_conf": cfg["prompt"]["yolo_conf"],
                     "score_min": cfg["prompt"]["score_min"],
-                    "min_fg_voxels": cfg["data"]["min_fg_voxels"], "channels": list(CHANNELS)})
+                    "min_fg_voxels": cfg["data"]["min_fg_voxels"], "channels": list(CHANNELS),
+                    "labels": list(TUMOUR_LABELS)})
     if not missing:
         log(f"[prompts] cache {d} already has all {len(patients)} patients")
         return d, 0

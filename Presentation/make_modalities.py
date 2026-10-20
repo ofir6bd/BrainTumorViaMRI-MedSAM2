@@ -33,7 +33,7 @@ def window(img, brain):
 
 
 def main():
-    folder = glob.glob(os.path.join(ROOT, "data", "dataset", "*", PATIENT))[0]
+    folder = glob.glob(os.path.join(ROOT, "datasets", "BraTS2024", "*", PATIENT))[0]
     seg = np.rint(load(folder, "seg")[:, :, Z]).astype(int)
     imgs = {k: load(folder, k)[:, :, Z] for k, _, _ in SEQ}
     brain = imgs["t2f"] > 0

@@ -1,20 +1,27 @@
 paths:
-  raw:        data/raw                        # downloaded archives (script 01)
-  extract_to: data/dataset                    # script 01 extracts archives here
-  dataset:    data/dataset                    # patient folders, in yolo_*/ medsam2_*/ test/ (scripts 02-05 read this)
-  sample:     data/sample                     # single-patient smoke test
+  raw:        datasets/raw                        # downloaded archives (script 01)
+  extract_to: datasets/BraTS2024                    # script 01 extracts archives here
+  dataset:    datasets/BraTS2024                    # patient folders, in yolo_*/ medsam2_*/ test/ (scripts 02-05 read this)
+  sample:     datasets/sample                     # single-patient smoke test
 
-  # Physical dataset pools, split by subject: apart from test/, no person is in two pools.
-  # data/dataset/split_manifest.json records who is where.
-  yolo_train:    data/dataset/yolo_train      # 250 patients - YOLO trains on these
-  yolo_val:      data/dataset/yolo_val        #  81 patients - YOLO picks its best epoch
-  medsam2_train: data/dataset/medsam2_train   # 721 patients - MedSAM2 trains on these
-  medsam2_val:   data/dataset/medsam2_val     # 245 patients - MedSAM2 picks its best epoch
-  test:          data/dataset/test            # 324 patients - final test for both, never trained on
+  # Physical dataset pools, split by patient: no person is in two pools (test/ included).
+  # datasets/BraTS2024/split_manifest.json records who is where.
+  yolo_train:    datasets/BraTS2024/yolo_train      # 258 people / 567 scans (35%) - YOLO trains on these
+  yolo_val:      datasets/BraTS2024/yolo_val        #  72 people / 165 scans (10%) - YOLO picks its best epoch
+  medsam2_train: datasets/BraTS2024/medsam2_train   # 258 people / 565 scans (35%) - MedSAM2 trains on these
+  medsam2_val:   datasets/BraTS2024/medsam2_val     #  72 people / 162 scans (10%) - MedSAM2 picks its best epoch
+  test:          datasets/BraTS2024/test            #  71 people / 162 scans (10%) - final test for both, never trained on
 
   outputs:    outputs                         # all generated artifacts
   tmp:        outputs/tmp_frames              # ephemeral RGB frames, auto-cleaned
   medsam2:    MedSAM2                         # vendored MedSAM2 repo + checkpoints
+
+# BraTS 2024 GLI labels: 1 NETC (necrotic core), 2 SNFH (oedema), 3 ET (enhancing), 4 RC (resection
+# cavity). The models' "tumour" = these labels. RC is left out: it is the hole left by surgery, not
+# tumour, and BraTS scores whole tumour as 1+2+3. Changing this means rebuilding YOLO's dataset and
+# MedSAM2's prompt cache (both keyed on it) and retraining both models.
+labels:
+  tumour: [1, 2, 3]
 
 inference:
   num_patients: 1        # how many patients to process (null = all)

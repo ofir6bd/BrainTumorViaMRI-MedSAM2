@@ -22,7 +22,7 @@ from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from werkzeug.exceptions import HTTPException
 from PIL import Image
 
-from .common import (CONFIG_PATH, DATASETS_DIR, ROOT, RUNS_DIR, best_weights, brain_slices,
+from .common import (CONFIG_PATH, tumour_mask, DATASETS_DIR, ROOT, RUNS_DIR, best_weights, brain_slices,
                      list_patients, load_config, load_volumes, read_json, rgb_slice, write_json)
 from .train import new_run
 
@@ -356,14 +356,14 @@ def _predict(run_id, split, patient_id, z, conf):
     vols = _cached(_volumes, patient["dir"], lambda: load_volumes(patient), 3)
     zs = brain_slices(vols["FLAIR"], cfg["data"]["min_fg_voxels"])
     if z is None:  # no slice asked for: open on the one with the most expert tumour
-        z = max(zs, key=lambda v: int((vols["SEG"][:, :, v] > 0).sum())) if zs else 0
+        z = max(zs, key=lambda v: int(tumour_mask(vols["SEG"][:, :, v]).sum())) if zs else 0
     z = min(zs, key=lambda v: abs(v - z)) if zs else z
     rgb = rgb_slice(vols, z, cfg["data"]["min_fg_voxels"])
 
     model = _model_of(run_id)
     r = model.predict(Image.fromarray(rgb), conf=conf, imgsz=cfg["train"]["imgsz"],
                       retina_masks=True, verbose=False, device=cfg["train"]["device"])[0]
-    gt = vols["SEG"][:, :, z] > 0
+    gt = tumour_mask(vols["SEG"][:, :, z])
     masks = r.masks.data.cpu().numpy().astype(bool) if r.masks is not None else np.zeros((0, *gt.shape), bool)
     confs = r.boxes.conf.cpu().numpy().tolist() if r.boxes is not None else []
     pred = masks.any(axis=0) if len(masks) else np.zeros_like(gt)

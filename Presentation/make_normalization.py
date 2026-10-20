@@ -30,7 +30,7 @@ plt.rcParams.update({"figure.facecolor": BG, "axes.facecolor": BG, "axes.edgecol
 
 
 def main():
-    d = glob.glob(os.path.join(ROOT, "data", "dataset", "*", PATIENT))[0]
+    d = glob.glob(os.path.join(ROOT, "datasets", "BraTS2024", "*", PATIENT))[0]
     load = lambda k: np.asarray(nib.load(glob.glob(os.path.join(d, f"*{k}.nii*"))[0]).dataobj, dtype=np.float32)
     vols = {"T1C": load("t1c"), "T2": load("t2w"), "FLAIR": load("t2f")}
     rgb = rgb_slice(vols, Z, 100)                               # the project's own function

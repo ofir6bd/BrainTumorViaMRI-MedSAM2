@@ -161,9 +161,9 @@ with `python Frontend\serve.py --port 5001`.
    ```json
    { "synapse_auth_token": "<your Synapse token>", "synapse_dataset_id": "<Synapse dataset id>" }
    ```
-2. **Extracted dataset** at `data/dataset/{yolo_train,yolo_val,medsam2_train,medsam2_val,test}/` — produced by script 01's extract
+2. **Extracted dataset** at `datasets/BraTS2024/{yolo_train,yolo_val,medsam2_train,medsam2_val,test}/` — produced by script 01's extract
    step, read by the viewers and inference. Set `inference.use_sample: false` in `config.yaml` to
-   use it; `true` reads the single-patient `data/sample/` folder instead.
+   use it; `true` reads the single-patient `datasets/sample/` folder instead.
 3. **MedSAM2 checkpoint** `MedSAM2/checkpoints/MedSAM2_latest.pt` — already present.
 
 ## Configuration (`config.yaml`)
@@ -173,41 +173,34 @@ All tunable settings live in `config.yaml`:
 - `paths:` — where inputs/outputs are read/written (`raw`, `extract_to`, `dataset`, `sample`,
   `outputs`, `tmp`, `medsam2`), plus the five physical dataset pools (`yolo_train`, `yolo_val`,
   `medsam2_train`, `medsam2_val`, `test`), split by subject so no person is in both a YOLO and a
-  MedSAM2 pool. `data/dataset/split_manifest.json` records who is where.
+  MedSAM2 pool. `datasets/BraTS2024/split_manifest.json` records who is where.
 - `inference.num_patients` — how many patients to process (`null` = all).
 - `inference.use_sample` — `true` runs the one-patient sample, `false` the full dataset.
 
 ## Dataset split
 
-The pools are split **by subject** (one person = `BraTS-GLI-XXXXX`; the `-100`, `-101`, … suffix
-is a scan date), and all scans of a person sit in the same pool:
+The pools are split **by patient** (one person = `BraTS-GLI-XXXXX`; the `-100`, `-101`, … suffix
+is a timepoint), and all scans of a person sit in the same pool — **no person is in two pools,
+`test/` included**. Shares are % of scans (patient + timepoint), assigned in whole patients:
 
-| Pool | Patients | People | Used for |
-|---|---|---|---|
-| `yolo_train` | 471 | 257 | YOLO training |
-| `yolo_val` | 81 | 41 | YOLO best-epoch choice |
-| `medsam2_train` | 500 | 245 | MedSAM2 training (on YOLO prompts for people YOLO never saw) |
-| `medsam2_val` | 245 | 139 | MedSAM2 best-epoch choice |
-| `test` | 324 | 262 | Final test for both, never trained on |
+| Pool | Scans | People | % scans | Used for |
+|---|---|---|---|---|
+| `test` | 162 | 71 | 10% | Final test for both, never trained on |
+| `yolo_val` | 165 | 72 | 10% | YOLO best-epoch choice |
+| `yolo_train` | 567 | 258 | 35% | YOLO training |
+| `medsam2_val` | 162 | 72 | 10% | MedSAM2 best-epoch choice |
+| `medsam2_train` | 565 | 258 | 35% | MedSAM2 training (on YOLO prompts for people YOLO never saw) |
 
-- **No person is in two pools**, except `test/` (below). This is checked live in the Analytics tab
-  under **Split integrity**; every cell outside the `test` row/column must read ✓ 0.
-- **2026-09-19 fix:** people who had scans in both train and val of the same model (45 in YOLO,
-  138 in MedSAM2) were moved wholly to one side — 49 + 149 folders — keeping the val pools at
-  their size. Otherwise each model's val score would be optimistic.
-- **2026-09-29 rebalance:** 221 scans (125 people, seed 42) moved `medsam2_train` → `yolo_train`
-  (was 250 / 721). Measured first: MedSAM2 on 500 of its patients scored val 0.8861 against 0.8864
-  on all 721 (250 → 0.8838), while YOLO on 125 of its 250 lost 0.0136 ± 0.0034 — YOLO still
-  gains from data, MedSAM2 had more than it needed. Val pools and `test/` were not touched.
-  The move is listed under `moves` in `split_manifest.json`; the previous manifest is
-  `split_manifest.backup-2026-09-29.json`.
+- Made by `maunal_code/02_split_by_patient.py` (seed 42; dry run by default, `--apply` moves the
+  folders and rewrites `split_manifest.json`). Patients are taken in random order and each goes
+  to the pool furthest below its scan target, so every pool gets the same mix of one-scan and
+  many-scan patients.
+- **2026-10-20 re-split:** the earlier split kept `test/` from the original per-scan split, so 213
+  people had scans both in `test/` and in a train/val pool. Everything was re-split by patient
+  (1223 of 1621 scans moved). **All models trained before 2026-10-20, and every Dice number from
+  them, belong to the old split** — retrain YOLO, then MedSAM2 on prompts from that YOLO.
+  Older manifests: `split_manifest.backup-2026-09-29.json`, `split_manifest.backup-2026-10-20.json`.
 - **To change the split**, move a patient's folder — always all scans of that person together —
   then update `split_manifest.json` (the dashboard's *Manifest vs disk* check flags anything out
-  of date). No statistics recompute is needed. Moving people between a YOLO and a MedSAM2 pool
-  means **both models must be retrained**: YOLO on its new pool, then MedSAM2 on prompts from
-  that YOLO, so MedSAM2 still only learns from people YOLO never saw.
-
-**Why `test/` still shares people with other pools:** moving any of them would change the test
-set, and every Dice number so far was measured on these exact 324 scans. The overlap was
-measured and does not flatter the score (test scans whose person is also in a training pool:
-Dice 0.863; the others: 0.871), so it is kept and noted here.
+  of date). Moving people between a YOLO and a MedSAM2 pool means **both models must be
+  retrained**, so MedSAM2 still only learns from people YOLO never saw.
